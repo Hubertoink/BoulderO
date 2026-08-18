@@ -547,7 +547,8 @@ app.patch('/admin/spots/:spotId', ...requireSuperAdmin, asyncRoute(async (req, r
   const result = await pool.query(
     `UPDATE spots
         SET name = $2, district = $3, address = $4, website = $5, opening_hours = $6,
-            area_sqm = $7, image_url = $8,
+            area_sqm = $7,
+            image_url = CASE WHEN $8::text IS NULL THEN image_url ELSE NULLIF($8, '') END,
             coordinates = ST_SetSRID(ST_MakePoint($10, $9), 4326)::geography,
             updated_at = NOW()
       WHERE id = $1 AND status = 'active'
