@@ -184,6 +184,26 @@ const imageUpload = multer({
   fileFilter: (_req, file, callback) => callback(null, /^image\/(jpeg|png|webp|heic)$/.test(file.mimetype)),
 })
 
+const spotImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (_req, _file, callback) => {
+      try {
+        const directory = path.join(uploadRoot, 'spot-images')
+        await fs.mkdir(directory, { recursive: true })
+        callback(null, directory)
+      } catch (error) {
+        callback(error)
+      }
+    },
+    filename: (_req, file, callback) => {
+      const extension = path.extname(file.originalname).toLowerCase() || '.jpg'
+      callback(null, `${crypto.randomUUID()}${extension}`)
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => callback(null, /^image\/(jpeg|png|webp)$/.test(file.mimetype)),
+})
+
 const csvUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 1024 * 1024, files: 1 },
@@ -480,7 +500,9 @@ app.post('/messages/:userId', requireUser, asyncRoute(async (req, res) => {
 
 app.get('/spots', asyncRoute(async (_req, res) => {
   const result = await pool.query(`
-    SELECT id, name, district, address, website, opening_hours, area_sqm, image_url, source,
+    SELECT id, name, district, address, website, opening_hours, area_sqm,
+           CASE WHEN image_url LIKE 'upload:%' THEN '/api/spot-images/' || id ELSE image_url END AS image_url,
+           source,
            ST_Y(coordinates::geometry) AS latitude,
            ST_X(coordinates::geometry) AS longitude
       FROM spots
@@ -500,6 +522,34 @@ app.post('/admin/spots', ...requireSuperAdmin, asyncRoute(async (req, res) => {
     [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
   )
   res.status(201).json({ spot: result.rows[0] })
+}))
+
+app.post('/admin/spots/:spotId/image', ...requireSuperAdmin, spotImageUpload.single('image'), asyncRoute(async (req, res) => {
+  const spotId = z.string().uuid().parse(req.params.spotId)
+  const file = req.file
+  if (!file) return res.status(400).json({ error: 'no_valid_spot_image' })
+  const storageKey = path.relative(uploadRoot, file.path).split(path.sep).join('/')
+  const result = await pool.query(
+    `UPDATE spots SET image_url = $2, updated_at = NOW() WHERE id = $1
+     RETURNING id, name, '/api/spot-images/' || id AS image_url`,
+    [spotId, `upload:${storageKey}`],
+  )
+  if (!result.rowCount) {
+    await fs.unlink(file.path).catch(() => undefined)
+    return res.status(404).json({ error: 'spot_not_found' })
+  }
+  res.status(201).json({ spot: result.rows[0] })
+}))
+
+app.get('/spot-images/:spotId', asyncRoute(async (req, res) => {
+  const spotId = z.string().uuid().parse(req.params.spotId)
+  const result = await pool.query(`SELECT image_url FROM spots WHERE id = $1 AND image_url LIKE 'upload:%'`, [spotId])
+  const imageUrl = result.rows[0]?.image_url
+  if (!imageUrl) return res.status(404).end()
+  const storageKey = imageUrl.slice('upload:'.length)
+  const absolutePath = path.resolve(uploadRoot, storageKey)
+  if (!absolutePath.startsWith(path.resolve(uploadRoot, 'spot-images'))) return res.status(400).end()
+  res.sendFile(absolutePath)
 }))
 
 app.post('/admin/spots/import', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
