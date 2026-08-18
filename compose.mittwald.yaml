@@ -37,6 +37,8 @@ services:
 
   db:
     image: ghcr.io/hubertoink/bouldero-db:latest
+    ports:
+      - "5432:5432/tcp"
     environment:
       POSTGRES_DB: bouldero
       POSTGRES_USER: bouldero
