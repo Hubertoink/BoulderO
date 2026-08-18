@@ -1,0 +1,1 @@
+ALTER TABLE spots ADD COLUMN IF NOT EXISTS source_license TEXT;
