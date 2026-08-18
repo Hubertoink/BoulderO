@@ -443,6 +443,20 @@ const spotInputSchema = z.object({
   longitude: z.number().gte(-180).lte(180),
 })
 
+const spotSuggestionInputSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  district: z.string().trim().max(120).optional().or(z.literal('')),
+  address: z.string().trim().min(5).max(300),
+  website: z.string().trim().url().max(500).optional().or(z.literal('')),
+  latitude: z.number().gte(-90).lte(90).nullable().optional(),
+  longitude: z.number().gte(-180).lte(180).nullable().optional(),
+  notes: z.string().trim().max(2000).optional().or(z.literal('')),
+}).superRefine((value, context) => {
+  if ((value.latitude === null || value.latitude === undefined) !== (value.longitude === null || value.longitude === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Koordinaten müssen zusammen angegeben werden.' })
+  }
+})
+
 function parseCsv(text) {
   const rows = []
   let row = []
@@ -744,6 +758,77 @@ app.get('/spots', asyncRoute(async (_req, res) => {
      ORDER BY name
   `)
   res.json({ spots: result.rows })
+}))
+
+app.post('/spot-suggestions', requireUser, asyncRoute(async (req, res) => {
+  const input = spotSuggestionInputSchema.parse(req.body)
+  const result = await pool.query(
+    `INSERT INTO spot_suggestions (submitted_by, name, district, address, website, latitude, longitude, notes)
+     VALUES ($1, $2, NULLIF($3, ''), $4, NULLIF($5, ''), $6, $7, NULLIF($8, ''))
+     RETURNING id, name, district, address, website, latitude, longitude, notes, status, created_at`,
+    [req.user.id, input.name, input.district || '', input.address, input.website || '', input.latitude ?? null, input.longitude ?? null, input.notes || ''],
+  )
+  res.status(201).json({ suggestion: result.rows[0] })
+}))
+
+app.get('/admin/spot-suggestions', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
+  const result = await pool.query(
+    `SELECT ss.id, ss.name, ss.district, ss.address, ss.website, ss.latitude, ss.longitude, ss.notes, ss.created_at,
+            u.name AS submitted_by_name, u.email AS submitted_by_email
+       FROM spot_suggestions ss
+       JOIN users u ON u.id = ss.submitted_by
+      WHERE ss.status = 'pending'
+      ORDER BY ss.created_at ASC`,
+  )
+  res.json({ suggestions: result.rows })
+}))
+
+app.post('/admin/spot-suggestions/:suggestionId/approve', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const suggestionId = z.string().uuid().parse(req.params.suggestionId)
+  const input = spotInputSchema.parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const suggestion = await client.query('SELECT id FROM spot_suggestions WHERE id = $1 AND status = \'pending\' FOR UPDATE', [suggestionId])
+    if (!suggestion.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'spot_suggestion_not_found' })
+    }
+    const created = await client.query(
+      `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, image_url, coordinates, source, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, 'user-suggestion', 'active')
+       RETURNING id, name, district, address, website, opening_hours, area_sqm, image_url, source,
+         ST_Y(coordinates::geometry) AS latitude, ST_X(coordinates::geometry) AS longitude`,
+      [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
+    )
+    await client.query(
+      `UPDATE spot_suggestions
+          SET status = 'approved', approved_spot_id = $2, reviewed_by = $3, reviewed_at = NOW()
+        WHERE id = $1`,
+      [suggestionId, created.rows[0].id, req.user.id],
+    )
+    await client.query('COMMIT')
+    res.status(201).json({ spot: created.rows[0] })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}))
+
+app.post('/admin/spot-suggestions/:suggestionId/reject', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const suggestionId = z.string().uuid().parse(req.params.suggestionId)
+  const input = z.object({ reviewNote: z.string().trim().max(1000).optional().or(z.literal('')) }).parse(req.body ?? {})
+  const result = await pool.query(
+    `UPDATE spot_suggestions
+        SET status = 'rejected', review_note = NULLIF($3, ''), reviewed_by = $2, reviewed_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING id`,
+    [suggestionId, req.user.id, input.reviewNote || ''],
+  )
+  if (!result.rowCount) return res.status(404).json({ error: 'spot_suggestion_not_found' })
+  res.status(204).end()
 }))
 
 app.post('/admin/spots', ...requireSuperAdmin, asyncRoute(async (req, res) => {
