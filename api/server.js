@@ -75,6 +75,14 @@ const authConfig = {
 
 const app = express()
 app.set('trust proxy', true)
+// Mittwald forwards the matching `/api` path prefix to the container. Strip it
+// here so the same application routes work locally and behind that ingress.
+app.use((req, _res, next) => {
+  if (req.url === '/api' || req.url.startsWith('/api/')) {
+    req.url = req.url.slice(4) || '/'
+  }
+  next()
+})
 app.use(express.json({ limit: '1mb' }))
 
 function asyncRoute(handler) {
