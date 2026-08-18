@@ -27,6 +27,8 @@ const legacyPasswordScryptCost = 16384
 const passwordScryptOptions = (cost) => ({ N: cost, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
 const appOrigin = process.env.APP_ORIGIN?.replace(/\/$/, '')
 const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.SMTP_FROM)
+const geocodingCache = new Map()
+let lastGeocodingRequestAt = 0
 const emailTransport = process.env.EMAIL_TRANSPORT === 'json'
   ? nodemailer.createTransport({ jsonTransport: true })
   : smtpConfigured
@@ -1024,6 +1026,32 @@ app.get('/spots', asyncRoute(async (_req, res) => {
      ORDER BY name
   `)
   res.json({ spots: result.rows })
+}))
+
+app.get('/geocoding/search', requireUser, asyncRoute(async (req, res) => {
+  const input = z.object({ q: z.string().trim().min(3).max(160) }).parse(req.query)
+  const cacheKey = input.q.toLocaleLowerCase('de-DE')
+  const cached = geocodingCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return res.json({ results: cached.results })
+
+  const delay = Math.max(0, 1000 - (Date.now() - lastGeocodingRequestAt))
+  if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+  lastGeocodingRequestAt = Date.now()
+
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=de&q=${encodeURIComponent(input.q)}`, {
+    headers: { 'User-Agent': 'BoulderO/1.0 (+https://bouldero.de)', Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!response.ok) return res.status(502).json({ error: 'geocoding_unavailable' })
+  const payload = await response.json()
+  const results = (Array.isArray(payload) ? payload : [])
+    .map((item) => ({ latitude: Number(item.lat), longitude: Number(item.lon), label: String(item.display_name ?? '') }))
+    .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude) && item.label)
+    .map((item) => ({ ...item, latitude: item.latitude.toFixed(6), longitude: item.longitude.toFixed(6) }))
+
+  geocodingCache.set(cacheKey, { results, expiresAt: Date.now() + 5 * 60 * 1000 })
+  if (geocodingCache.size > 100) geocodingCache.delete(geocodingCache.keys().next().value)
+  res.json({ results })
 }))
 
 app.post('/spots/:spotId/corrections', requireUser, asyncRoute(async (req, res) => {

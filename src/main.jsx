@@ -4,6 +4,7 @@ import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet'
 import {
   IconAdjustmentsHorizontal,
+  IconArrowsMaximize,
   IconBookmark,
   IconCalendarEvent,
   IconCheck,
@@ -535,7 +536,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
 
 function LegalDialog({ kind, onClose }) {
   const privacy = kind === 'privacy'
-  return <div className="composer-backdrop legal-backdrop"><section className="journal-composer legal-dialog" role="dialog" aria-modal="true" aria-label={privacy ? 'Datenschutzerklärung' : 'Impressum'}><div className="composer-header"><div><span className="eyebrow">BoulderO</span><h2>{privacy ? 'Datenschutzerklärung' : 'Impressum'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{privacy ? <div className="legal-content"><p>Stand: 18. August 2026</p><h3>Verantwortlicher</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim<br /><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Welche Daten wir verarbeiten</h3><p>Bei der Registrierung verarbeiten wir Name, Benutzername, E-Mail-Adresse und ein nur gehasht gespeichertes Passwort. Wenn du BoulderO nutzt, kommen je nach Funktion Profilbild, Besuche, Tagebucheinträge, Fotos, soziale Verbindungen, Nachrichten und Hallenvorschläge hinzu.</p><h3>Zweck und Rechtsgrundlage</h3><p>Wir verarbeiten diese Daten, um dein Konto bereitzustellen, die von dir gewählten Funktionen auszuführen und BoulderO sicher zu betreiben. Rechtsgrundlage ist in der Regel die Vertragserfüllung nach Art. 6 Abs. 1 lit. b DSGVO sowie unser berechtigtes Interesse an Sicherheit und Missbrauchsschutz nach Art. 6 Abs. 1 lit. f DSGVO.</p><h3>Hosting, E-Mail und Karte</h3><p>BoulderO wird bei Mittwald gehostet. Bestätigungs- und Passwort-E-Mails werden über das BoulderO-Postfach versendet. Für die Karte werden Kacheln von OpenStreetMap geladen; dabei erhält OpenStreetMap technisch bedingt deine IP-Adresse und die angeforderten Kartendaten.</p><h3>Speicherdauer</h3><p>Kontodaten und von dir erstellte Inhalte speichern wir grundsätzlich für die Dauer deines Kontos. Danach löschen oder anonymisieren wir sie, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p><h3>Deine Rechte</h3><p>Du kannst Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch verlangen. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren. Für Anliegen genügt eine E-Mail an die oben genannte Adresse.</p></div> : <div className="legal-content"><p><strong>Angaben gemäß § 5 DDG</strong></p><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p><h3>Kontakt</h3><p><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Verantwortlich für den Inhalt</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p></div>}</section></div>
+  return <div className="composer-backdrop legal-backdrop"><section className="journal-composer legal-dialog" role="dialog" aria-modal="true" aria-label={privacy ? 'Datenschutzerklärung' : 'Impressum'}><div className="composer-header"><div><span className="eyebrow">BoulderO</span><h2>{privacy ? 'Datenschutzerklärung' : 'Impressum'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{privacy ? <div className="legal-content"><p>Stand: 18. August 2026</p><h3>Verantwortlicher</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim<br /><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Welche Daten wir verarbeiten</h3><p>Bei der Registrierung verarbeiten wir Name, Benutzername, E-Mail-Adresse und ein nur gehasht gespeichertes Passwort. Wenn du BoulderO nutzt, kommen je nach Funktion Profilbild, Besuche, Tagebucheinträge, Fotos, soziale Verbindungen, Nachrichten und Hallenvorschläge hinzu.</p><h3>Zweck und Rechtsgrundlage</h3><p>Wir verarbeiten diese Daten, um dein Konto bereitzustellen, die von dir gewählten Funktionen auszuführen und BoulderO sicher zu betreiben. Rechtsgrundlage ist in der Regel die Vertragserfüllung nach Art. 6 Abs. 1 lit. b DSGVO sowie unser berechtigtes Interesse an Sicherheit und Missbrauchsschutz nach Art. 6 Abs. 1 lit. f DSGVO.</p><h3>Hosting, E-Mail und Karte</h3><p>BoulderO wird bei Mittwald gehostet. Bestätigungs- und Passwort-E-Mails werden über das BoulderO-Postfach versendet. Für die Karte werden Kacheln von OpenStreetMap geladen; dabei erhält OpenStreetMap technisch bedingt deine IP-Adresse und die angeforderten Kartendaten. Die optionale Straßensuche übermittelt deinen Suchbegriff an den Geocoding-Dienst Nominatim von OpenStreetMap.</p><h3>Speicherdauer</h3><p>Kontodaten und von dir erstellte Inhalte speichern wir grundsätzlich für die Dauer deines Kontos. Danach löschen oder anonymisieren wir sie, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p><h3>Deine Rechte</h3><p>Du kannst Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch verlangen. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren. Für Anliegen genügt eine E-Mail an die oben genannte Adresse.</p></div> : <div className="legal-content"><p><strong>Angaben gemäß § 5 DDG</strong></p><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p><h3>Kontakt</h3><p><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Verantwortlich für den Inhalt</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p></div>}</section></div>
 }
 
 function BadgesView({ progress, onBack }) {
@@ -564,7 +565,7 @@ function CoordinatePicker({ latitude, longitude, onChange }) {
   return <div className="coordinate-picker"><MapContainer center={position} zoom={15} scrollWheelZoom={false} attributionControl={false}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><Focus /><Marker position={position} draggable icon={markerIcon(false, true)} eventHandlers={{ dragend: (event) => { const next = event.target.getLatLng(); onChange(next.lat.toFixed(6), next.lng.toFixed(6)) } }} /></MapContainer><small>Pin auf der Karte ziehen, um die Koordinaten zu übernehmen.</small></div>
 }
 
-function SuggestionCoordinatePicker({ latitude, longitude, onChange }) {
+function SuggestionMapCanvas({ latitude, longitude, onChange, expanded = false }) {
   const hasPosition = latitude !== '' && longitude !== '' && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))
   const position = hasPosition ? [Number(latitude), Number(longitude)] : mannheimCenter
   function Focus() {
@@ -576,7 +577,41 @@ function SuggestionCoordinatePicker({ latitude, longitude, onChange }) {
     useMapEvents({ click: (event) => onChange(event.latlng.lat.toFixed(6), event.latlng.lng.toFixed(6)) })
     return hasPosition ? <Marker position={position} draggable icon={markerIcon(false, true)} eventHandlers={{ dragend: (event) => { const next = event.target.getLatLng(); onChange(next.lat.toFixed(6), next.lng.toFixed(6)) } }} /> : null
   }
-  return <section className="coordinate-picker coordinate-picker--selectable"><span className="form-field__label">Position auf der Karte</span><MapContainer center={position} zoom={hasPosition ? 15 : 13} scrollWheelZoom={false} attributionControl={false}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><Focus /><PickPosition /></MapContainer><small>{hasPosition ? 'Punkt gesetzt. Du kannst den Pin ziehen oder einen neuen Punkt auf der Karte wählen.' : 'Klicke auf die Karte, um den Standort der Halle zu setzen.'}</small></section>
+  return <MapContainer center={position} zoom={hasPosition ? 15 : 13} scrollWheelZoom touchZoom zoomControl={expanded} attributionControl={false} className={expanded ? 'location-picker-map' : undefined}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><Focus /><PickPosition /></MapContainer>
+}
+
+function LocationPickerDialog({ latitude, longitude, onChange, onClose }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [error, setError] = useState('')
+  async function search(event) {
+    event?.preventDefault()
+    if (query.trim().length < 3) return setError('Bitte gib mindestens drei Zeichen ein.')
+    setSearching(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/geocoding/search?q=${encodeURIComponent(query.trim())}`)
+      if (!response.ok) throw new Error('Die Suche ist gerade nicht verfügbar.')
+      setResults((await response.json()).results)
+    } catch (searchError) { setError(searchError.message) } finally { setSearching(false) }
+  }
+  function useCurrentLocation() {
+    if (!navigator.geolocation) return setError('Dein Browser unterstützt keine Standortbestimmung.')
+    setError('')
+    navigator.geolocation.getCurrentPosition(
+      (position) => onChange(position.coords.latitude.toFixed(6), position.coords.longitude.toFixed(6)),
+      () => setError('Dein Standort konnte nicht bestimmt werden. Prüfe die Browserfreigabe.'),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    )
+  }
+  return <div className="composer-backdrop location-picker-backdrop"><section className="location-picker-dialog" role="dialog" aria-modal="true" aria-label="Position auf Karte auswählen"><div className="composer-header"><div><h2>Position auswählen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Karte schließen"><IconX size={19} /></button></div><div className="location-search"><label><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') search(event) }} placeholder="Straße, Ort oder Adresse suchen" /></label><button type="button" onClick={search} disabled={searching}>{searching ? 'Sucht …' : 'Suchen'}</button><button type="button" className="ui-icon-button" onClick={useCurrentLocation} aria-label="Eigenen Standort verwenden" title="Eigenen Standort verwenden"><IconCurrentLocation size={19} /></button></div>{error && <p className="form-error">{error}</p>}{results.length > 0 && <div className="location-search-results">{results.map((result) => <button key={`${result.latitude}-${result.longitude}`} type="button" onClick={() => { onChange(result.latitude, result.longitude); setResults([]) }}><IconMapPin size={17} /><span>{result.label}</span></button>)}</div>}<div className="location-picker-map-wrap"><SuggestionMapCanvas latitude={latitude} longitude={longitude} onChange={onChange} expanded /></div><p className="location-picker-help">Mit Maus oder zwei Fingern zoomen. Klicke auf die Karte oder ziehe den Pin an die gewünschte Position.</p></section></div>
+}
+
+function SuggestionCoordinatePicker({ latitude, longitude, onChange }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasPosition = latitude !== '' && longitude !== '' && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))
+  return <section className="coordinate-picker coordinate-picker--selectable"><div className="coordinate-picker__heading"><span className="form-field__label">Position auf der Karte</span><button type="button" className="ui-icon-button" onClick={() => setExpanded(true)} aria-label="Karte vergrößern" title="Karte vergrößern"><IconArrowsMaximize size={18} /></button></div><SuggestionMapCanvas latitude={latitude} longitude={longitude} onChange={onChange} /><small>{hasPosition ? 'Punkt gesetzt. Du kannst den Pin ziehen oder einen neuen Punkt auf der Karte wählen.' : 'Klicke auf die Karte, um den Standort der Halle zu setzen.'}</small>{expanded && <LocationPickerDialog latitude={latitude} longitude={longitude} onChange={onChange} onClose={() => setExpanded(false)} />}</section>
 }
 
 function SpotEditDialog({ spot, reports = [], onSave, onResolveReport, onClose }) {
