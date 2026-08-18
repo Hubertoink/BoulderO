@@ -2,7 +2,7 @@ name: Publish container images
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -25,9 +25,10 @@ jobs:
 
       - name: Build and publish images
         run: |
-          docker build --file Dockerfile --tag ghcr.io/hubertoink/bouldero-web:latest .
-          docker push ghcr.io/hubertoink/bouldero-web:latest
-          docker build --file api/Dockerfile --tag ghcr.io/hubertoink/bouldero-api:latest .
-          docker push ghcr.io/hubertoink/bouldero-api:latest
-          docker build --file db/Dockerfile --tag ghcr.io/hubertoink/bouldero-db:latest db
-          docker push ghcr.io/hubertoink/bouldero-db:latest
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then TAG=latest; API_UPSTREAM=api; else TAG=dev; API_UPSTREAM=api-dev; fi
+          docker build --build-arg API_UPSTREAM=$API_UPSTREAM --file Dockerfile --tag ghcr.io/hubertoink/bouldero-web:$TAG .
+          docker push ghcr.io/hubertoink/bouldero-web:$TAG
+          docker build --file api/Dockerfile --tag ghcr.io/hubertoink/bouldero-api:$TAG .
+          docker push ghcr.io/hubertoink/bouldero-api:$TAG
+          docker build --file db/Dockerfile --tag ghcr.io/hubertoink/bouldero-db:$TAG db
+          docker push ghcr.io/hubertoink/bouldero-db:$TAG

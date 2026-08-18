@@ -2,7 +2,9 @@
 # Build it first with `npm run build`.
 FROM nginx:1.27-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ARG API_UPSTREAM=api
+COPY nginx.conf /tmp/default.conf
+RUN sed "s/__API_UPSTREAM__/${API_UPSTREAM}/g" /tmp/default.conf > /etc/nginx/conf.d/default.conf
 COPY dist /usr/share/nginx/html
 
 EXPOSE 80

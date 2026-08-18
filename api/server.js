@@ -2,6 +2,7 @@ import 'dotenv/config'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import express from 'express'
 import multer from 'multer'
 import { ExpressAuth, getSession } from '@auth/express'
@@ -19,6 +20,7 @@ const demoMode = process.env.DEMO_MODE === 'true'
 const superAdminEmail = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase()
 const superAdminPassword = process.env.SUPERADMIN_PASSWORD
 const superAdminEnabled = Boolean(superAdminEmail && superAdminPassword)
+const scrypt = promisify(crypto.scrypt)
 const demoUsers = [
   { id: '3b9a8c88-779d-4cb9-a950-23c8f4559011', name: 'Mira Keller', email: 'mira@bouldero.local', username: 'miraklettert', image: null, role: 'member' },
   { id: '7c5e37a2-1f52-4ce4-b204-412b2e8bc902', name: 'Alex Winter', email: 'alex@bouldero.local', username: 'alexziehtdurch', image: null, role: 'member' },
@@ -44,6 +46,20 @@ function matchesSecret(value, expected) {
   return supplied.length === secret.length && crypto.timingSafeEqual(supplied, secret)
 }
 
+async function passwordHash(password) {
+  const salt = crypto.randomBytes(16).toString('base64url')
+  const derived = await scrypt(password, salt, 64)
+  return `scrypt$${salt}$${Buffer.from(derived).toString('base64url')}`
+}
+
+async function passwordMatches(password, stored) {
+  const [algorithm, salt, encoded] = String(stored ?? '').split('$')
+  if (algorithm !== 'scrypt' || !salt || !encoded) return false
+  const expected = Buffer.from(encoded, 'base64url')
+  const derived = Buffer.from(await scrypt(password, salt, expected.length))
+  return expected.length === derived.length && crypto.timingSafeEqual(expected, derived)
+}
+
 if (superAdminEnabled) {
   providers.push(Credentials({
     id: 'superadmin',
@@ -60,6 +76,23 @@ if (superAdminEnabled) {
     ),
   }))
 }
+
+providers.push(Credentials({
+  id: 'member',
+  name: 'BoulderO Konto',
+  credentials: {
+    email: { label: 'E-Mail', type: 'email' },
+    password: { label: 'Passwort', type: 'password' },
+  },
+  authorize: async (credentials) => {
+    const email = String(credentials?.email ?? '').trim().toLowerCase()
+    const password = String(credentials?.password ?? '')
+    const result = await pool.query('SELECT id, name, email, username, image, role, password_hash FROM users WHERE email = $1', [email])
+    const user = result.rows[0]
+    if (!user || !await passwordMatches(password, user.password_hash)) return null
+    return { id: user.id, name: user.name, email: user.email, username: user.username, image: user.image, role: user.role }
+  },
+}))
 
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   providers.push(Google({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET }))
@@ -80,6 +113,7 @@ app.get('/api/auth/configuration', (_req, res) => {
     demoEnabled: demoMode,
     googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     superAdminEnabled,
+    registrationEnabled: true,
     demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
   })
 })
@@ -88,6 +122,7 @@ app.get('/auth/configuration', (_req, res) => {
     demoEnabled: demoMode,
     googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     superAdminEnabled,
+    registrationEnabled: true,
     demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
   })
 })
@@ -105,6 +140,36 @@ app.use((req, _res, next) => {
   next()
 })
 app.use(express.json({ limit: '1mb' }))
+
+function usernameFromName(name) {
+  return name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || 'boulderer'
+}
+
+app.post('/register', asyncRoute(async (req, res) => {
+  const input = z.object({
+    name: z.string().trim().min(2).max(80),
+    email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()),
+    password: z.string().min(10).max(200),
+  }).parse(req.body)
+  const hash = await passwordHash(input.password)
+  const baseUsername = usernameFromName(input.name)
+  for (let suffix = 0; suffix < 100; suffix += 1) {
+    const username = suffix ? `${baseUsername}${suffix + 1}`.slice(0, 30) : baseUsername
+    try {
+      const created = await pool.query(
+        `INSERT INTO users (name, email, username, password_hash, role)
+         VALUES ($1, $2, $3, $4, 'member') RETURNING id, name, email, username, role`,
+        [input.name, input.email, username, hash],
+      )
+      return res.status(201).json({ user: created.rows[0] })
+    } catch (error) {
+      if (error?.code === '23505' && error?.constraint?.includes('email')) return res.status(409).json({ error: 'email_taken' })
+      if (error?.code === '23505') continue
+      throw error
+    }
+  }
+  res.status(409).json({ error: 'username_unavailable' })
+}))
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
