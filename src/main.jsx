@@ -143,7 +143,7 @@ function SpotSheet({ spot, onVisit }) {
   )
 }
 
-function MapView({ spots, selectedId, onSelectSpot, onVisit, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
+function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
 
@@ -155,6 +155,21 @@ function MapView({ spots, selectedId, onSelectSpot, onVisit, query, setQuery, fi
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     )
   }
+  useEffect(() => {
+    const lastVisitedSpot = spots.find((spot) => spot.id === lastVisitedSpotId)
+    if (lastVisitedSpot) onSelectSpot(lastVisitedSpot.id)
+    if (!navigator.geolocation || !navigator.permissions?.query) return undefined
+    let cancelled = false
+    navigator.permissions.query({ name: 'geolocation' }).then((permission) => {
+      if (cancelled || permission.state !== 'granted') return
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => { if (!cancelled) setUserLocation([coords.latitude, coords.longitude]) },
+        () => undefined,
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+      )
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [lastVisitedSpotId, spots])
   const visibleSpots = useMemo(() => {
     return spots.filter((spot) => {
       const matchesSearch = `${spot.name} ${spot.district}`.toLowerCase().includes(query.toLowerCase())
@@ -1172,7 +1187,7 @@ function App() {
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
-      {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} onSelectSpot={selectSpot} onVisit={openComposer} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
+      {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
