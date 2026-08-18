@@ -5,13 +5,16 @@ import L from 'leaflet'
 import {
   IconAdjustmentsHorizontal,
   IconBookmark,
+  IconCalendarEvent,
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
   IconCompass,
+  IconClock,
   IconCurrentLocation,
   IconDownload,
   IconEye,
+  IconFlag,
   IconLock,
   IconMapPin,
   IconMedal,
@@ -116,7 +119,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, userLocation }) {
   )
 }
 
-function SpotSheet({ spot, onVisit }) {
+function SpotSheet({ spot, onVisit, onPlan, onReport }) {
   const visited = spot.visits > 0
   return (
     <aside className="spot-sheet" style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
@@ -139,11 +142,12 @@ function SpotSheet({ spot, onVisit }) {
         <IconCheck size={19} />
         {visited ? 'Weiteren Besuch eintragen' : 'Ersten Besuch eintragen'}
       </button>
+      <div className="spot-sheet__secondary-actions"><button type="button" onClick={() => onPlan(spot.id)}><IconCalendarEvent size={17} />Besuch planen</button><button type="button" onClick={() => onReport(spot.id)}><IconFlag size={16} />Datenfehler melden</button></div>
     </aside>
   )
 }
 
-function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
+function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
 
@@ -217,7 +221,7 @@ function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, 
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
       <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} userLocation={userLocation} />
-      <SpotSheet spot={selectedSpot} onVisit={onVisit} />
+      <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} />
     </main>
   )
 }
@@ -261,6 +265,9 @@ function VisibilityPicker({ value, onChange }) {
 
 function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
   const [visitedAt, setVisitedAt] = useState(new Date().toISOString().slice(0, 10))
+  const [timesOpen, setTimesOpen] = useState(false)
+  const [startedAt, setStartedAt] = useState('')
+  const [endedAt, setEndedAt] = useState('')
   const [body, setBody] = useState('')
   const [visibility, setVisibility] = useState('followers')
   const [files, setFiles] = useState([])
@@ -274,7 +281,7 @@ function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
     setError('')
     try {
       if (!spot) throw new Error('Wähle zuerst eine Halle auf der Karte aus.')
-      await onSave({ spotId: spot.id, visitedAt, body, files: files.map((item) => item.file), visibility })
+      await onSave({ spotId: spot.id, visitedAt, startedAt, endedAt, body, files: files.map((item) => item.file), visibility })
       onClose()
     } catch (saveError) {
       setError(saveError.message || 'Der Eintrag konnte nicht gespeichert werden.')
@@ -303,6 +310,7 @@ function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
         <div className="composer-header"><div><span className="eyebrow">Tagebucheintrag</span><h2>Besuch festhalten</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>
         <div className="form-field"><span>Halle</span>{spot ? <div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span><button type="button" onClick={onChooseOnMap}>Ändern</button></div> : <button type="button" className="choose-spot" onClick={onChooseOnMap}><IconMapPin size={18} />Halle auf Karte auswählen</button>}</div>
         <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} required /></label>
+        <section className="visit-time-picker"><button type="button" className={timesOpen ? 'is-open' : ''} onClick={() => setTimesOpen((value) => !value)}><IconClock size={18} /><span>Uhrzeit hinzufügen <small>optional</small></span><IconChevronRight size={17} /></button>{timesOpen && <div className="visit-time-picker__fields"><label className="form-field"><span>Von</span><input type="time" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} /></label><label className="form-field"><span>Bis</span><input type="time" value={endedAt} onChange={(event) => setEndedAt(event.target.value)} /></label></div>}</section>
         <label className="form-field"><span>Erfahrungsbericht</span><textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength="4000" placeholder="Wie war deine Session? Was möchtest du später noch wissen?" /></label>
         <div className="photo-field"><div className="photo-selection">{files.map((item, index) => <figure key={item.preview}><img src={item.preview} alt={`Ausgewähltes Foto ${index + 1}`} /><button type="button" onClick={() => removePhoto(index)} aria-label={`Foto ${index + 1} entfernen`}><IconX size={15} /></button></figure>)}</div><label className="photo-picker"><IconPhoto size={19} /><span>{files.length ? `${files.length} Foto${files.length > 1 ? 's' : ''} ausgewählt` : 'Fotos hinzufügen'}</span><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple onChange={addPhotos} /></label>{files.length > 0 && files.length < 6 && <button type="button" className="add-photo" onClick={() => fileInput.current?.click()}><IconPlus size={16} />Weiteres Foto</button>}</div>
         <VisibilityPicker value={visibility} onChange={setVisibility} />
@@ -311,6 +319,43 @@ function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
       </form>
     </div>
   )
+}
+
+function PlannedVisitDialog({ spot, onSave, onClose }) {
+  const initial = new Date(Date.now() + 24 * 60 * 60 * 1000)
+  const [date, setDate] = useState(initial.toISOString().slice(0, 10))
+  const [time, setTime] = useState('18:00')
+  const [endTime, setEndTime] = useState('')
+  const [note, setNote] = useState('')
+  const [visibility, setVisibility] = useState('followers')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const startsAt = new Date(`${date}T${time}:00`).toISOString()
+      const endsAt = endTime ? new Date(`${date}T${endTime}:00`).toISOString() : null
+      await onSave({ spotId: spot.id, startsAt, endsAt, note, visibility })
+      onClose()
+    } catch (saveError) { setError(saveError.message || 'Der geplante Besuch konnte nicht gespeichert werden.') } finally { setSaving(false) }
+  }
+  return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true" aria-label="Besuch planen"><div className="composer-header"><div><span className="eyebrow">BoulderO Planung</span><h2>Besuch planen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(event) => setDate(event.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(event) => setNote(event.target.value)} placeholder="Zum Beispiel: Ich möchte neue Leute zum Bouldern treffen." /></label><VisibilityPicker value={visibility} onChange={setVisibility} />{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird geplant …' : 'Besuch planen'}</button></form></section></div>
+}
+
+function SpotCorrectionDialog({ spot, onSave, onClose }) {
+  const [category, setCategory] = useState('coordinates')
+  const [note, setNote] = useState('')
+  const [latitude, setLatitude] = useState(String(spot.latitude ?? ''))
+  const [longitude, setLongitude] = useState(String(spot.longitude ?? ''))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(event) {
+    event.preventDefault(); setSaving(true); setError('')
+    try { await onSave(spot.id, { category, note, suggestedLatitude: category === 'coordinates' && latitude !== '' ? Number(latitude) : null, suggestedLongitude: category === 'coordinates' && longitude !== '' ? Number(longitude) : null }); onClose() } catch (saveError) { setError(saveError.message || 'Die Meldung konnte nicht gesendet werden.') } finally { setSaving(false) }
+  }
+  return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true" aria-label="Datenfehler melden"><div className="composer-header"><div><span className="eyebrow">BoulderO Community</span><h2>Datenfehler melden</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy"><b>{spot.name}</b><br />Die Verwaltung prüft deinen Hinweis vor einer Änderung.</p><form onSubmit={submit}><label className="form-field"><span>Was stimmt nicht?</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="coordinates">Position auf der Karte</option><option value="address">Adresse</option><option value="opening_hours">Öffnungszeiten</option><option value="website">Website</option><option value="other">Etwas anderes</option></select></label>{category === 'coordinates' && <div className="admin-form-grid"><label className="form-field"><span>Richtiger Breitengrad</span><input required type="number" step="any" value={latitude} onChange={(event) => setLatitude(event.target.value)} /></label><label className="form-field"><span>Richtiger Längengrad</span><input required type="number" step="any" value={longitude} onChange={(event) => setLongitude(event.target.value)} /></label></div>}<label className="form-field"><span>Hinweis *</span><textarea required minLength="3" value={note} maxLength="2000" onChange={(event) => setNote(event.target.value)} placeholder="Was ist nicht korrekt und wie sollte es aussehen?" /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gesendet …' : 'Hinweis senden'}</button></form></section></div>
 }
 
 function visibilityLabel(value) {
@@ -495,7 +540,18 @@ function downloadHallTemplate() {
   URL.revokeObjectURL(url)
 }
 
-function SpotEditDialog({ spot, onSave, onClose }) {
+function CoordinatePicker({ latitude, longitude, onChange }) {
+  const position = [Number(latitude), Number(longitude)]
+  const Focus = () => {
+    const map = useMap()
+    useEffect(() => { if (Number.isFinite(position[0]) && Number.isFinite(position[1])) map.setView(position, 15, { animate: false }) }, [map, latitude, longitude])
+    return null
+  }
+  if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) return null
+  return <div className="coordinate-picker"><MapContainer center={position} zoom={15} scrollWheelZoom={false} attributionControl={false}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><Focus /><Marker position={position} draggable icon={markerIcon(false, true)} eventHandlers={{ dragend: (event) => { const next = event.target.getLatLng(); onChange(next.lat.toFixed(6), next.lng.toFixed(6)) } }} /></MapContainer><small>Pin auf der Karte ziehen, um die Koordinaten zu übernehmen.</small></div>
+}
+
+function SpotEditDialog({ spot, reports = [], onSave, onResolveReport, onClose }) {
   const hasUploadedImage = spot.image_url?.startsWith('/api/spot-images/')
   const [draft, setDraft] = useState({ name: spot.name, district: spot.district, address: spot.address, website: spot.website ?? '', imageUrl: hasUploadedImage ? undefined : spot.image_url ?? '', openingHours: spot.opening_hours ?? '', areaSqm: spot.area_sqm ?? '', latitude: spot.latitude, longitude: spot.longitude })
   const [saving, setSaving] = useState(false)
@@ -511,7 +567,7 @@ function SpotEditDialog({ spot, onSave, onClose }) {
       onClose()
     } catch (saveError) { setError(saveError.message || 'Die Halle konnte nicht gespeichert werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${spot.name} bearbeiten`}><div className="composer-header"><div><span className="eyebrow">Halle bearbeiten</span><h2>{spot.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={draft.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label><label className="form-field"><span>Bild hochladen</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} ersetzt das bestehende Bild.` : hasUploadedImage ? 'Vorhandenes Upload-Bild bleibt erhalten.' : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label>{hasUploadedImage ? null : <label className="form-field"><span>Bild-URL</span><input type="url" value={draft.imageUrl ?? ''} onChange={(event) => update('imageUrl', event.target.value)} /><small>Feld leeren, um die Bild-URL zu entfernen.</small></label>}{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button></form></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${spot.name} bearbeiten`}><div className="composer-header"><div><span className="eyebrow">Halle bearbeiten</span><h2>{spot.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div>{reports.length > 0 && <section className="correction-review-panel"><span className="eyebrow">Community-Hinweise · {reports.length}</span>{reports.map((report) => <article key={report.id}><p><b>{({ coordinates: 'Position', address: 'Adresse', opening_hours: 'Öffnungszeiten', website: 'Website', other: 'Sonstiges' })[report.category]}</b> · von {report.reporter_name}</p><p>{report.note}</p>{report.suggested_latitude !== null && <small>Vorschlag: {report.suggested_latitude}, {report.suggested_longitude}</small>}<div><button type="button" onClick={() => onResolveReport(report.id, 'resolve')}>Erledigt</button><button type="button" onClick={() => onResolveReport(report.id, 'dismiss')}>Verwerfen</button></div></article>)}</section>}<form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><CoordinatePicker latitude={draft.latitude} longitude={draft.longitude} onChange={(latitude, longitude) => setDraft((current) => ({ ...current, latitude, longitude }))} /><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={draft.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label><label className="form-field"><span>Bild hochladen</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} ersetzt das bestehende Bild.` : hasUploadedImage ? 'Vorhandenes Upload-Bild bleibt erhalten.' : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label>{hasUploadedImage ? null : <label className="form-field"><span>Bild-URL</span><input type="url" value={draft.imageUrl ?? ''} onChange={(event) => update('imageUrl', event.target.value)} /><small>Feld leeren, um die Bild-URL zu entfernen.</small></label>}{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button></form></section></div>
 }
 
 function SpotCreateDialog({ onCreate, onClose }) {
@@ -615,7 +671,7 @@ function LegacyAdminSpotsView({ spots, onCreate, onImport, onUpdate, onDelete, o
   return <main className="view content-view compact-view admin-view"><div className="page-intro"><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label><label className="form-field"><span>Bild hochladen</span><input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} wird nach dem Speichern verknüpft.` : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label><label className="form-field"><span>Oder Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} placeholder="https://…/halle.jpg" /><small>Praktisch für den CSV-Massenimport.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>Halle</th><th>Stadtteil</th><th>Adresse</th><th>Quelle</th><th aria-label="Aktionen" /></tr></thead><tbody>{filteredSpots.map((spot) => <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr>)}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{editingSpot && <SpotEditDialog spot={editingSpot} onSave={(input) => onUpdate(editingSpot.id, input)} onClose={() => setEditingSpot(null)} />}</main>
 }
 
-function AdminSpotsView({ spots, suggestions, onCreate, onImport, onUpdate, onDelete, onApproveSuggestion, onRejectSuggestion, onBack }) {
+function AdminSpotsView({ spots, suggestions, correctionReports, onCreate, onImport, onUpdate, onDelete, onApproveSuggestion, onRejectSuggestion, onResolveCorrection, onBack }) {
   const [filter, setFilter] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [editingSpot, setEditingSpot] = useState(null)
@@ -638,7 +694,7 @@ function AdminSpotsView({ spots, suggestions, onCreate, onImport, onUpdate, onDe
     setError('')
     try { await onDelete(spot.id) } catch (deleteError) { setError(deleteError.message || 'Die Halle konnte nicht gelöscht werden.') } finally { setDeletingId(null) }
   }
-  return <main className="view content-view compact-view admin-view"><div className="page-intro page-intro--action"><div><h1>Hallen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><button type="button" className="journal-add" onClick={() => setCreateOpen(true)}><IconPlus size={18} />Halle anlegen</button></div>{suggestions.length > 0 && <section className="admin-suggestions"><div className="section-heading"><div><span className="eyebrow">Community</span><h2>Hallenvorschläge <b>{suggestions.length}</b></h2></div></div><p>Diese Vorschläge werden erst nach deiner Prüfung auf der Karte veröffentlicht.</p><div className="suggestion-list">{suggestions.map((suggestion) => <article key={suggestion.id}><div><b>{suggestion.name}</b><span>{suggestion.address}{suggestion.district ? ` · ${suggestion.district}` : ''}</span><small>von {suggestion.submitted_by_name}</small></div><button type="button" onClick={() => setReviewingSuggestion(suggestion)}>Prüfen</button></article>)}</div></section>}<section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section>{error && <p className="form-error">{error}</p>}<section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>Halle</th><th>Stadtteil</th><th>Adresse</th><th>Quelle</th><th aria-label="Aktionen" /></tr></thead><tbody>{filteredSpots.map((spot) => <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : spot.source === 'user-suggestion' ? 'Vorschlag' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr>)}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{createOpen && <SpotCreateDialog onCreate={onCreate} onClose={() => setCreateOpen(false)} />}{editingSpot && <SpotEditDialog spot={editingSpot} onSave={(input, imageFile) => onUpdate(editingSpot.id, input, imageFile)} onClose={() => setEditingSpot(null)} />}{reviewingSuggestion && <SpotSuggestionReviewDialog suggestion={reviewingSuggestion} onApprove={onApproveSuggestion} onReject={onRejectSuggestion} onClose={() => setReviewingSuggestion(null)} />}</main>
+  return <main className="view content-view compact-view admin-view"><div className="page-intro page-intro--action"><div><h1>Hallen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><button type="button" className="journal-add" onClick={() => setCreateOpen(true)}><IconPlus size={18} />Halle anlegen</button></div>{suggestions.length > 0 && <section className="admin-suggestions"><div className="section-heading"><div><span className="eyebrow">Community</span><h2>Hallenvorschläge <b>{suggestions.length}</b></h2></div></div><p>Diese Vorschläge werden erst nach deiner Prüfung auf der Karte veröffentlicht.</p><div className="suggestion-list">{suggestions.map((suggestion) => <article key={suggestion.id}><div><b>{suggestion.name}</b><span>{suggestion.address}{suggestion.district ? ` · ${suggestion.district}` : ''}</span><small>von {suggestion.submitted_by_name}</small></div><button type="button" onClick={() => setReviewingSuggestion(suggestion)}>Prüfen</button></article>)}</div></section>}<section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section>{error && <p className="form-error">{error}</p>}<section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>Halle</th><th>Stadtteil</th><th>Adresse</th><th>Hinweise</th><th>Quelle</th><th aria-label="Aktionen" /></tr></thead><tbody>{filteredSpots.map((spot) => { const reports = correctionReports.filter((report) => report.spot_id === spot.id); return <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{reports.length > 0 && <button className="admin-correction-badge" type="button" onClick={() => setEditingSpot(spot)}>{reports.length}</button>}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : spot.source === 'user-suggestion' ? 'Vorschlag' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr> })}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{createOpen && <SpotCreateDialog onCreate={onCreate} onClose={() => setCreateOpen(false)} />}{editingSpot && <SpotEditDialog spot={editingSpot} reports={correctionReports.filter((report) => report.spot_id === editingSpot.id)} onResolveReport={onResolveCorrection} onSave={(input, imageFile) => onUpdate(editingSpot.id, input, imageFile)} onClose={() => setEditingSpot(null)} />}{reviewingSuggestion && <SpotSuggestionReviewDialog suggestion={reviewingSuggestion} onApprove={onApproveSuggestion} onReject={onRejectSuggestion} onClose={() => setReviewingSuggestion(null)} />}</main>
 }
 
 function formatFeedDate(value) {
@@ -663,8 +719,18 @@ function Lightbox({ image, onClose }) {
   return <div className="lightbox" role="dialog" aria-modal="true" aria-label={image.alt} onClick={onClose}><button className="lightbox__close" onClick={onClose} aria-label="Bild schließen"><IconX size={21} /></button><img src={image.src} alt={image.alt} onClick={(event) => event.stopPropagation()} /></div>
 }
 
+function formatPlanDate(value) {
+  return new Intl.DateTimeFormat('de-DE', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
+function PlannedVisitCard({ plan, onRsvp }) {
+  const rsvp = plan.my_response
+  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow"><IconCalendarEvent size={14} />Geplant</span><time>{formatPlanDate(plan.starts_at)}</time></div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><span><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}</span>{!plan.is_owner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</div></article>
+}
+
 function FeedView({ onOpenImage }) {
   const [entries, setEntries] = useState([])
+  const [plannedVisits, setPlannedVisits] = useState([])
   const [error, setError] = useState('')
   const [comments, setComments] = useState({})
   const [expanded, setExpanded] = useState(null)
@@ -673,9 +739,10 @@ function FeedView({ onOpenImage }) {
 
   async function load() {
     try {
-      const response = await fetch('/api/social/feed')
-      if (!response.ok) throw new Error('Feed konnte nicht geladen werden.')
-      setEntries((await response.json()).entries)
+      const [feedResponse, plansResponse] = await Promise.all([fetch('/api/social/feed'), fetch('/api/social/planned-visits')])
+      if (!feedResponse.ok || !plansResponse.ok) throw new Error('Feed konnte nicht geladen werden.')
+      setEntries((await feedResponse.json()).entries)
+      setPlannedVisits((await plansResponse.json()).plannedVisits)
     } catch (loadError) { setError(loadError.message) }
   }
   useEffect(() => { load() }, [])
@@ -706,8 +773,15 @@ function FeedView({ onOpenImage }) {
     await load()
   }
 
+  async function rsvp(plan, response) {
+    const result = await fetch(`/api/planned-visits/${plan.id}/rsvp`, response ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response }) } : { method: 'DELETE' })
+    if (!result.ok) return setError('Deine Zusage konnte nicht aktualisiert werden.')
+    await load()
+  }
+
   const visibleEntries = feedMode === 'friends' ? entries.filter((entry) => entry.is_friend) : entries
-  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><h2>Aktuell im Feed</h2><div className="feed-toggle"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article key={entry.id}><FeedAuthor entry={entry} />{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<p className="feed-body">{entry.body || 'Hat einen Besuch geteilt.'}</p>{!entry.media?.length && <h3>war bei {entry.spot_name}</h3>}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>Kommentar <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></section></main>
+  const visiblePlans = feedMode === 'friends' ? plannedVisits.filter((plan) => plan.is_friend || plan.is_owner) : plannedVisits
+  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><h2>Aktuell im Feed</h2><div className="feed-toggle"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{visiblePlans.length > 0 && <section className="planned-visit-list"><div className="section-heading"><h3>Geplante Besuche</h3><span>{visiblePlans.length}</span></div>{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} />)}</section>}{!visibleEntries.length && !visiblePlans.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article key={entry.id}><FeedAuthor entry={entry} />{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<p className="feed-body">{entry.body || 'Hat einen Besuch geteilt.'}</p>{!entry.media?.length && <h3>war bei {entry.spot_name}</h3>}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>Kommentar <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></section></main>
 }
 
 function UserAvatar({ user }) {
@@ -831,7 +905,10 @@ function App() {
   const [lightboxImage, setLightboxImage] = useState(null)
   const [friendSummary, setFriendSummary] = useState({ unread_messages: 0, pending_requests: 0 })
   const [spotSuggestions, setSpotSuggestions] = useState([])
+  const [spotCorrectionReports, setSpotCorrectionReports] = useState([])
   const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false)
+  const [planDialogSpotId, setPlanDialogSpotId] = useState(null)
+  const [correctionDialogSpotId, setCorrectionDialogSpotId] = useState(null)
   const [legalDialog, setLegalDialog] = useState(null)
 
   function navigate(view, { replace = false } = {}) {
@@ -904,6 +981,12 @@ function App() {
     if (response.ok) setSpotSuggestions((await response.json()).suggestions)
   }
 
+  async function loadSpotCorrectionReports(user = currentUser) {
+    if (user?.role !== 'superadmin') { setSpotCorrectionReports([]); return }
+    const response = await fetch('/api/admin/spot-corrections')
+    if (response.ok) setSpotCorrectionReports((await response.json()).reports)
+  }
+
   async function refreshSession() {
     const response = await fetch('/api/me')
     if (!response.ok) return
@@ -911,6 +994,7 @@ function App() {
     setCurrentUser(user)
     await loadPrivateData()
     await loadSpotSuggestions(user)
+    await loadSpotCorrectionReports(user)
     const summaryResponse = await fetch('/api/social/friends/summary')
     if (summaryResponse.ok) setFriendSummary(await summaryResponse.json())
   }
@@ -961,6 +1045,7 @@ function App() {
     setCurrentUser(user)
     await loadPrivateData()
     await loadSpotSuggestions(user)
+    await loadSpotCorrectionReports(user)
     setAuthOpen(false)
     showToast('Verwaltungskonto ist aktiv')
   }
@@ -971,7 +1056,7 @@ function App() {
     await fetch('/api/auth/callback/member', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin, email, password }), redirect: 'manual' })
     const response = await fetch('/api/me')
     if (!response.ok) throw new Error('E-Mail oder Passwort sind nicht korrekt.')
-    const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')
+    const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')
   }
 
   async function registerMember(name, email, password) {
@@ -1011,6 +1096,7 @@ function App() {
     setProgress(null)
     setSpots(initialSpots)
     setSpotSuggestions([])
+    setSpotCorrectionReports([])
     setFriendSummary({ unread_messages: 0, pending_requests: 0 })
     showToast('Du bist abgemeldet')
   }
@@ -1024,6 +1110,16 @@ function App() {
     setComposerSpotId(spotId)
     setComposerSurface(spotId ? 'map' : 'dialog')
     setComposerOpen(true)
+  }
+
+  function openPlan(spotId) {
+    if (!currentUser) { setAuthOpen(true); showToast('Melde dich an, um einen Besuch zu planen'); return }
+    setPlanDialogSpotId(spotId)
+  }
+
+  function openCorrection(spotId) {
+    if (!currentUser) { setAuthOpen(true); showToast('Melde dich an, um einen Datenfehler zu melden'); return }
+    setCorrectionDialogSpotId(spotId)
   }
 
   function selectSpot(id) {
@@ -1051,7 +1147,7 @@ function App() {
   }
 
   async function createJournalEntry(entry) {
-    const response = await fetch('/api/visits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotId: entry.spotId, visitedAt: entry.visitedAt, body: entry.body, visibility: entry.visibility }) })
+    const response = await fetch('/api/visits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotId: entry.spotId, visitedAt: entry.visitedAt, startedAt: entry.startedAt, endedAt: entry.endedAt, body: entry.body, visibility: entry.visibility }) })
     if (!response.ok) throw new Error('Der Besuch konnte nicht gespeichert werden.')
     const { journalEntry } = await response.json()
     if (entry.files.length) {
@@ -1165,6 +1261,25 @@ function App() {
     showToast('Dein Hallenvorschlag wurde zur Prüfung gesendet')
   }
 
+  async function createPlannedVisit(input) {
+    const response = await fetch('/api/planned-visits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) throw new Error('Bitte prüfe Datum und Uhrzeit.')
+    showToast('Geplanter Besuch wurde im Feed veröffentlicht')
+  }
+
+  async function submitSpotCorrection(spotId, input) {
+    const response = await fetch(`/api/spots/${spotId}/corrections`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) throw new Error('Der Hinweis konnte nicht gesendet werden.')
+    showToast('Danke, dein Hinweis wird geprüft')
+  }
+
+  async function resolveSpotCorrection(id, decision) {
+    const response = await fetch(`/api/admin/spot-corrections/${id}/${decision}`, { method: 'POST' })
+    if (!response.ok) throw new Error('Der Hinweis konnte nicht verarbeitet werden.')
+    await loadSpotCorrectionReports()
+    showToast(decision === 'resolve' ? 'Hinweis als erledigt markiert' : 'Hinweis verworfen')
+  }
+
   async function approveSpotSuggestion(id, input) {
     const response = await fetch(`/api/admin/spot-suggestions/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
     if (!response.ok) throw new Error('Bitte prüfe die Pflichtangaben für die Veröffentlichung.')
@@ -1182,16 +1297,16 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <button className="brand" onClick={() => navigate('map')} aria-label="Zur Karte"><IconCompass size={22} /><span>Boulder<span>O</span></span></button>
+        <button className="brand" onClick={() => navigate('map')} aria-label="Zur Karte"><img className="brand-logo" src="/BoulderO_Logo.ico" alt="" /><span>Boulder<span>O</span></span></button>
         <div className="header-progress"><span><b>{uniqueVisited}</b>/10 Hallen</span><i><em style={{ width: `${uniqueVisited * 10}%` }} /></i></div>
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
-      {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
+      {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
-      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
@@ -1199,6 +1314,8 @@ function App() {
       </nav>
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} />}
+      {planDialogSpotId && <PlannedVisitDialog spot={spots.find((spot) => spot.id === planDialogSpotId)} onSave={createPlannedVisit} onClose={() => setPlanDialogSpotId(null)} />}
+      {correctionDialogSpotId && <SpotCorrectionDialog spot={spots.find((spot) => spot.id === correctionDialogSpotId)} onSave={submitSpotCorrection} onClose={() => setCorrectionDialogSpotId(null)} />}
       {selectedEntry && <JournalEntryDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} onUpdate={updateJournalEntry} />}
       {authOpen && <SignInDialog configuration={authConfiguration} resetToken={resetToken} onClose={() => { setAuthOpen(false); setResetToken(null) }} onDemoSignIn={signInDemo} onSuperAdminSignIn={signInSuperAdmin} onMemberSignIn={signInMember} onRegister={registerMember} onRequestPasswordReset={requestPasswordReset} onResendVerification={resendVerification} onResetPassword={resetPassword} onOpenPrivacy={() => { setAuthOpen(false); setLegalDialog('privacy') }} onOpenImprint={() => { setAuthOpen(false); setLegalDialog('imprint') }} />}
       {passwordDialogOpen && <PasswordDialog onClose={() => setPasswordDialogOpen(false)} onSave={changePassword} />}

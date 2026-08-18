@@ -132,7 +132,7 @@ $exportSpots = @($spots | Where-Object { $_.name -notin $ExcludeName })
 
 $outputDirectory = Split-Path -Parent $OutputPath
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
-$exportSpots | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding utf8
+$exportSpots | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding utf8BOM
 
 $missingWebsites = @($exportSpots | Where-Object { -not $_.website }).Count
 Write-Output "Exportiert: $($exportSpots.Count) Hallen nach $OutputPath"

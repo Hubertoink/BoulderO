@@ -457,6 +457,40 @@ const spotSuggestionInputSchema = z.object({
   }
 })
 
+const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+const visitInputSchema = z.object({
+  spotId: z.string().uuid(),
+  visitedAt: z.string().date().optional(),
+  startedAt: timeSchema.optional().or(z.literal('')),
+  endedAt: timeSchema.optional().or(z.literal('')),
+  body: z.string().trim().max(4000).default(''),
+  visibility: z.enum(['private', 'friends', 'followers', 'public']).default('private'),
+}).superRefine((value, context) => {
+  if (Boolean(value.startedAt) !== Boolean(value.endedAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Start- und Endzeit müssen zusammen angegeben werden.' })
+  if (value.startedAt && value.endedAt && value.endedAt <= value.startedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Endzeit muss nach der Startzeit liegen.' })
+})
+
+const plannedVisitInputSchema = z.object({
+  spotId: z.string().uuid(),
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }).optional().nullable(),
+  note: z.string().trim().max(2000).default(''),
+  visibility: z.enum(['private', 'friends', 'followers', 'public']).default('friends'),
+}).superRefine((value, context) => {
+  if (value.endsAt && new Date(value.endsAt) <= new Date(value.startsAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Das Ende muss nach dem Beginn liegen.' })
+})
+
+const spotCorrectionInputSchema = z.object({
+  category: z.enum(['coordinates', 'address', 'opening_hours', 'website', 'other']),
+  note: z.string().trim().min(3).max(2000),
+  suggestedLatitude: z.number().gte(-90).lte(90).nullable().optional(),
+  suggestedLongitude: z.number().gte(-180).lte(180).nullable().optional(),
+}).superRefine((value, context) => {
+  if ((value.suggestedLatitude === null || value.suggestedLatitude === undefined) !== (value.suggestedLongitude === null || value.suggestedLongitude === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Koordinaten müssen zusammen angegeben werden.' })
+  }
+})
+
 function parseCsv(text) {
   const rows = []
   let row = []
@@ -689,6 +723,82 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
   res.json({ entries: result.rows })
 }))
 
+app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query(`
+    SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id,
+           s.id AS spot_id, s.name AS spot_name, s.district, s.address,
+           u.name AS user_name, u.username, u.image AS user_image,
+           (p.user_id = $1) AS is_owner,
+           (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = p.user_id AND f.followed_id = $1 AND f.status = 'accepted')) AS is_friend,
+           (SELECT COUNT(*)::int FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.response = 'going') AS going_count,
+           (SELECT COUNT(*)::int FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.response = 'interested') AS interested_count,
+           (SELECT response FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1) AS my_response
+      FROM planned_visits p
+      JOIN spots s ON s.id = p.spot_id
+      JOIN users u ON u.id = p.user_id
+     WHERE p.status = 'scheduled'
+       AND p.starts_at >= NOW() - INTERVAL '2 hours'
+       AND (
+         p.user_id = $1
+         OR p.visibility = 'public'
+         OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted'))
+         OR (p.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = p.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
+       )
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id) OR (b.blocker_id = p.user_id AND b.blocked_id = $1))
+     ORDER BY p.starts_at ASC
+     LIMIT 20
+  `, [req.user.id])
+  res.json({ plannedVisits: result.rows })
+}))
+
+app.get('/planned-visits/mine', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query(`
+    SELECT p.id, p.spot_id, p.starts_at, p.ends_at, p.note, p.visibility, p.status,
+           s.name AS spot_name, s.district, s.address
+      FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+     WHERE p.user_id = $1 AND p.status = 'scheduled' AND p.starts_at >= NOW() - INTERVAL '2 hours'
+     ORDER BY p.starts_at ASC
+  `, [req.user.id])
+  res.json({ plannedVisits: result.rows })
+}))
+
+app.post('/planned-visits', requireUser, asyncRoute(async (req, res) => {
+  const input = plannedVisitInputSchema.parse(req.body)
+  const spot = await pool.query('SELECT id FROM spots WHERE id = $1 AND status = \'active\'', [input.spotId])
+  if (!spot.rowCount) return res.status(404).json({ error: 'spot_not_found' })
+  const result = await pool.query(
+    `INSERT INTO planned_visits (user_id, spot_id, starts_at, ends_at, note, visibility)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, spot_id, starts_at, ends_at, note, visibility, status, created_at`,
+    [req.user.id, input.spotId, input.startsAt, input.endsAt ?? null, input.note, input.visibility],
+  )
+  res.status(201).json({ plannedVisit: result.rows[0] })
+}))
+
+app.post('/planned-visits/:planId/rsvp', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  const input = z.object({ response: z.enum(['going', 'interested']) }).parse(req.body)
+  const plan = await pool.query('SELECT id, user_id, visibility, status FROM planned_visits WHERE id = $1', [planId])
+  const item = plan.rows[0]
+  if (!item || item.status !== 'scheduled') return res.status(404).json({ error: 'planned_visit_not_found' })
+  if (item.user_id === req.user.id) return res.status(400).json({ error: 'cannot_rsvp_own_plan' })
+  if (!await canViewEntry(req.user.id, item.user_id, item.visibility)) return res.status(404).json({ error: 'planned_visit_not_found' })
+  const result = await pool.query(
+    `INSERT INTO planned_visit_rsvps (planned_visit_id, user_id, response)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (planned_visit_id, user_id) DO UPDATE SET response = EXCLUDED.response, updated_at = NOW()
+     RETURNING response`,
+    [planId, req.user.id, input.response],
+  )
+  res.json({ rsvp: result.rows[0] })
+}))
+
+app.delete('/planned-visits/:planId/rsvp', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  await pool.query('DELETE FROM planned_visit_rsvps WHERE planned_visit_id = $1 AND user_id = $2', [planId, req.user.id])
+  res.status(204).end()
+}))
+
 app.get('/social/entries/:entryId/comments', requireUser, asyncRoute(async (req, res) => {
   const entry = await getViewableEntry(req.user.id, req.params.entryId)
   if (!entry) return res.status(404).json({ error: 'entry_not_found' })
@@ -760,6 +870,20 @@ app.get('/spots', asyncRoute(async (_req, res) => {
   res.json({ spots: result.rows })
 }))
 
+app.post('/spots/:spotId/corrections', requireUser, asyncRoute(async (req, res) => {
+  const spotId = z.string().uuid().parse(req.params.spotId)
+  const input = spotCorrectionInputSchema.parse(req.body)
+  const spot = await pool.query('SELECT id FROM spots WHERE id = $1 AND status = \'active\'', [spotId])
+  if (!spot.rowCount) return res.status(404).json({ error: 'spot_not_found' })
+  const result = await pool.query(
+    `INSERT INTO spot_correction_reports (spot_id, reporter_id, category, note, suggested_latitude, suggested_longitude)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, category, note, suggested_latitude, suggested_longitude, status, created_at`,
+    [spotId, req.user.id, input.category, input.note, input.suggestedLatitude ?? null, input.suggestedLongitude ?? null],
+  )
+  res.status(201).json({ report: result.rows[0] })
+}))
+
 app.post('/spot-suggestions', requireUser, asyncRoute(async (req, res) => {
   const input = spotSuggestionInputSchema.parse(req.body)
   const result = await pool.query(
@@ -781,6 +905,33 @@ app.get('/admin/spot-suggestions', ...requireSuperAdmin, asyncRoute(async (_req,
       ORDER BY ss.created_at ASC`,
   )
   res.json({ suggestions: result.rows })
+}))
+
+app.get('/admin/spot-corrections', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
+  const result = await pool.query(`
+    SELECT r.id, r.spot_id, r.category, r.note, r.suggested_latitude, r.suggested_longitude, r.created_at,
+           u.name AS reporter_name, u.email AS reporter_email
+      FROM spot_correction_reports r
+      JOIN users u ON u.id = r.reporter_id
+     WHERE r.status = 'pending'
+     ORDER BY r.created_at ASC
+  `)
+  res.json({ reports: result.rows })
+}))
+
+app.post('/admin/spot-corrections/:reportId/:decision', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const reportId = z.string().uuid().parse(req.params.reportId)
+  const decision = z.enum(['resolve', 'dismiss']).parse(req.params.decision)
+  const status = decision === 'resolve' ? 'resolved' : 'dismissed'
+  const result = await pool.query(
+    `UPDATE spot_correction_reports
+        SET status = $2, reviewed_by = $3, reviewed_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING id, spot_id, status`,
+    [reportId, status, req.user.id],
+  )
+  if (!result.rowCount) return res.status(404).json({ error: 'spot_correction_not_found' })
+  res.json({ report: result.rows[0] })
 }))
 
 app.post('/admin/spot-suggestions/:suggestionId/approve', ...requireSuperAdmin, asyncRoute(async (req, res) => {
@@ -949,7 +1100,7 @@ app.post('/admin/spots/import', ...requireSuperAdmin, csvUpload.single('file'), 
 
 app.get('/visits', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
-    SELECT v.id, v.spot_id, v.visited_at, v.created_at, s.name AS spot_name,
+    SELECT v.id, v.spot_id, v.visited_at, v.started_at, v.ended_at, v.created_at, s.name AS spot_name,
            s.district, j.id AS journal_entry_id, j.body, j.visibility,
            COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type))
              FILTER (WHERE m.id IS NOT NULL), '[]') AS media
@@ -965,20 +1116,15 @@ app.get('/visits', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.post('/visits', requireUser, asyncRoute(async (req, res) => {
-  const input = z.object({
-    spotId: z.string().uuid(),
-    visitedAt: z.string().date().optional(),
-    body: z.string().trim().max(4000).default(''),
-    visibility: z.enum(['private', 'friends', 'followers', 'public']).default('private'),
-  }).parse(req.body)
+  const input = visitInputSchema.parse(req.body)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     const visit = await client.query(
-      `INSERT INTO visits (user_id, spot_id, visited_at)
-       VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE))
-       RETURNING id, spot_id, visited_at, created_at`,
-      [req.user.id, input.spotId, input.visitedAt ?? null],
+      `INSERT INTO visits (user_id, spot_id, visited_at, started_at, ended_at)
+       VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), NULLIF($4, '')::time, NULLIF($5, '')::time)
+       RETURNING id, spot_id, visited_at, started_at, ended_at, created_at`,
+      [req.user.id, input.spotId, input.visitedAt ?? null, input.startedAt ?? '', input.endedAt ?? ''],
     )
     const entry = await client.query(
       `INSERT INTO journal_entries (user_id, visit_id, body, visibility)
