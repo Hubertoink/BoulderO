@@ -95,6 +95,18 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]))
 }
 
+async function writeAuthAudit(eventType, user) {
+  try {
+    await pool.query(
+      `INSERT INTO auth_audit_events (event_type, user_id, user_name, user_email)
+       VALUES ($1, $2, $3, $4)`,
+      [eventType, user.id, user.name, user.email],
+    )
+  } catch (error) {
+    console.error('Konto-Audit konnte nicht geschrieben werden:', error)
+  }
+}
+
 async function createAccountActionToken(userId, purpose) {
   const token = crypto.randomBytes(32).toString('base64url')
   const hours = purpose === 'verify_email' ? 24 : 1
@@ -134,12 +146,13 @@ if (superAdminEnabled) {
       email: { label: 'E-Mail', type: 'email' },
       password: { label: 'Passwort', type: 'password' },
     },
-    authorize: async (credentials) => (
-      matchesSecret(String(credentials?.email).trim().toLowerCase(), superAdminEmail)
-      && matchesSecret(credentials?.password, superAdminPassword)
-        ? superAdmin
-        : null
-    ),
+    authorize: async (credentials) => {
+      const authenticated = matchesSecret(String(credentials?.email).trim().toLowerCase(), superAdminEmail)
+        && matchesSecret(credentials?.password, superAdminPassword)
+      if (!authenticated) return null
+      await writeAuthAudit('login', superAdmin)
+      return superAdmin
+    },
   }))
 }
 
@@ -153,11 +166,16 @@ providers.push(Credentials({
   authorize: async (credentials) => {
     const email = String(credentials?.email ?? '').trim().toLowerCase()
     const password = String(credentials?.password ?? '')
-    if (superAdminEnabled && matchesSecret(email, superAdminEmail) && matchesSecret(password, superAdminPassword)) return superAdmin
+    if (superAdminEnabled && matchesSecret(email, superAdminEmail) && matchesSecret(password, superAdminPassword)) {
+      await writeAuthAudit('login', superAdmin)
+      return superAdmin
+    }
     const result = await pool.query('SELECT id, name, email, username, image, role, password_hash, email_verified_at FROM users WHERE email = $1', [email])
     const user = result.rows[0]
     if (!user || !user.email_verified_at || !await passwordMatches(password, user.password_hash)) return null
-    return { id: user.id, name: user.name, email: user.email, username: user.username, image: user.image, role: user.role }
+    const authenticatedUser = { id: user.id, name: user.name, email: user.email, username: user.username, image: user.image, role: user.role }
+    await writeAuthAudit('login', authenticatedUser)
+    return authenticatedUser
   },
 }))
 
@@ -233,6 +251,7 @@ app.post('/register', asyncRoute(async (req, res) => {
          VALUES ($1, $2, $3, $4, 'member') RETURNING id, name, email, username, role`,
         [input.name, input.email, username, hash],
       )
+      await writeAuthAudit('registration', created.rows[0])
       try {
         await sendAccountActionEmail(req, created.rows[0], 'verify_email')
       } catch (error) {
@@ -963,6 +982,18 @@ app.get('/admin/spot-suggestions', ...requireSuperAdmin, asyncRoute(async (_req,
       ORDER BY ss.created_at ASC`,
   )
   res.json({ suggestions: result.rows })
+}))
+
+app.get('/admin/auth-audit', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const limit = z.coerce.number().int().min(1).max(500).parse(req.query.limit ?? 100)
+  const result = await pool.query(
+    `SELECT id, event_type, user_id, user_name, user_email, created_at
+       FROM auth_audit_events
+      ORDER BY created_at DESC
+      LIMIT $1`,
+    [limit],
+  )
+  res.json({ events: result.rows })
 }))
 
 app.get('/admin/spot-corrections', ...requireSuperAdmin, asyncRoute(async (_req, res) => {

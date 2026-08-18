@@ -155,3 +155,10 @@ button { cursor: pointer; }
 .profile-legal-links { justify-content: center; }
 .profile-actions .profile-legal-links button { width: auto; min-height: 0; padding: 0; }
 .profile-legal-links button + button { padding-left: 0; border-left: 0; }
+
+.admin-audit { margin: 26px 0; padding: 18px; border: 1px solid var(--line); background: var(--soft-linen); }
+.admin-audit h2 { margin: 3px 0 0; font-size: 20px; }
+.admin-audit > p { margin: 6px 0 14px; color: var(--ink-soft); font-size: 12px; }
+.audit-event { display: inline-flex; padding: 4px 7px; border-radius: 999px; font-size: 10px; font-weight: 750; }
+.audit-event--registration { background: #e4f0e7; color: #2e6748; }
+.audit-event--login { background: #e4edf4; color: var(--yale-blue); }

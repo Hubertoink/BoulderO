@@ -683,39 +683,309 @@ function LegacyAdminSpotsView({ spots, onCreate, onImport, onUpdate, onDelete, o
   return <main className="view content-view compact-view admin-view"><div className="page-intro"><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label><label className="form-field"><span>Bild hochladen</span><input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} wird nach dem Speichern verknüpft.` : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label><label className="form-field"><span>Oder Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} placeholder="https://…/halle.jpg" /><small>Praktisch für den CSV-Massenimport.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>Halle</th><th>Stadtteil</th><th>Adresse</th><th>Quelle</th><th aria-label="Aktionen" /></tr></thead><tbody>{filteredSpots.map((spot) => <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr>)}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{editingSpot && <SpotEditDialog spot={editingSpot} onSave={(input) => onUpdate(editingSpot.id, input)} onClose={() => setEditingSpot(null)} />}</main>
 }
 
-function AdminSpotsView({ spots, suggestions, correctionReports, onCreate, onImport, onUpdate, onDelete, onApproveSuggestion, onRejectSuggestion, onResolveCorrection, onBack }) {
-  const [filter, setFilter] = useState('')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [editingSpot, setEditingSpot] = useState(null)
-  const [deletingId, setDeletingId] = useState(null)
-  const [error, setError] = useState('')
-  const [importing, setImporting] = useState(false)
-  const [reviewingSuggestion, setReviewingSuggestion] = useState(null)
-  const [sort, setSort] = useState({ key: 'name', direction: 'asc' })
-  const csvInput = useRef(null)
-  const filteredSpots = spots.filter((spot) => `${spot.name} ${spot.district} ${spot.address}`.toLowerCase().includes(filter.trim().toLowerCase()))
-  function changeSort(key) { setSort((current) => current.key === key ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' }) }
+function AuthAuditSection({ events }) {
+  return <section className="admin-audit"><div className="section-heading"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierungen & Anmeldungen</h2></div><span>{events.length}</span></div><p>Erfolgreiche Registrierungen und Anmeldungen der letzten 100 Ereignisse.</p><div className="admin-table-wrap"><table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Konto</th><th>E-Mail</th></tr></thead><tbody>{events.length ? events.map((event) => <tr key={event.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</td><td><span className={`audit-event audit-event--${event.event_type}`}>{event.event_type === 'registration' ? 'Registrierung' : 'Anmeldung'}</span></td><td>{event.user_name}</td><td>{event.user_email}</td></tr>) : <tr><td colSpan="4">Noch keine Ereignisse seit der Aktivierung des Audits.</td></tr>}</tbody></table></div></section>
+}
+
+function AdminSpotsView({
+  spots,
+  suggestions,
+  correctionReports,
+  authAudit,
+  onCreate,
+  onImport,
+  onUpdate,
+  onDelete,
+  onApproveSuggestion,
+  onRejectSuggestion,
+  onResolveCorrection,
+  onBack,
+}) {
+  const [filter, setFilter] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingSpot, setEditingSpot] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [error, setError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [reviewingSuggestion, setReviewingSuggestion] = useState(null);
+  const [sort, setSort] = useState({ key: "name", direction: "asc" });
+  const csvInput = useRef(null);
+  const filteredSpots = spots.filter((spot) =>
+    `${spot.name} ${spot.district} ${spot.address}`
+      .toLowerCase()
+      .includes(filter.trim().toLowerCase()),
+  );
+  function changeSort(key) {
+    setSort((current) =>
+      current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" },
+    );
+  }
   const sortedSpots = [...filteredSpots].sort((left, right) => {
-    const leftValue = sort.key === 'reports' ? correctionReports.filter((report) => report.spot_id === left.id).length : String(left[sort.key] ?? '')
-    const rightValue = sort.key === 'reports' ? correctionReports.filter((report) => report.spot_id === right.id).length : String(right[sort.key] ?? '')
-    const result = typeof leftValue === 'number' ? leftValue - rightValue : leftValue.localeCompare(rightValue, 'de', { sensitivity: 'base' })
-    return sort.direction === 'asc' ? result : -result
-  })
+    const leftValue =
+      sort.key === "reports"
+        ? correctionReports.filter((report) => report.spot_id === left.id)
+            .length
+        : String(left[sort.key] ?? "");
+    const rightValue =
+      sort.key === "reports"
+        ? correctionReports.filter((report) => report.spot_id === right.id)
+            .length
+        : String(right[sort.key] ?? "");
+    const result =
+      typeof leftValue === "number"
+        ? leftValue - rightValue
+        : leftValue.localeCompare(rightValue, "de", { sensitivity: "base" });
+    return sort.direction === "asc" ? result : -result;
+  });
   async function importCsv(event) {
-    const [file] = event.target.files
-    if (!file) return
-    setImporting(true)
-    setError('')
-    try { await onImport(file) } catch (importError) { setError(importError.message || 'Der Import konnte nicht verarbeitet werden.') } finally { setImporting(false); event.target.value = '' }
+    const [file] = event.target.files;
+    if (!file) return;
+    setImporting(true);
+    setError("");
+    try {
+      await onImport(file);
+    } catch (importError) {
+      setError(
+        importError.message || "Der Import konnte nicht verarbeitet werden.",
+      );
+    } finally {
+      setImporting(false);
+      event.target.value = "";
+    }
   }
   async function removeSpot(spot) {
-    if (!window.confirm(`„${spot.name}“ aus der Karte entfernen?`)) return
-    setDeletingId(spot.id)
-    setError('')
-    try { await onDelete(spot.id) } catch (deleteError) { setError(deleteError.message || 'Die Halle konnte nicht gelöscht werden.') } finally { setDeletingId(null) }
+    if (!window.confirm(`„${spot.name}“ aus der Karte entfernen?`)) return;
+    setDeletingId(spot.id);
+    setError("");
+    try {
+      await onDelete(spot.id);
+    } catch (deleteError) {
+      setError(
+        deleteError.message || "Die Halle konnte nicht gelöscht werden.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
   }
-  const sortLabel = (key, label) => <button type="button" className="table-sort" onClick={() => changeSort(key)}>{label}{sort.key === key && <span>{sort.direction === 'asc' ? ' ↑' : ' ↓'}</span>}</button>
-  return <main className="view content-view compact-view admin-view"><div className="page-intro page-intro--action"><div><h1>Hallen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><button type="button" className="journal-add" onClick={() => setCreateOpen(true)}><IconPlus size={18} />Halle anlegen</button></div>{suggestions.length > 0 && <section className="admin-suggestions"><div className="section-heading"><div><span className="eyebrow">Community</span><h2>Hallenvorschläge <b>{suggestions.length}</b></h2></div></div><p>Diese Vorschläge werden erst nach deiner Prüfung auf der Karte veröffentlicht.</p><div className="suggestion-list">{suggestions.map((suggestion) => <article key={suggestion.id}><div><b>{suggestion.name}</b><span>{suggestion.address}{suggestion.district ? ` · ${suggestion.district}` : ''}</span><small>von {suggestion.submitted_by_name}</small></div><button type="button" onClick={() => setReviewingSuggestion(suggestion)}>Prüfen</button></article>)}</div></section>}<section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section>{error && <p className="form-error">{error}</p>}<section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>{sortLabel('name', 'Halle')}</th><th>{sortLabel('district', 'Stadtteil')}</th><th>{sortLabel('address', 'Adresse')}</th><th>{sortLabel('reports', 'Hinweise')}</th><th>{sortLabel('source', 'Quelle')}</th><th aria-label="Aktionen" /></tr></thead><tbody>{sortedSpots.map((spot) => { const reports = correctionReports.filter((report) => report.spot_id === spot.id); return <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{reports.length > 0 && <button className="admin-correction-badge" type="button" onClick={() => setEditingSpot(spot)}>{reports.length}</button>}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : spot.source === 'user-suggestion' ? 'Vorschlag' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr> })}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{createOpen && <SpotCreateDialog onCreate={onCreate} onClose={() => setCreateOpen(false)} />}{editingSpot && <SpotEditDialog spot={editingSpot} reports={correctionReports.filter((report) => report.spot_id === editingSpot.id)} onResolveReport={onResolveCorrection} onSave={(input, imageFile) => onUpdate(editingSpot.id, input, imageFile)} onClose={() => setEditingSpot(null)} />}{reviewingSuggestion && <SpotSuggestionReviewDialog suggestion={reviewingSuggestion} onApprove={onApproveSuggestion} onReject={onRejectSuggestion} onClose={() => setReviewingSuggestion(null)} />}</main>
+  const sortLabel = (key, label) => (
+    <button
+      type="button"
+      className="table-sort"
+      onClick={() => changeSort(key)}
+    >
+      {label}
+      {sort.key === key && (
+        <span>{sort.direction === "asc" ? " ↑" : " ↓"}</span>
+      )}
+    </button>
+  );
+  return (
+    <main className="view content-view compact-view admin-view">
+      <div className="page-intro page-intro--action">
+        <div>
+          <h1>Hallen</h1>
+          <p>
+            Neue Boulderhallen werden nach dem Speichern direkt auf der Karte
+            veröffentlicht.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="journal-add"
+          onClick={() => setCreateOpen(true)}
+        >
+          <IconPlus size={18} />
+          Halle anlegen
+        </button>
+      </div>
+      <AuthAuditSection events={authAudit} />
+      {suggestions.length > 0 && (
+        <section className="admin-suggestions">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Community</span>
+              <h2>
+                Hallenvorschläge <b>{suggestions.length}</b>
+              </h2>
+            </div>
+          </div>
+          <p>
+            Diese Vorschläge werden erst nach deiner Prüfung auf der Karte
+            veröffentlicht.
+          </p>
+          <div className="suggestion-list">
+            {suggestions.map((suggestion) => (
+              <article key={suggestion.id}>
+                <div>
+                  <b>{suggestion.name}</b>
+                  <span>
+                    {suggestion.address}
+                    {suggestion.district ? ` · ${suggestion.district}` : ""}
+                  </span>
+                  <small>von {suggestion.submitted_by_name}</small>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReviewingSuggestion(suggestion)}
+                >
+                  Prüfen
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <section className="admin-import">
+        <div>
+          <span className="eyebrow">Mehrere Hallen</span>
+          <h2>CSV importieren</h2>
+          <p>
+            Maximal 500 Hallen; Pflichtspalten: name, district, address,
+            latitude und longitude. image_url ist optional.
+          </p>
+        </div>
+        <div className="admin-import__actions">
+          <button
+            type="button"
+            className="text-back"
+            onClick={downloadHallTemplate}
+          >
+            <IconDownload size={16} />
+            Vorlage herunterladen
+          </button>
+          <label className="visit-button">
+            <IconPlus size={18} />
+            {importing ? "Import wird verarbeitet …" : "CSV auswählen"}
+            <input
+              ref={csvInput}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={importCsv}
+              disabled={importing}
+            />
+          </label>
+        </div>
+      </section>
+      {error && <p className="form-error">{error}</p>}
+      <section className="admin-list">
+        <div className="section-heading">
+          <h2>Aktive Hallen</h2>
+          <span>
+            {filteredSpots.length} / {spots.length}
+          </span>
+        </div>
+        <label className="admin-filter">
+          <IconSearch size={17} />
+          <input
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Nach Name, Stadtteil oder Adresse filtern"
+          />
+        </label>
+        <div className="admin-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{sortLabel("name", "Halle")}</th>
+                <th>{sortLabel("district", "Stadtteil")}</th>
+                <th>{sortLabel("address", "Adresse")}</th>
+                <th>{sortLabel("reports", "Hinweise")}</th>
+                <th>{sortLabel("source", "Quelle")}</th>
+                <th aria-label="Aktionen" />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedSpots.map((spot) => {
+                const reports = correctionReports.filter(
+                  (report) => report.spot_id === spot.id,
+                );
+                return (
+                  <tr key={spot.id}>
+                    <td>{spot.name}</td>
+                    <td>{spot.district}</td>
+                    <td>{spot.address}</td>
+                    <td>
+                      {reports.length > 0 && (
+                        <button
+                          className="admin-correction-badge"
+                          type="button"
+                          onClick={() => setEditingSpot(spot)}
+                        >
+                          {reports.length}
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      {spot.source === "admin"
+                        ? "manuell"
+                        : spot.source === "admin-import"
+                          ? "CSV"
+                          : spot.source === "user-suggestion"
+                            ? "Vorschlag"
+                            : "Import"}
+                    </td>
+                    <td>
+                      <div className="admin-row-actions">
+                        <button
+                          type="button"
+                          onClick={() => setEditingSpot(spot)}
+                        >
+                          Bearbeiten
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          disabled={deletingId === spot.id}
+                          onClick={() => removeSpot(spot)}
+                        >
+                          {deletingId === spot.id ? "Löscht …" : "Löschen"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!filteredSpots.length && (
+          <p className="journal-empty">Keine Hallen für diesen Filter.</p>
+        )}
+      </section>
+      <button className="text-back" onClick={onBack}>
+        Zurück zum Profil
+      </button>
+      {createOpen && (
+        <SpotCreateDialog
+          onCreate={onCreate}
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
+      {editingSpot && (
+        <SpotEditDialog
+          spot={editingSpot}
+          reports={correctionReports.filter(
+            (report) => report.spot_id === editingSpot.id,
+          )}
+          onResolveReport={onResolveCorrection}
+          onSave={(input, imageFile) =>
+            onUpdate(editingSpot.id, input, imageFile)
+          }
+          onClose={() => setEditingSpot(null)}
+        />
+      )}
+      {reviewingSuggestion && (
+        <SpotSuggestionReviewDialog
+          suggestion={reviewingSuggestion}
+          onApprove={onApproveSuggestion}
+          onReject={onRejectSuggestion}
+          onClose={() => setReviewingSuggestion(null)}
+        />
+      )}
+    </main>
+  );
 }
 
 function formatFeedDate(value) {
@@ -941,6 +1211,7 @@ function App() {
   const [feedAuthorFilter, setFeedAuthorFilter] = useState(null)
   const [spotSuggestions, setSpotSuggestions] = useState([])
   const [spotCorrectionReports, setSpotCorrectionReports] = useState([])
+  const [authAudit, setAuthAudit] = useState([])
   const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false)
   const [planDialogSpotId, setPlanDialogSpotId] = useState(null)
   const [correctionDialogSpotId, setCorrectionDialogSpotId] = useState(null)
@@ -1036,6 +1307,11 @@ function App() {
     const response = await fetch('/api/admin/spot-corrections')
     if (response.ok) setSpotCorrectionReports((await response.json()).reports)
   }
+  async function loadAuthAudit(user = currentUser) {
+    if (user?.role !== 'superadmin') { setAuthAudit([]); return }
+    const response = await fetch('/api/admin/auth-audit')
+    if (response.ok) setAuthAudit((await response.json()).events)
+  }
 
   async function refreshSession() {
     const response = await fetch('/api/me')
@@ -1045,6 +1321,7 @@ function App() {
     await loadPrivateData()
     await loadSpotSuggestions(user)
     await loadSpotCorrectionReports(user)
+    await loadAuthAudit(user)
     const summaryResponse = await fetch('/api/social/friends/summary')
     if (summaryResponse.ok) setFriendSummary(await summaryResponse.json())
     await loadFeedSummary()
@@ -1087,7 +1364,7 @@ function App() {
     await fetch('/api/auth/callback/member', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin, email, password }), redirect: 'manual' })
     const response = await fetch('/api/me')
     if (!response.ok) throw new Error('E-Mail oder Passwort sind nicht korrekt.')
-    const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')
+    const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); await loadAuthAudit(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')
   }
 
   async function registerMember(name, email, password) {
@@ -1342,9 +1619,9 @@ function App() {
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => { navigate('admin'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
-      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} authAudit={authAudit} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={() => setFeedSummary({ unread_feed: 0 })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
