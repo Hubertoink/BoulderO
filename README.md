@@ -51,6 +51,17 @@ npm run build
 docker compose up --build -d
 ```
 
+### Mittwald Container Stack
+
+Für Mittwald wird die separate Datei [`compose.mittwald.yaml`](compose.mittwald.yaml) verwendet. Sie referenziert die beim Push nach `main` automatisch nach GitHub Container Registry veröffentlichten Images. Die Zugangswerte werden ausschließlich bei der Bereitstellung als Umgebungsvariablen gesetzt und nicht in Git gespeichert.
+
+```bash
+AUTH_SECRET="..." POSTGRES_PASSWORD="..." \
+  mw stack deploy -s <stack-id> -c compose.mittwald.yaml
+```
+
+Der Webservice wird anschließend über einen Mittwald-Virtualhost auf Port `80/tcp` veröffentlicht. Für den ersten Web-Test ist `DEMO_MODE=true` vorgesehen; für eine reale Anmeldung ist ein eigener OAuth-Client zu hinterlegen und der Testmodus auszuschalten.
+
 ## Sichtbarkeit von Tagebüchern und Fotos
 
 Beim Speichern und im Detail eines Tagebucheintrags kann dessen Sichtbarkeit gewählt werden: privat, Freunde (beidseitiges Folgen), Follower oder BoulderO Community. Community bedeutet: im Feed für alle angemeldeten BoulderO-Konten sichtbar — keine externe, frei im Web sichtbare Veröffentlichung. Fotos übernehmen automatisch dieselbe Regel und werden von der API nur für berechtigte Konten ausgeliefert. Eigentümerinnen und Eigentümer können einzelne Fotos jederzeit im Eintragsdetail entfernen.

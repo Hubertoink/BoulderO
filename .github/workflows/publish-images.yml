@@ -38,3 +38,11 @@ jobs:
           file: api/Dockerfile
           push: true
           tags: ghcr.io/hubertoink/bouldero-api:latest
+
+      - name: Build and publish database image
+        uses: docker/build-push-action@v6
+        with:
+          context: db
+          file: db/Dockerfile
+          push: true
+          tags: ghcr.io/hubertoink/bouldero-db:latest
