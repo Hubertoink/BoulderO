@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   "emailVerified" TIMESTAMPTZ,
   image TEXT,
   username TEXT UNIQUE,
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'superadmin')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

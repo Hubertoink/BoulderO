@@ -40,7 +40,7 @@ const navItems = [
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
 
-const appViews = new Set(['map', 'journal', 'social', 'friends', 'profile', 'badges', 'connections'])
+const appViews = new Set(['map', 'journal', 'social', 'friends', 'profile', 'badges', 'connections', 'admin'])
 
 function viewFromLocation() {
   const segment = window.location.pathname.split('/').filter(Boolean)[0]
@@ -411,7 +411,7 @@ function ProfileAvatar({ user, progress, onUpload }) {
   return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event.target.files[0])} /><span>Profilfoto ändern</span></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenSocial, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenSocial, onOpenAdmin, progress, onUploadAvatar }) {
   if (!currentUser) {
     return (
       <main className="view content-view empty-state profile-empty">
@@ -451,6 +451,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
         <section className="profile-actions">
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
           <button onClick={onOpenSocial}><IconUserCircle size={18} /><span><b>Follower & Freunde</b><small>Demo-Profile und geteilte Einträge</small></span><IconChevronRight size={18} /></button>
+          {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>Neue Boulderhallen anlegen</small></span><IconChevronRight size={18} /></button>}
           <button className="profile-actions__logout" onClick={onSignOut}><IconLogout size={18} />Abmelden</button>
         </section>
       </div>
@@ -461,6 +462,27 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
 function BadgesView({ progress, onBack }) {
   const badges = progress?.badges ?? []
   return <main className="view content-view compact-view"><div className="page-intro"><span className="eyebrow">Deine Meilensteine</span><h1>Abzeichen</h1><p>{progress?.unique_spots ?? 0} unterschiedliche Hallen entdeckt. Jedes Abzeichen wird automatisch freigeschaltet.</p></div><section className="badge-grid">{badges.map((badge) => <article className={`badge-card ${badge.unlocked ? 'is-unlocked' : ''}`} key={badge.id}>{badge.unlocked ? <IconMedal size={25} /> : <IconLock size={22} />}<div><span className="eyebrow">{badge.unlocked ? 'Freigeschaltet' : `Noch ${Math.max(0, badge.threshold - (progress?.unique_spots ?? 0))} Hallen`}</span><h2>{badge.name}</h2><p>{badge.threshold} unterschiedliche Hallen</p></div></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+}
+
+function AdminSpotsView({ spots, onCreate, onBack }) {
+  const [form, setForm] = useState({ name: '', district: '', address: '', website: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  function update(field, value) { setForm((current) => ({ ...current, [field]: value })) }
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await onCreate({ ...form, areaSqm: form.areaSqm ? Number(form.areaSqm) : null, latitude: Number(form.latitude), longitude: Number(form.longitude) })
+      setForm({ name: '', district: '', address: '', website: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
+    } catch (submitError) {
+      setError(submitError.message || 'Die Halle konnte nicht angelegt werden.')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <main className="view content-view compact-view admin-view"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{spots.length}</span></div>{spots.map((spot) => <article key={spot.id}><div><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></div><span>{spot.source === 'admin' ? 'manuell' : 'Import'}</span></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
 }
 
 function formatFeedDate(value) {
@@ -589,8 +611,16 @@ function MessageDialog({ user, onClose, onRead }) {
   return <div className="composer-backdrop"><section className="journal-composer message-dialog" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Direktnachrichten</span><h2>{user.name}</h2></div><button className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div>{error && <p className="form-error">{error}</p>}<div className="message-list">{messages.map((message) => { const own = message.sender_id !== user.id; return <article className={own ? 'message message--own' : 'message message--received'} key={message.id}><span>{message.body}</span><small>{own ? 'Du' : user.name.split(' ')[0]} · {formatMessageTime(message.created_at)}</small></article> })}</div><form className="message-compose" onSubmit={send}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Nachricht schreiben …" maxLength="2000" /><button>Senden</button></form></section></div>
 }
 
-function SignInDialog({ configuration, onClose, onDemoSignIn }) {
-  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="Anmelden"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>Anmelden</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{configuration?.demoEnabled && <><p className="auth-copy">Testmodus: Wähle ein Profil, um Folgen, Freunde und geteilte Einträge zu testen.</p><div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div></>}{configuration?.googleEnabled && <a className="google-login" href="/api/auth/signin/google"><IconWorld size={18} />Mit Google fortfahren</a>}<p className="auth-note"><IconLock size={15} />Demo-Profile sind nur lokal aktiv. Google-Anmeldung wird erst mit hinterlegten OAuth-Zugangsdaten angezeigt.</p></section></div>
+function SignInDialog({ configuration, onClose, onDemoSignIn, onSuperAdminSignIn }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  async function submitSuperAdmin(event) {
+    event.preventDefault()
+    setError('')
+    try { await onSuperAdminSignIn(email, password) } catch { setError('E-Mail oder Passwort sind nicht korrekt.') }
+  }
+  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="Anmelden"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>Anmelden</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{configuration?.superAdminEnabled && <form className="admin-login" onSubmit={submitSuperAdmin}><p className="auth-copy"><b>Verwaltung</b> · temporärer Superadmin-Zugang</p><label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="form-field"><span>Passwort</span><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button">Als Verwaltung anmelden</button></form>}{configuration?.demoEnabled && <><p className="auth-copy">Testmodus: Wähle ein Profil, um Folgen, Freunde und geteilte Einträge zu testen.</p><div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div></>}{configuration?.googleEnabled && <a className="google-login" href="/api/auth/signin/google"><IconWorld size={18} />Mit Google fortfahren</a>}<p className="auth-note"><IconLock size={15} />Demo-Profile sind nur lokal aktiv. Google-Anmeldung wird erst mit hinterlegten OAuth-Zugangsdaten angezeigt.</p></section></div>
 }
 
 function App() {
@@ -693,6 +723,24 @@ function App() {
     await refreshSession()
     setAuthOpen(false)
     showToast('Demo-Profil ist aktiv')
+  }
+
+  async function signInSuperAdmin(email, password) {
+    const csrfResponse = await fetch('/api/auth/csrf')
+    const { csrfToken } = await csrfResponse.json()
+    await fetch('/api/auth/callback/superadmin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin, email, password }),
+      redirect: 'manual',
+    })
+    const sessionResponse = await fetch('/api/me')
+    if (!sessionResponse.ok) throw new Error('authentication_failed')
+    const { user } = await sessionResponse.json()
+    setCurrentUser(user)
+    await loadPrivateData()
+    setAuthOpen(false)
+    showToast('Verwaltungskonto ist aktiv')
   }
 
   async function signOut() {
@@ -798,6 +846,18 @@ function App() {
     showToast(user.following ? `Du folgst ${user.name} nicht mehr` : `Du folgst jetzt ${user.name}`)
   }
 
+  async function createSpot(input) {
+    const response = await fetch('/api/admin/spots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.error === 'superadmin_required' ? 'Dir fehlen die Verwaltungsrechte.' : 'Bitte prüfe die Eingaben.')
+    }
+    const { spot } = await response.json()
+    await loadPrivateData()
+    setSelectedId(spot.id)
+    showToast(`${spot.name} wurde angelegt`)
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -807,8 +867,9 @@ function App() {
       </header>
       {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} onSelectSpot={selectSpot} onVisit={openComposer} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenSocial={() => navigate('friends')} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenSocial={() => navigate('friends')} onOpenAdmin={() => navigate('admin')} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} onCreate={createSpot} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
@@ -817,7 +878,7 @@ function App() {
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} />}
       {selectedEntry && <JournalEntryDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} onUpdate={updateJournalEntry} />}
-      {authOpen && <SignInDialog configuration={authConfiguration} onClose={() => setAuthOpen(false)} onDemoSignIn={signInDemo} />}
+      {authOpen && <SignInDialog configuration={authConfiguration} onClose={() => setAuthOpen(false)} onDemoSignIn={signInDemo} onSuperAdminSignIn={signInSuperAdmin} />}
       {messageUser && <MessageDialog user={messageUser} onClose={() => setMessageUser(null)} onRead={async () => { const response = await fetch('/api/social/friends/summary'); if (response.ok) setFriendSummary(await response.json()) }} />}
       {lightboxImage && <Lightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />}
     </div>

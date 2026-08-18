@@ -16,11 +16,17 @@ const uploadRoot = process.env.UPLOAD_DIR ?? '/app/uploads'
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
 const demoMode = process.env.DEMO_MODE === 'true'
+const superAdminEmail = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase()
+const superAdminPassword = process.env.SUPERADMIN_PASSWORD
+const superAdminEnabled = Boolean(superAdminEmail && superAdminPassword)
 const demoUsers = [
-  { id: '3b9a8c88-779d-4cb9-a950-23c8f4559011', name: 'Mira Keller', email: 'mira@bouldero.local', username: 'miraklettert', image: null },
-  { id: '7c5e37a2-1f52-4ce4-b204-412b2e8bc902', name: 'Alex Winter', email: 'alex@bouldero.local', username: 'alexziehtdurch', image: null },
-  { id: 'f0dc01b0-4cc8-4266-bd3f-bbc9a4635503', name: 'Lea Hofmann', email: 'lea@bouldero.local', username: 'leahochhinaus', image: null },
+  { id: '3b9a8c88-779d-4cb9-a950-23c8f4559011', name: 'Mira Keller', email: 'mira@bouldero.local', username: 'miraklettert', image: null, role: 'member' },
+  { id: '7c5e37a2-1f52-4ce4-b204-412b2e8bc902', name: 'Alex Winter', email: 'alex@bouldero.local', username: 'alexziehtdurch', image: null, role: 'member' },
+  { id: 'f0dc01b0-4cc8-4266-bd3f-bbc9a4635503', name: 'Lea Hofmann', email: 'lea@bouldero.local', username: 'leahochhinaus', image: null, role: 'member' },
 ]
+const superAdmin = superAdminEnabled
+  ? { id: '0bb3b9c3-e6eb-4384-9ad4-7cb04ec18630', name: 'BoulderO Verwaltung', email: superAdminEmail, username: 'bouldero_admin', image: null, role: 'superadmin' }
+  : null
 const providers = []
 
 if (demoMode) {
@@ -29,6 +35,29 @@ if (demoMode) {
     name: 'Demo-Profil',
     credentials: { profile: { label: 'Profil', type: 'text' } },
     authorize: async (credentials) => demoUsers.find((user) => user.id === credentials?.profile) ?? null,
+  }))
+}
+
+function matchesSecret(value, expected) {
+  const supplied = Buffer.from(value ?? '')
+  const secret = Buffer.from(expected ?? '')
+  return supplied.length === secret.length && crypto.timingSafeEqual(supplied, secret)
+}
+
+if (superAdminEnabled) {
+  providers.push(Credentials({
+    id: 'superadmin',
+    name: 'BoulderO Verwaltung',
+    credentials: {
+      email: { label: 'E-Mail', type: 'email' },
+      password: { label: 'Passwort', type: 'password' },
+    },
+    authorize: async (credentials) => (
+      matchesSecret(String(credentials?.email).trim().toLowerCase(), superAdminEmail)
+      && matchesSecret(credentials?.password, superAdminPassword)
+        ? superAdmin
+        : null
+    ),
   }))
 }
 
@@ -52,14 +81,14 @@ function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 }
 
-async function ensureDemoUsers() {
-  if (!demoMode) return
-  for (const user of demoUsers) {
+async function ensureManagedUsers() {
+  const users = [...(demoMode ? demoUsers : []), ...(superAdmin ? [superAdmin] : [])]
+  for (const user of users) {
     await pool.query(
-      `INSERT INTO users (id, name, email, username)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, username = EXCLUDED.username`,
-      [user.id, user.name, user.email, user.username],
+      `INSERT INTO users (id, name, email, username, role)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, username = EXCLUDED.username, role = EXCLUDED.role`,
+      [user.id, user.name, user.email, user.username, user.role],
     )
   }
 }
@@ -98,7 +127,7 @@ async function currentUser(req) {
   const session = await getSession(req, authConfig)
   if (!session?.user?.email) return null
   const result = await pool.query(
-    'SELECT id, name, email, image, username FROM users WHERE email = $1',
+    'SELECT id, name, email, image, username, role FROM users WHERE email = $1',
     [session.user.email],
   )
   return result.rows[0] ?? null
@@ -110,6 +139,11 @@ const requireUser = asyncRoute(async (req, res, next) => {
   req.user = user
   next()
 })
+
+const requireSuperAdmin = [requireUser, (req, res, next) => {
+  if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'superadmin_required' })
+  next()
+}]
 
 const imageUpload = multer({
   storage: multer.diskStorage({
@@ -140,6 +174,7 @@ app.get('/auth/configuration', (_req, res) => {
   res.json({
     demoEnabled: demoMode,
     googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    superAdminEnabled,
     demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
   })
 })
@@ -158,7 +193,7 @@ app.patch('/me', requireUser, asyncRoute(async (req, res) => {
     `UPDATE users
        SET name = COALESCE($2, name), username = COALESCE($3, username)
      WHERE id = $1
-     RETURNING id, name, email, image, username`,
+       RETURNING id, name, email, image, username, role`,
     [req.user.id, input.name ?? null, input.username ?? null],
   )
   res.json({ user: result.rows[0] })
@@ -170,7 +205,7 @@ app.post('/me/avatar', requireUser, imageUpload.single('avatar'), asyncRoute(asy
   const storageKey = path.relative(uploadRoot, file.path).split(path.sep).join('/')
   const result = await pool.query(
     `UPDATE users SET image = $2 WHERE id = $1
-     RETURNING id, name, email, image, username`,
+    RETURNING id, name, email, image, username, role`,
     [req.user.id, storageKey],
   )
   res.status(201).json({ user: result.rows[0] })
@@ -404,6 +439,27 @@ app.get('/spots', asyncRoute(async (_req, res) => {
   res.json({ spots: result.rows })
 }))
 
+app.post('/admin/spots', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const input = z.object({
+    name: z.string().trim().min(2).max(120),
+    district: z.string().trim().min(2).max(120),
+    address: z.string().trim().min(5).max(300),
+    website: z.string().trim().url().max(500).optional().or(z.literal('')),
+    openingHours: z.string().trim().max(300).optional(),
+    areaSqm: z.number().int().min(0).max(1000000).nullable().optional(),
+    latitude: z.number().gte(-90).lte(90),
+    longitude: z.number().gte(-180).lte(180),
+  }).parse(req.body)
+  const result = await pool.query(
+    `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, coordinates, source, status)
+     VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($8, $7), 4326)::geography, 'admin', 'active')
+     RETURNING id, name, district, address, website, opening_hours, area_sqm,
+       ST_Y(coordinates::geometry) AS latitude, ST_X(coordinates::geometry) AS longitude`,
+    [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.latitude, input.longitude],
+  )
+  res.status(201).json({ spot: result.rows[0] })
+}))
+
 app.get('/visits', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
     SELECT v.id, v.spot_id, v.visited_at, v.created_at, s.name AS spot_name,
@@ -558,5 +614,5 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'internal_error' })
 })
 
-await ensureDemoUsers()
+await ensureManagedUsers()
 app.listen(port, () => console.log(`BoulderO API listening on ${port}`))

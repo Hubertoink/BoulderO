@@ -62,6 +62,8 @@ AUTH_SECRET="..." POSTGRES_PASSWORD="..." \
 
 Der Webservice wird anschließend über einen Mittwald-Virtualhost auf Port `80/tcp` veröffentlicht. Für den ersten Web-Test ist `DEMO_MODE=true` vorgesehen; für eine reale Anmeldung ist ein eigener OAuth-Client zu hinterlegen und der Testmodus auszuschalten.
 
+Für die vorläufige Verwaltung kann zusätzlich ein passwortgeschütztes Superadmin-Konto aktiviert werden. Die Werte `SUPERADMIN_EMAIL` und `SUPERADMIN_PASSWORD` müssen ausschließlich in der Deployment-Umgebung gesetzt werden. Das Konto erhält Zugriff auf „Hallen verwalten“ und kann neue Hallen mit Adresse und Koordinaten anlegen; gewöhnliche Konten erhalten hierfür keine API-Berechtigung.
+
 ## Sichtbarkeit von Tagebüchern und Fotos
 
 Beim Speichern und im Detail eines Tagebucheintrags kann dessen Sichtbarkeit gewählt werden: privat, Freunde (beidseitiges Folgen), Follower oder BoulderO Community. Community bedeutet: im Feed für alle angemeldeten BoulderO-Konten sichtbar — keine externe, frei im Web sichtbare Veröffentlichung. Fotos übernehmen automatisch dieselbe Regel und werden von der API nur für berechtigte Konten ausgeliefert. Eigentümerinnen und Eigentümer können einzelne Fotos jederzeit im Eintragsdetail entfernen.

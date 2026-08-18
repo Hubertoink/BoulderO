@@ -23,6 +23,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       DEMO_MODE: ${DEMO_MODE:-true}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
       UPLOAD_DIR: /app/uploads
     volumes:
       - bouldero_uploads:/app/uploads
