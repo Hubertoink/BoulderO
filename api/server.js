@@ -184,6 +184,50 @@ const imageUpload = multer({
   fileFilter: (_req, file, callback) => callback(null, /^image\/(jpeg|png|webp|heic)$/.test(file.mimetype)),
 })
 
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => callback(null, /^(text\/csv|application\/csv|application\/vnd\.ms-excel)$/.test(file.mimetype) || file.originalname.toLowerCase().endsWith('.csv')),
+})
+
+const spotInputSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  district: z.string().trim().min(2).max(120),
+  address: z.string().trim().min(5).max(300),
+  website: z.string().trim().url().max(500).optional().or(z.literal('')),
+  openingHours: z.string().trim().max(300).optional(),
+  areaSqm: z.number().int().min(0).max(1000000).nullable().optional(),
+  imageUrl: z.string().trim().url().max(1000).optional().or(z.literal('')),
+  latitude: z.number().gte(-90).lte(90),
+  longitude: z.number().gte(-180).lte(180),
+})
+
+function parseCsv(text) {
+  const rows = []
+  let row = []
+  let value = ''
+  let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') { value += '"'; index += 1 } else quoted = !quoted
+    } else if (character === ',' && !quoted) { row.push(value); value = ''
+    } else if (character === '\n' && !quoted) { row.push(value); rows.push(row); row = []; value = ''
+    } else if (character !== '\r') value += character
+  }
+  if (quoted) throw new Error('Nicht geschlossene Anführungszeichen in der CSV-Datei.')
+  if (value || row.length) { row.push(value); rows.push(row) }
+  return rows.filter((fields) => fields.some((field) => field.trim()))
+}
+
+function numberFromCsv(value, field, rowNumber, { optional = false, integer = false } = {}) {
+  const normalized = String(value ?? '').trim().replace(',', '.')
+  if (!normalized && optional) return null
+  const number = Number(normalized)
+  if (!Number.isFinite(number) || (integer && !Number.isInteger(number))) throw new Error(`Zeile ${rowNumber}: ${field} ist ungültig.`)
+  return number
+}
+
 app.get('/health', asyncRoute(async (_req, res) => {
   await pool.query('SELECT 1')
   res.json({ status: 'ok' })
@@ -436,7 +480,7 @@ app.post('/messages/:userId', requireUser, asyncRoute(async (req, res) => {
 
 app.get('/spots', asyncRoute(async (_req, res) => {
   const result = await pool.query(`
-    SELECT id, name, district, address, website, opening_hours, area_sqm,
+    SELECT id, name, district, address, website, opening_hours, area_sqm, image_url, source,
            ST_Y(coordinates::geometry) AS latitude,
            ST_X(coordinates::geometry) AS longitude
       FROM spots
@@ -447,24 +491,59 @@ app.get('/spots', asyncRoute(async (_req, res) => {
 }))
 
 app.post('/admin/spots', ...requireSuperAdmin, asyncRoute(async (req, res) => {
-  const input = z.object({
-    name: z.string().trim().min(2).max(120),
-    district: z.string().trim().min(2).max(120),
-    address: z.string().trim().min(5).max(300),
-    website: z.string().trim().url().max(500).optional().or(z.literal('')),
-    openingHours: z.string().trim().max(300).optional(),
-    areaSqm: z.number().int().min(0).max(1000000).nullable().optional(),
-    latitude: z.number().gte(-90).lte(90),
-    longitude: z.number().gte(-180).lte(180),
-  }).parse(req.body)
+  const input = spotInputSchema.parse(req.body)
   const result = await pool.query(
-    `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, coordinates, source, status)
-     VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($8, $7), 4326)::geography, 'admin', 'active')
-     RETURNING id, name, district, address, website, opening_hours, area_sqm,
+    `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, image_url, coordinates, source, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, 'admin', 'active')
+     RETURNING id, name, district, address, website, opening_hours, area_sqm, image_url, source,
        ST_Y(coordinates::geometry) AS latitude, ST_X(coordinates::geometry) AS longitude`,
-    [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.latitude, input.longitude],
+    [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
   )
   res.status(201).json({ spot: result.rows[0] })
+}))
+
+app.post('/admin/spots/import', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'csv_file_required' })
+  const rows = parseCsv(req.file.buffer.toString('utf8'))
+  if (rows.length < 2) return res.status(400).json({ error: 'csv_rows_required' })
+  if (rows.length > 501) return res.status(400).json({ error: 'csv_limit_exceeded' })
+  const headers = rows[0].map((value) => value.trim().replace(/^\uFEFF/, '').toLowerCase())
+  const required = ['name', 'district', 'address', 'latitude', 'longitude']
+  const missing = required.filter((name) => !headers.includes(name))
+  if (missing.length) return res.status(400).json({ error: 'csv_headers_invalid', missing })
+  const inputs = rows.slice(1).map((values, index) => {
+    const record = { rowNumber: index + 2 }
+    headers.forEach((header, column) => { record[header] = values[column] ?? '' })
+    return spotInputSchema.parse({
+      name: record.name,
+      district: record.district,
+      address: record.address,
+      website: record.website || '',
+      openingHours: record.opening_hours || '',
+      areaSqm: numberFromCsv(record.area_sqm, 'area_sqm', record.rowNumber, { optional: true, integer: true }),
+      imageUrl: record.image_url || '',
+      latitude: numberFromCsv(record.latitude, 'latitude', record.rowNumber),
+      longitude: numberFromCsv(record.longitude, 'longitude', record.rowNumber),
+    })
+  })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    for (const input of inputs) {
+      await client.query(
+        `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, image_url, coordinates, source, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, 'admin-import', 'active')`,
+        [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+  res.status(201).json({ imported: inputs.length })
 }))
 
 app.get('/visits', requireUser, asyncRoute(async (req, res) => {

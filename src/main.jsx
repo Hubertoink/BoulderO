@@ -10,6 +10,7 @@ import {
   IconChevronRight,
   IconCompass,
   IconCurrentLocation,
+  IconDownload,
   IconEye,
   IconLock,
   IconMapPin,
@@ -117,7 +118,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, userLocation }) {
 function SpotSheet({ spot, onVisit }) {
   const visited = spot.visits > 0
   return (
-    <aside className="spot-sheet">
+    <aside className="spot-sheet" style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
         <span className="eyebrow">{spot.district} · {spot.distance}</span>
         {visited && <span className="visited-label"><IconCheck size={14} /> besucht</span>}
@@ -371,7 +372,6 @@ function JournalView({ currentUser, journalVisits, onSignIn, onOpenComposer, onO
         <div>
         <span className="eyebrow">Dein Verlauf</span>
         <h1>Tagebuch</h1>
-        <p>{visitTotal} Besuche in {uniqueHallCount} Hallen. Du bestimmst für jeden Eintrag die Sichtbarkeit.</p>
         </div>
         <button className="journal-add" onClick={onOpenComposer}><IconPlus size={18} />Eintrag</button>
       </div>
@@ -434,7 +434,6 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
           <div className="profile-hero__shade" />
           <div className="profile-hero__content">
             <ProfileAvatar user={currentUser} progress={progress} onUpload={onUploadAvatar} />
-            <span className="eyebrow eyebrow--light">Dein Profil</span>
             <h1>{currentUser.name}</h1>
             <p>@{currentUser.username ?? 'boulderfan'} · Mannheim</p>
           </div>
@@ -464,10 +463,22 @@ function BadgesView({ progress, onBack }) {
   return <main className="view content-view compact-view"><div className="page-intro"><span className="eyebrow">Deine Meilensteine</span><h1>Abzeichen</h1><p>{progress?.unique_spots ?? 0} unterschiedliche Hallen entdeckt. Jedes Abzeichen wird automatisch freigeschaltet.</p></div><section className="badge-grid">{badges.map((badge) => <article className={`badge-card ${badge.unlocked ? 'is-unlocked' : ''}`} key={badge.id}>{badge.unlocked ? <IconMedal size={25} /> : <IconLock size={22} />}<div><span className="eyebrow">{badge.unlocked ? 'Freigeschaltet' : `Noch ${Math.max(0, badge.threshold - (progress?.unique_spots ?? 0))} Hallen`}</span><h2>{badge.name}</h2><p>{badge.threshold} unterschiedliche Hallen</p></div></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
 }
 
-function AdminSpotsView({ spots, onCreate, onBack }) {
-  const [form, setForm] = useState({ name: '', district: '', address: '', website: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
+function downloadHallTemplate() {
+  const csv = 'name,district,address,latitude,longitude,opening_hours,area_sqm,website,image_url\nBeispiel Boulderhalle,Jungbusch,Beispielstraße 12,49.4964,8.4548,Mo–Fr 10:00–22:00,850,https://example.com,https://images.example.com/halle.jpg\n'
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'bouldero-hallen-import-vorlage.csv'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function AdminSpotsView({ spots, onCreate, onImport, onBack }) {
+  const [form, setForm] = useState({ name: '', district: '', address: '', website: '', imageUrl: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
+  const csvInput = useRef(null)
   function update(field, value) { setForm((current) => ({ ...current, [field]: value })) }
   async function submit(event) {
     event.preventDefault()
@@ -475,14 +486,24 @@ function AdminSpotsView({ spots, onCreate, onBack }) {
     setError('')
     try {
       await onCreate({ ...form, areaSqm: form.areaSqm ? Number(form.areaSqm) : null, latitude: Number(form.latitude), longitude: Number(form.longitude) })
-      setForm({ name: '', district: '', address: '', website: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
+      setForm({ name: '', district: '', address: '', website: '', imageUrl: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
     } catch (submitError) {
       setError(submitError.message || 'Die Halle konnte nicht angelegt werden.')
     } finally {
       setSaving(false)
     }
   }
-  return <main className="view content-view compact-view admin-view"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{spots.length}</span></div>{spots.map((spot) => <article key={spot.id}><div><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></div><span>{spot.source === 'admin' ? 'manuell' : 'Import'}</span></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+  async function importCsv(event) {
+    const [file] = event.target.files
+    if (!file) return
+    setImporting(true)
+    setError('')
+    try { await onImport(file) } catch (importError) { setError(importError.message || 'Der Import konnte nicht verarbeitet werden.') } finally {
+      setImporting(false)
+      event.target.value = ''
+    }
+  }
+  return <main className="view content-view compact-view admin-view"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label><label className="form-field"><span>Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} placeholder="https://…/halle.jpg" /><small>Wird im Karten-Detail als Hintergrundbild verwendet.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{spots.length}</span></div>{spots.map((spot) => <article key={spot.id}><div><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></div><span>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : 'Import'}</span></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
 }
 
 function formatFeedDate(value) {
@@ -692,7 +713,7 @@ function App() {
     setJournalVisits(visits)
     setSpots(apiSpots.map((spot) => {
       const fallback = initialSpots.find((item) => item.id === spot.id) ?? {}
-      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: `${spot.area_sqm.toLocaleString('de-DE')} m²`, visits: countBySpot[spot.id] ?? 0 }
+      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: `${Number(spot.area_sqm ?? 0).toLocaleString('de-DE')} m²`, visits: countBySpot[spot.id] ?? 0 }
     }))
   }
 
@@ -858,6 +879,21 @@ function App() {
     showToast(`${spot.name} wurde angelegt`)
   }
 
+  async function importSpots(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch('/api/admin/spots/import', { method: 'POST', body: formData })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      if (payload.error === 'csv_headers_invalid') throw new Error(`Diese Spalten fehlen: ${payload.missing.join(', ')}`)
+      if (payload.error === 'csv_limit_exceeded') throw new Error('Pro Import sind höchstens 500 Hallen möglich.')
+      throw new Error('Die CSV-Datei konnte nicht importiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
+    }
+    const { imported } = await response.json()
+    await loadPrivateData()
+    showToast(`${imported} Hallen wurden importiert`)
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -869,7 +905,7 @@ function App() {
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenSocial={() => navigate('friends')} onOpenAdmin={() => navigate('admin')} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
-      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} onCreate={createSpot} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} onCreate={createSpot} onImport={importSpots} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">

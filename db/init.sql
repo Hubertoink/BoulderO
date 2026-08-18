@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS spots (
   website TEXT,
   opening_hours TEXT,
   area_sqm INTEGER,
+  image_url TEXT,
   coordinates GEOGRAPHY(POINT, 4326) NOT NULL,
   source TEXT NOT NULL DEFAULT 'seed',
   source_external_id TEXT,
