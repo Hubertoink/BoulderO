@@ -411,7 +411,7 @@ function ProfileAvatar({ user, progress, onUpload }) {
   return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event.target.files[0])} /><span>Profilfoto ändern</span></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenSocial, onOpenAdmin, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenAdmin, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, progress, onUploadAvatar }) {
   if (!currentUser) {
     return (
       <main className="view content-view empty-state profile-empty">
@@ -449,7 +449,6 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
         </section>
         <section className="profile-actions">
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
-          <button onClick={onOpenSocial}><IconUserCircle size={18} /><span><b>Follower & Freunde</b><small>Demo-Profile und geteilte Einträge</small></span><IconChevronRight size={18} /></button>
           <button onClick={onSuggestSpot}><IconMapPin size={18} /><span><b>Halle melden</b><small>Schlage eine Boulderhalle zur Prüfung vor</small></span><IconChevronRight size={18} /></button>
           {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>{pendingSuggestionCount > 0 ? `${pendingSuggestionCount} Hallenvorschlag${pendingSuggestionCount === 1 ? '' : 'e'} warten auf Prüfung` : 'Neue Boulderhallen anlegen'}</small></span>{pendingSuggestionCount > 0 && <b className="admin-count-badge">{pendingSuggestionCount > 99 ? '99+' : pendingSuggestionCount}</b>}<IconChevronRight size={18} /></button>}
           {currentUser.role === 'member' && <button onClick={onChangePassword}><IconLock size={18} /><span><b>Passwort ändern</b><small>Dein Konto sicher halten</small></span><IconChevronRight size={18} /></button>}
@@ -717,7 +716,11 @@ function FriendsView({ onOpenMessages, onSummaryChange }) {
       onSummaryChange(await summaryResponse.json())
     } catch (loadError) { setError(loadError.message) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const interval = window.setInterval(load, 15000)
+    return () => window.clearInterval(interval)
+  }, [])
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); return undefined }
     const timer = window.setTimeout(async () => {
@@ -748,7 +751,11 @@ function MessageDialog({ user, onClose, onRead }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
   async function load() { const response = await fetch(`/api/messages/${user.id}`); if (response.ok) { setMessages((await response.json()).messages); onRead() } else setError('Nachrichten benötigen gegenseitiges Folgen.') }
-  useEffect(() => { load() }, [user.id])
+  useEffect(() => {
+    load()
+    const interval = window.setInterval(load, 8000)
+    return () => window.clearInterval(interval)
+  }, [user.id])
   async function send(event) { event.preventDefault(); if (!draft.trim()) return; const response = await fetch(`/api/messages/${user.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: draft.trim() }) }); if (!response.ok) return setError('Nachricht konnte nicht gesendet werden.'); setDraft(''); await load() }
   return <div className="composer-backdrop"><section className="journal-composer message-dialog" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Direktnachrichten</span><h2>{user.name}</h2></div><button className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div>{error && <p className="form-error">{error}</p>}<div className="message-list">{messages.map((message) => { const own = message.sender_id !== user.id; return <article className={own ? 'message message--own' : 'message message--received'} key={message.id}><span>{message.body}</span><small>{own ? 'Du' : user.name.split(' ')[0]} · {formatMessageTime(message.created_at)}</small></article> })}</div><form className="message-compose" onSubmit={send}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Nachricht schreiben …" maxLength="2000" /><button>Senden</button></form></section></div>
 }
@@ -897,6 +904,18 @@ function App() {
     fetch('/api/auth/configuration').then((response) => response.ok ? response.json() : null).then(setAuthConfiguration).catch(() => undefined)
     refreshSession().catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (!currentUser) return undefined
+    async function refreshFriendSummary() {
+      const response = await fetch('/api/social/friends/summary')
+      if (response.ok) setFriendSummary(await response.json())
+    }
+    refreshFriendSummary()
+    const interval = window.setInterval(refreshFriendSummary, 15000)
+    window.addEventListener('focus', refreshFriendSummary)
+    return () => { window.clearInterval(interval); window.removeEventListener('focus', refreshFriendSummary) }
+  }, [currentUser?.id])
 
   async function signInDemo(profileId) {
     const csrfResponse = await fetch('/api/auth/csrf')
@@ -1155,13 +1174,13 @@ function App() {
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} onSelectSpot={selectSpot} onVisit={openComposer} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenSocial={() => navigate('friends')} onOpenAdmin={() => navigate('admin')} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
-        {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && friendSummary.unread_messages > 0 && <b className="nav-badge">{friendSummary.unread_messages > 9 ? '9+' : friendSummary.unread_messages}</b>}</span><span>{label}</span></button>)}
+        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}</span><span>{label}</span></button> })}
       </nav>
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} />}
