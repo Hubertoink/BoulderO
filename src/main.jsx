@@ -935,6 +935,10 @@ function App() {
 
   function navigate(view, { replace = false } = {}) {
     if (!appViews.has(view)) return
+    setComposerOpen(false)
+    setComposerSpotId(null)
+    setPlanDialogSpotId(null)
+    setComposerSurface('dialog')
     const current = window.history.state
     const position = current?.position ?? 0
     const nextState = { boulderO: true, view, position: replace ? position : position + 1 }
@@ -954,6 +958,9 @@ function App() {
     if (!window.history.state?.boulderO) window.history.replaceState({ boulderO: true, view: initialView, position: 0 }, '', `${pathForView(initialView)}${window.location.search}`)
     function onPopState() {
       setComposerOpen(false)
+      setComposerSpotId(null)
+      setPlanDialogSpotId(null)
+      setComposerSurface('dialog')
       setSelectedEntry(null)
       setMessageUser(null)
       setLightboxImage(null)
@@ -1135,6 +1142,7 @@ function App() {
       showToast('Melde dich an, um Besuche dauerhaft zu speichern')
       return
     }
+    setPlanDialogSpotId(null)
     setComposerSpotId(spotId)
     setComposerSurface(spotId ? 'map' : 'dialog')
     setComposerOpen(true)
@@ -1142,11 +1150,16 @@ function App() {
 
   function openPlan(spotId) {
     if (!currentUser) { setAuthOpen(true); showToast('Melde dich an, um einen Besuch zu planen'); return }
+    setComposerOpen(false)
+    setComposerSpotId(null)
+    setComposerSurface('dialog')
     setPlanDialogSpotId(spotId)
   }
 
   function openCorrection(spotId) {
     if (!currentUser) { setAuthOpen(true); showToast('Melde dich an, um einen Datenfehler zu melden'); return }
+    setComposerOpen(false)
+    setPlanDialogSpotId(null)
     setCorrectionDialogSpotId(spotId)
   }
 
