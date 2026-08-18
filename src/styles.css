@@ -166,3 +166,37 @@ button { cursor: pointer; }
 .audit-event { display: inline-flex; padding: 4px 7px; border-radius: 999px; font-size: 10px; font-weight: 750; }
 .audit-event--registration { background: #e4f0e7; color: #2e6748; }
 .audit-event--login { background: #e4edf4; color: var(--yale-blue); }
+/* Der Vollbild-Picker nutzt die verfügbare Dialoghöhe für die Karte aus. */
+.location-picker-dialog {
+  height: min(720px, calc(100vh - 40px));
+  min-height: 0;
+}
+
+.location-picker-map-wrap {
+  min-height: min(520px, calc(100vh - 170px));
+  flex-basis: min(520px, calc(100vh - 170px));
+}
+
+.location-picker-map {
+  min-height: min(520px, calc(100vh - 170px));
+}
+
+@media (max-width: 560px) {
+  .location-picker-backdrop {
+    align-items: stretch;
+  }
+
+  .location-picker-dialog {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .location-picker-map-wrap {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .location-picker-map {
+    min-height: 100%;
+  }
+}
