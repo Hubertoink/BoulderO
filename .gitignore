@@ -13,6 +13,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Persönliche Quell-Arbeitsmappen; die bereinigten Stammdaten liegen in data/.
+assets/*.xlsx
+
 # Local uploads and database data
 uploads/
 postgres-data/

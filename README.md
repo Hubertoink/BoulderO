@@ -72,6 +72,10 @@ Der Feed unterstützt Likes und Kommentare. Direktnachrichten sind bewusst auf g
 
 ## Hallenimport
 
+Die versionierte Datei [`data/StammBoulderhallen.csv`](data/StammBoulderhallen.csv) ist die zentrale Quelle der Standardhallen. Sie wird bei jedem API-Start idempotent synchronisiert. Neue Einträge werden angelegt, bestehende Stammhallen aus der CSV aktualisiert; hochgeladene Hallenbilder, Besuche und manuelle Archivierungen bleiben erhalten. Falls eine entsprechende Halle bereits manuell angelegt wurde, übernimmt der Seeder sie über Name und Koordinatennähe, anstatt ein Duplikat zu erstellen.
+
+Die CSV enthält eine stabile `source_external_id`. Änderungen an den Stammdaten erfolgen daher direkt per Pull Request bzw. Commit an dieser Datei und werden beim nächsten Deployment reproduzierbar in die Datenbank übertragen.
+
 Die spätere CSV wird idempotent importiert; wiederholte Importe aktualisieren Datensätze anhand von `source_external_id`, `id` oder einer aus Name und Koordinaten abgeleiteten Kennung. Erwartete Pflichtfelder sind `name`, `latitude` und `longitude`; optional sind unter anderem `district`, `address`, `website`, `opening_hours`, `area_sqm` und `source_license`.
 
 Eine CSV wird zunächst in den API-Container kopiert und dann importiert:

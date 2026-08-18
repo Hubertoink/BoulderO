@@ -83,9 +83,19 @@ app.get('/api/auth/configuration', (_req, res) => {
     demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
   })
 })
+app.get('/auth/configuration', (_req, res) => {
+  res.json({
+    demoEnabled: demoMode,
+    googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    superAdminEnabled,
+    demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
+  })
+})
 // Auth.js must retain the public `/api/auth` path for CSRF cookies, sessions,
 // and OAuth callbacks. The other API routes are defined without that prefix.
 app.use('/api/auth', ExpressAuth(authConfig))
+// The local Nginx reverse proxy strips `/api`, so support its internal path too.
+app.use('/auth', ExpressAuth(authConfig))
 // Mittwald forwards the matching `/api` path prefix to the container. Strip it
 // for all non-auth routes so they work locally and behind that ingress.
 app.use((req, _res, next) => {
