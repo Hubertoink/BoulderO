@@ -57,6 +57,10 @@ Gestaltungswerte liegen als CSS-Variablen vor (`--space-*`, `--radius-*`, Farb-T
 
 Bevor ein neuer Stil ergänzt wird, wird geprüft, ob einer dieser Bausteine oder ein vorhandenes Token den Fall bereits abdeckt.
 
+## Überschriften
+
+Über-Überschriften (Eyebrows) werden nicht als dekorative Einleitung verwendet. Überschriften stehen direkt für sich. Ein `.eyebrow` ist ausschließlich zulässig, wenn er eine eigenständige, relevante Metainformation vermittelt, etwa einen Status, eine Kategorie oder einen Zeitpunkt. Dialoge und Formulare verwenden grundsätzlich nur ihre Hauptüberschrift.
+
 ## Bildsprache
 
 Die vorhandenen Bergbilder tragen die emotionale Seite der Anwendung und werden sparsam auf Einstiegs- und Profilflächen eingesetzt. Produktfunktionen, insbesondere Karte und Besuchsstatus, bleiben bildarm und fokussiert.
