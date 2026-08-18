@@ -121,11 +121,20 @@ function BoulderMap({ spots, selectedSpot, onSelect, userLocation }) {
 
 function SpotSheet({ spot, onVisit, onPlan, onReport }) {
   const visited = spot.visits > 0
+  const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
+  const daysSinceLastVisit = lastVisitDate ? Math.floor((Date.now() - lastVisitDate.getTime()) / 86400000) : 0
+  const visitLabel = lastVisitDate && daysSinceLastVisit > 14
+    ? `besucht am ${new Intl.DateTimeFormat('de-DE').format(lastVisitDate)}`
+    : 'besucht'
+  const websiteLabel = (() => {
+    if (!spot.website) return 'Keine Website'
+    try { return new URL(spot.website).hostname.replace(/^www\./, '') } catch { return spot.website }
+  })()
   return (
     <aside className="spot-sheet" style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
         <span className="eyebrow">{spot.district} · {spot.distance}</span>
-        {visited && <span className="visited-label"><IconCheck size={14} /> besucht</span>}
+        {visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}
       </div>
       <div className="spot-sheet__title-row">
         <div>
@@ -135,7 +144,7 @@ function SpotSheet({ spot, onVisit, onPlan, onReport }) {
       </div>
       <div className="spot-meta">
         <span><b>Heute</b>{spot.open}</span>
-        <span><b>Fläche</b>{spot.size}</span>
+        <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
         <span><b>Deine Besuche</b>{spot.visits}</span>
       </div>
       <button className={`visit-button ${visited ? 'is-visited' : ''}`} onClick={() => onVisit(spot.id)}>
@@ -512,8 +521,8 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
           <button onClick={onSuggestSpot}><IconMapPin size={18} /><span><b>Halle melden</b><small>Schlage eine Boulderhalle zur Prüfung vor</small></span><IconChevronRight size={18} /></button>
           {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>{spots.length} Hallen · {pendingSuggestionCount + pendingCorrectionCount} Hinweis{pendingSuggestionCount + pendingCorrectionCount === 1 ? '' : 'e'} offen</small></span>{pendingSuggestionCount + pendingCorrectionCount > 0 && <b className="admin-count-badge">{pendingSuggestionCount + pendingCorrectionCount > 99 ? '99+' : pendingSuggestionCount + pendingCorrectionCount}</b>}<IconChevronRight size={18} /></button>}
           {currentUser.role === 'member' && <button onClick={onChangePassword}><IconLock size={18} /><span><b>Passwort ändern</b><small>Dein Konto sicher halten</small></span><IconChevronRight size={18} /></button>}
-          <div className="profile-legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div>
           <button className="profile-actions__logout" onClick={onSignOut}><IconLogout size={18} />Abmelden</button>
+          <div className="profile-legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div>
         </section>
       </div>
     </main>
@@ -998,10 +1007,14 @@ function App() {
     const { visits } = await visitResponse.json()
     setProgress(await progressResponse.json())
     const countBySpot = visits.reduce((counts, visit) => ({ ...counts, [visit.spot_id]: (counts[visit.spot_id] ?? 0) + 1 }), {})
+    const lastVisitBySpot = visits.reduce((dates, visit) => {
+      if (!dates[visit.spot_id] || new Date(visit.visited_at) > new Date(dates[visit.spot_id])) dates[visit.spot_id] = visit.visited_at
+      return dates
+    }, {})
     setJournalVisits(visits)
     setSpots(apiSpots.map((spot) => {
       const fallback = initialSpots.find((item) => item.id === spot.id) ?? {}
-      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: `${Number(spot.area_sqm ?? 0).toLocaleString('de-DE')} m²`, visits: countBySpot[spot.id] ?? 0 }
+      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: `${Number(spot.area_sqm ?? 0).toLocaleString('de-DE')} m²`, visits: countBySpot[spot.id] ?? 0, last_visit_at: lastVisitBySpot[spot.id] ?? null }
     }))
   }
 
