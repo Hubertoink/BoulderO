@@ -15,6 +15,7 @@ import {
   IconLock,
   IconMapPin,
   IconMedal,
+  IconMessageCircle,
   IconLogin2,
   IconLogout,
   IconPhoto,
@@ -36,8 +37,8 @@ import { initialSpots, mannheimCenter } from './data/spots'
 const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
   { id: 'journal', label: 'Tagebuch', icon: IconBookmark },
-  { id: 'social', label: 'Feed', icon: IconUsers },
-  { id: 'friends', label: 'Freunde', icon: IconUserCircle },
+  { id: 'social', label: 'Feed', icon: IconMessageCircle },
+  { id: 'friends', label: 'Freunde', icon: IconUsers },
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
 
@@ -370,7 +371,6 @@ function JournalView({ currentUser, journalVisits, onSignIn, onOpenComposer, onO
       <div className="journal-content">
       <div className="page-intro page-intro--action">
         <div>
-        <span className="eyebrow">Dein Verlauf</span>
         <h1>Tagebuch</h1>
         </div>
         <button className="journal-add" onClick={onOpenComposer}><IconPlus size={18} />Eintrag</button>
@@ -460,7 +460,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
 
 function BadgesView({ progress, onBack }) {
   const badges = progress?.badges ?? []
-  return <main className="view content-view compact-view"><div className="page-intro"><span className="eyebrow">Deine Meilensteine</span><h1>Abzeichen</h1><p>{progress?.unique_spots ?? 0} unterschiedliche Hallen entdeckt. Jedes Abzeichen wird automatisch freigeschaltet.</p></div><section className="badge-grid">{badges.map((badge) => <article className={`badge-card ${badge.unlocked ? 'is-unlocked' : ''}`} key={badge.id}>{badge.unlocked ? <IconMedal size={25} /> : <IconLock size={22} />}<div><span className="eyebrow">{badge.unlocked ? 'Freigeschaltet' : `Noch ${Math.max(0, badge.threshold - (progress?.unique_spots ?? 0))} Hallen`}</span><h2>{badge.name}</h2><p>{badge.threshold} unterschiedliche Hallen</p></div></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+  return <main className="view content-view compact-view"><div className="page-intro"><h1>Abzeichen</h1></div><section className="badge-grid">{badges.map((badge) => <article className={`badge-card ${badge.unlocked ? 'is-unlocked' : ''}`} key={badge.id}>{badge.unlocked ? <IconMedal size={25} /> : <IconLock size={22} />}<div><span className="eyebrow">{badge.unlocked ? 'Freigeschaltet' : `Noch ${Math.max(0, badge.threshold - (progress?.unique_spots ?? 0))} Hallen`}</span><h2>{badge.name}</h2><p>{badge.threshold} unterschiedliche Hallen</p></div></article>)}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
 }
 
 function downloadHallTemplate() {
