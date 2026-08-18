@@ -541,6 +541,37 @@ app.post('/admin/spots/:spotId/image', ...requireSuperAdmin, spotImageUpload.sin
   res.status(201).json({ spot: result.rows[0] })
 }))
 
+app.patch('/admin/spots/:spotId', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const spotId = z.string().uuid().parse(req.params.spotId)
+  const input = spotInputSchema.parse(req.body)
+  const result = await pool.query(
+    `UPDATE spots
+        SET name = $2, district = $3, address = $4, website = $5, opening_hours = $6,
+            area_sqm = $7, image_url = $8,
+            coordinates = ST_SetSRID(ST_MakePoint($10, $9), 4326)::geography,
+            updated_at = NOW()
+      WHERE id = $1 AND status = 'active'
+      RETURNING id, name, district, address, website, opening_hours, area_sqm,
+        CASE WHEN image_url LIKE 'upload:%' THEN '/api/spot-images/' || id ELSE image_url END AS image_url,
+        source, ST_Y(coordinates::geometry) AS latitude, ST_X(coordinates::geometry) AS longitude`,
+    [spotId, input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
+  )
+  if (!result.rowCount) return res.status(404).json({ error: 'spot_not_found' })
+  res.json({ spot: result.rows[0] })
+}))
+
+app.delete('/admin/spots/:spotId', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const spotId = z.string().uuid().parse(req.params.spotId)
+  const result = await pool.query(
+    `UPDATE spots SET status = 'archived', updated_at = NOW()
+      WHERE id = $1 AND status = 'active'
+      RETURNING id, name`,
+    [spotId],
+  )
+  if (!result.rowCount) return res.status(404).json({ error: 'spot_not_found' })
+  res.status(204).end()
+}))
+
 app.get('/spot-images/:spotId', asyncRoute(async (req, res) => {
   const spotId = z.string().uuid().parse(req.params.spotId)
   const result = await pool.query(`SELECT image_url FROM spots WHERE id = $1 AND image_url LIKE 'upload:%'`, [spotId])
