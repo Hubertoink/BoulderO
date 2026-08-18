@@ -1,0 +1,40 @@
+name: Publish container images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/bouldero-web:latest
+
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: api/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/bouldero-api:latest
