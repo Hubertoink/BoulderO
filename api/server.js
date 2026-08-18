@@ -21,6 +21,9 @@ const superAdminEmail = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase()
 const superAdminPassword = process.env.SUPERADMIN_PASSWORD
 const superAdminEnabled = Boolean(superAdminEmail && superAdminPassword)
 const scrypt = promisify(crypto.scrypt)
+const passwordScryptCost = 4096
+const legacyPasswordScryptCost = 16384
+const passwordScryptOptions = (cost) => ({ N: cost, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
 const demoUsers = [
   { id: '3b9a8c88-779d-4cb9-a950-23c8f4559011', name: 'Mira Keller', email: 'mira@bouldero.local', username: 'miraklettert', image: null, role: 'member' },
   { id: '7c5e37a2-1f52-4ce4-b204-412b2e8bc902', name: 'Alex Winter', email: 'alex@bouldero.local', username: 'alexziehtdurch', image: null, role: 'member' },
@@ -48,15 +51,21 @@ function matchesSecret(value, expected) {
 
 async function passwordHash(password) {
   const salt = crypto.randomBytes(16).toString('base64url')
-  const derived = await scrypt(password, salt, 64)
-  return `scrypt$${salt}$${Buffer.from(derived).toString('base64url')}`
+  const derived = await scrypt(password, salt, 64, passwordScryptOptions(passwordScryptCost))
+  return `scrypt$${passwordScryptCost}$${salt}$${Buffer.from(derived).toString('base64url')}`
 }
 
 async function passwordMatches(password, stored) {
-  const [algorithm, salt, encoded] = String(stored ?? '').split('$')
-  if (algorithm !== 'scrypt' || !salt || !encoded) return false
-  const expected = Buffer.from(encoded, 'base64url')
-  const derived = Buffer.from(await scrypt(password, salt, expected.length))
+  const parts = String(stored ?? '').split('$')
+  const [algorithm, costOrSalt, saltOrEncoded, encoded] = parts
+  if (algorithm !== 'scrypt') return false
+  const isVersioned = parts.length === 4
+  const cost = isVersioned ? Number(costOrSalt) : legacyPasswordScryptCost
+  const salt = isVersioned ? saltOrEncoded : costOrSalt
+  const encodedHash = isVersioned ? encoded : saltOrEncoded
+  if (!salt || !encodedHash || ![passwordScryptCost, legacyPasswordScryptCost].includes(cost)) return false
+  const expected = Buffer.from(encodedHash, 'base64url')
+  const derived = Buffer.from(await scrypt(password, salt, expected.length, passwordScryptOptions(cost)))
   return expected.length === derived.length && crypto.timingSafeEqual(expected, derived)
 }
 
