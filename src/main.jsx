@@ -722,7 +722,7 @@ function SignInDialog({ configuration, onClose, onDemoSignIn, onSuperAdminSignIn
     event.preventDefault(); setError(''); setNotice('')
     try {
       if (mode === 'signin') await onMemberSignIn(email, password)
-      if (mode === 'register') { await onRegister(name, email, password); setNotice('Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.'); switchMode('signin'); setNotice('Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.') }
+      if (mode === 'register') { const result = await onRegister(name, email, password); switchMode('signin'); setNotice(result?.deliveryFailed ? 'Dein Konto wurde angelegt, aber die Bestätigungs-E-Mail konnte noch nicht versendet werden. Du kannst sie hier erneut anfordern.' : 'Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.') }
       if (mode === 'forgot') { await onRequestPasswordReset(email); setNotice('Falls ein Konto existiert, wurde ein Link zum Zurücksetzen versendet.') }
       if (mode === 'reset') { if (password !== passwordConfirm) throw new Error('Die Passwörter stimmen nicht überein.'); await onResetPassword(resetToken, password); setNotice('Dein Passwort wurde geändert. Du kannst dich jetzt anmelden.'); setMode('signin'); setPassword(''); setPasswordConfirm('') }
     } catch (submitError) { setError(submitError.message || 'Die Anfrage konnte nicht verarbeitet werden.') }
@@ -886,7 +886,7 @@ function App() {
 
   async function registerMember(name, email, password) {
     const response = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) })
-    if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error === 'email_taken' ? 'Diese E-Mail-Adresse ist bereits registriert.' : payload.error === 'email_not_configured' ? 'Die E-Mail-Registrierung wird gerade eingerichtet.' : 'Konto konnte nicht erstellt werden.') }
+    if (!response.ok) { const payload = await response.json().catch(() => ({})); if (payload.error === 'email_delivery_failed') return { deliveryFailed: true }; throw new Error(payload.error === 'email_taken' ? 'Diese E-Mail-Adresse ist bereits registriert.' : payload.error === 'email_not_configured' ? 'Die E-Mail-Registrierung wird gerade eingerichtet.' : 'Konto konnte nicht erstellt werden.') }
   }
 
   async function requestPasswordReset(email) {
