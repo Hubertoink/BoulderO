@@ -90,10 +90,13 @@ function FocusLocation({ location }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, userLocation }) {
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation }) {
   return (
     <div className="map-frame">
-      <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas">
+      <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas" eventHandlers={{ click: (event) => {
+        const target = event.originalEvent?.target
+        if (window.matchMedia('(max-width: 560px)').matches && !target?.closest?.('.leaflet-marker-icon, .leaflet-marker-shadow')) onDismiss()
+      } }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -197,7 +200,7 @@ function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, 
     })
   }, [spots, query, filter])
 
-  const selectedSpot = spots.find((spot) => spot.id === selectedId) ?? spots[0]
+  const selectedSpot = selectedId ? spots.find((spot) => spot.id === selectedId) ?? null : null
 
   return (
     <main className="view map-view">
@@ -229,8 +232,8 @@ function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, 
         <span className="result-count">{visibleSpots.length} Orte</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} userLocation={userLocation} />
-      <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} />
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} onDismiss={() => { if (!isPickingSpot) onSelectSpot(null) }} userLocation={userLocation} />
+      {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} />}
     </main>
   )
 }
