@@ -723,6 +723,25 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
   res.json({ entries: result.rows })
 }))
 
+app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query(`
+    WITH last_seen AS (
+      SELECT COALESCE((SELECT last_seen_at FROM social_feed_reads WHERE user_id = $1), TIMESTAMPTZ 'epoch') AS value
+    )
+    SELECT (
+      (SELECT COUNT(*) FROM entry_likes l JOIN journal_entries j ON j.id = l.journal_entry_id, last_seen WHERE j.user_id = $1 AND l.user_id <> $1 AND l.created_at > last_seen.value)
+      + (SELECT COUNT(*) FROM entry_comments c JOIN journal_entries j ON j.id = c.journal_entry_id, last_seen WHERE j.user_id = $1 AND c.user_id <> $1 AND c.created_at > last_seen.value)
+      + (SELECT COUNT(*) FROM planned_visit_rsvps r JOIN planned_visits p ON p.id = r.planned_visit_id, last_seen WHERE p.user_id = $1 AND r.user_id <> $1 AND r.updated_at > last_seen.value)
+    )::int AS unread_feed
+  `, [req.user.id])
+  res.json(result.rows[0])
+}))
+
+app.post('/social/feed/seen', requireUser, asyncRoute(async (req, res) => {
+  await pool.query(`INSERT INTO social_feed_reads (user_id, last_seen_at) VALUES ($1, NOW()) ON CONFLICT (user_id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`, [req.user.id])
+  res.status(204).end()
+}))
+
 app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
     SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id,
@@ -797,6 +816,42 @@ app.delete('/planned-visits/:planId/rsvp', requireUser, asyncRoute(async (req, r
   const planId = z.string().uuid().parse(req.params.planId)
   await pool.query('DELETE FROM planned_visit_rsvps WHERE planned_visit_id = $1 AND user_id = $2', [planId, req.user.id])
   res.status(204).end()
+}))
+
+app.get('/planned-visits/:planId/rsvps', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  const plan = await pool.query('SELECT user_id, visibility, status FROM planned_visits WHERE id = $1', [planId])
+  const item = plan.rows[0]
+  if (!item || item.status !== 'scheduled' || !await canViewEntry(req.user.id, item.user_id, item.visibility)) return res.status(404).json({ error: 'planned_visit_not_found' })
+  const result = await pool.query(`
+    SELECT u.id, u.name, u.username, u.image, r.response
+      FROM planned_visit_rsvps r JOIN users u ON u.id = r.user_id
+     WHERE r.planned_visit_id = $1
+     ORDER BY CASE r.response WHEN 'going' THEN 0 ELSE 1 END, u.name
+  `, [planId])
+  res.json({ rsvps: result.rows })
+}))
+
+app.get('/social/users/:userId/preview', requireUser, asyncRoute(async (req, res) => {
+  const userId = z.string().uuid().parse(req.params.userId)
+  if (!await areFriends(req.user.id, userId)) return res.status(403).json({ error: 'friends_required' })
+  const [user, entries, plans] = await Promise.all([
+    pool.query('SELECT id, name, username, image FROM users WHERE id = $1', [userId]),
+    pool.query(`
+      SELECT j.id, j.body, j.created_at, v.visited_at, s.name AS spot_name, s.district
+        FROM journal_entries j JOIN visits v ON v.id = j.visit_id JOIN spots s ON s.id = v.spot_id
+       WHERE j.user_id = $1 AND j.visibility IN ('public', 'followers', 'friends')
+       ORDER BY j.created_at DESC LIMIT 3
+    `, [userId]),
+    pool.query(`
+      SELECT p.id, p.starts_at, p.note, s.name AS spot_name
+        FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+       WHERE p.user_id = $1 AND p.status = 'scheduled' AND p.starts_at >= NOW() - INTERVAL '2 hours' AND p.visibility IN ('public', 'followers', 'friends')
+       ORDER BY p.starts_at ASC LIMIT 2
+    `, [userId]),
+  ])
+  if (!user.rowCount) return res.status(404).json({ error: 'user_not_found' })
+  res.json({ user: user.rows[0], entries: entries.rows, plans: plans.rows })
 }))
 
 app.get('/social/entries/:entryId/comments', requireUser, asyncRoute(async (req, res) => {
