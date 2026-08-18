@@ -5,6 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import express from 'express'
 import multer from 'multer'
+import nodemailer from 'nodemailer'
 import { ExpressAuth, getSession } from '@auth/express'
 import Credentials from '@auth/express/providers/credentials'
 import Google from '@auth/express/providers/google'
@@ -24,6 +25,18 @@ const scrypt = promisify(crypto.scrypt)
 const passwordScryptCost = 4096
 const legacyPasswordScryptCost = 16384
 const passwordScryptOptions = (cost) => ({ N: cost, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
+const appOrigin = process.env.APP_ORIGIN?.replace(/\/$/, '')
+const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.SMTP_FROM)
+const emailTransport = process.env.EMAIL_TRANSPORT === 'json'
+  ? nodemailer.createTransport({ jsonTransport: true })
+  : smtpConfigured
+    ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT ?? 465),
+      secure: process.env.SMTP_SECURE !== 'false',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    })
+    : null
 const demoUsers = [
   { id: '3b9a8c88-779d-4cb9-a950-23c8f4559011', name: 'Mira Keller', email: 'mira@bouldero.local', username: 'miraklettert', image: null, role: 'member' },
   { id: '7c5e37a2-1f52-4ce4-b204-412b2e8bc902', name: 'Alex Winter', email: 'alex@bouldero.local', username: 'alexziehtdurch', image: null, role: 'member' },
@@ -69,6 +82,48 @@ async function passwordMatches(password, stored) {
   return expected.length === derived.length && crypto.timingSafeEqual(expected, derived)
 }
 
+function actionTokenHash(token) {
+  return crypto.createHash('sha256').update(token).digest('base64url')
+}
+
+function publicAppOrigin(req) {
+  if (appOrigin) return appOrigin
+  return `${req.protocol}://${req.get('host')}`
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]))
+}
+
+async function createAccountActionToken(userId, purpose) {
+  const token = crypto.randomBytes(32).toString('base64url')
+  const hours = purpose === 'verify_email' ? 24 : 1
+  await pool.query('UPDATE account_action_tokens SET used_at = NOW() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL', [userId, purpose])
+  await pool.query(
+    `INSERT INTO account_action_tokens (user_id, purpose, token_hash, expires_at)
+     VALUES ($1, $2, $3, NOW() + ($4 * INTERVAL '1 hour'))`,
+    [userId, purpose, actionTokenHash(token), hours],
+  )
+  return token
+}
+
+async function sendAccountActionEmail(req, user, purpose) {
+  if (!emailTransport) throw new Error('email_not_configured')
+  const token = await createAccountActionToken(user.id, purpose)
+  const isVerification = purpose === 'verify_email'
+  const url = new URL(publicAppOrigin(req))
+  url.searchParams.set(isVerification ? 'verifyEmail' : 'resetPassword', token)
+  const subject = isVerification ? 'Bestätige dein BoulderO Konto' : 'BoulderO Passwort zurücksetzen'
+  const title = isVerification ? 'Bestätige deine E-Mail-Adresse' : 'Setze dein Passwort zurück'
+  const copy = isVerification
+    ? 'Bitte bestätige deine E-Mail-Adresse, um dein BoulderO Konto freizuschalten.'
+    : 'Du hast angefordert, dein BoulderO Passwort zurückzusetzen.'
+  const action = isVerification ? 'E-Mail-Adresse bestätigen' : 'Passwort zurücksetzen'
+  const html = `<p>Hallo ${escapeHtml(user.name || 'BoulderO Mitglied')},</p><p>${copy}</p><p><a href="${url.toString()}">${action}</a></p><p>Der Link ist ${isVerification ? '24 Stunden' : 'eine Stunde'} gültig. Falls du diese Nachricht nicht angefordert hast, kannst du sie ignorieren.</p>`
+  const result = await emailTransport.sendMail({ from: process.env.SMTP_FROM, to: user.email, subject, text: `${copy}\n\n${url.toString()}`, html })
+  if (process.env.EMAIL_TRANSPORT === 'json') console.info(`E-Mail-Vorschau (${purpose}): ${result.message}`)
+}
+
 if (superAdminEnabled) {
   providers.push(Credentials({
     id: 'superadmin',
@@ -96,9 +151,9 @@ providers.push(Credentials({
   authorize: async (credentials) => {
     const email = String(credentials?.email ?? '').trim().toLowerCase()
     const password = String(credentials?.password ?? '')
-    const result = await pool.query('SELECT id, name, email, username, image, role, password_hash FROM users WHERE email = $1', [email])
+    const result = await pool.query('SELECT id, name, email, username, image, role, password_hash, email_verified_at FROM users WHERE email = $1', [email])
     const user = result.rows[0]
-    if (!user || !await passwordMatches(password, user.password_hash)) return null
+    if (!user || !user.email_verified_at || !await passwordMatches(password, user.password_hash)) return null
     return { id: user.id, name: user.name, email: user.email, username: user.username, image: user.image, role: user.role }
   },
 }))
@@ -122,7 +177,8 @@ app.get('/api/auth/configuration', (_req, res) => {
     demoEnabled: demoMode,
     googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     superAdminEnabled,
-    registrationEnabled: true,
+    registrationEnabled: Boolean(emailTransport),
+    emailDeliveryEnabled: Boolean(emailTransport),
     demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
   })
 })
@@ -131,7 +187,8 @@ app.get('/auth/configuration', (_req, res) => {
     demoEnabled: demoMode,
     googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
     superAdminEnabled,
-    registrationEnabled: true,
+    registrationEnabled: Boolean(emailTransport),
+    emailDeliveryEnabled: Boolean(emailTransport),
     demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
   })
 })
@@ -155,11 +212,14 @@ function usernameFromName(name) {
 }
 
 app.post('/register', asyncRoute(async (req, res) => {
+  if (!emailTransport) return res.status(503).json({ error: 'email_not_configured' })
   const input = z.object({
     name: z.string().trim().min(2).max(80),
     email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()),
     password: z.string().min(10).max(200),
   }).parse(req.body)
+  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [input.email])
+  if (existing.rowCount) return res.status(409).json({ error: 'email_taken' })
   const hash = await passwordHash(input.password)
   const baseUsername = usernameFromName(input.name)
   for (let suffix = 0; suffix < 100; suffix += 1) {
@@ -170,7 +230,13 @@ app.post('/register', asyncRoute(async (req, res) => {
          VALUES ($1, $2, $3, $4, 'member') RETURNING id, name, email, username, role`,
         [input.name, input.email, username, hash],
       )
-      return res.status(201).json({ user: created.rows[0] })
+      try {
+        await sendAccountActionEmail(req, created.rows[0], 'verify_email')
+      } catch (error) {
+        console.error('Bestätigungs-E-Mail konnte nicht versendet werden:', error)
+        return res.status(503).json({ error: 'email_delivery_failed' })
+      }
+      return res.status(201).json({ user: created.rows[0], verificationRequired: true })
     } catch (error) {
       if (error?.code === '23505' && error?.constraint?.includes('email')) return res.status(409).json({ error: 'email_taken' })
       if (error?.code === '23505') continue
@@ -178,6 +244,77 @@ app.post('/register', asyncRoute(async (req, res) => {
     }
   }
   res.status(409).json({ error: 'username_unavailable' })
+}))
+
+app.post('/account/verification/resend', asyncRoute(async (req, res) => {
+  if (!emailTransport) return res.status(503).json({ error: 'email_not_configured' })
+  const input = z.object({ email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()) }).parse(req.body)
+  const result = await pool.query('SELECT id, name, email, email_verified_at FROM users WHERE email = $1', [input.email])
+  const user = result.rows[0]
+  if (user && !user.email_verified_at) await sendAccountActionEmail(req, user, 'verify_email')
+  res.status(202).json({ accepted: true })
+}))
+
+app.post('/account/verify-email', asyncRoute(async (req, res) => {
+  const input = z.object({ token: z.string().min(32).max(256) }).parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const action = await client.query(
+      `SELECT id, user_id FROM account_action_tokens
+       WHERE token_hash = $1 AND purpose = 'verify_email' AND used_at IS NULL AND expires_at > NOW()
+       FOR UPDATE`,
+      [actionTokenHash(input.token)],
+    )
+    if (!action.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'invalid_or_expired_token' })
+    }
+    await client.query('UPDATE users SET email_verified_at = NOW() WHERE id = $1', [action.rows[0].user_id])
+    await client.query('UPDATE account_action_tokens SET used_at = NOW() WHERE id = $1', [action.rows[0].id])
+    await client.query('COMMIT')
+    res.json({ verified: true })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}))
+
+app.post('/account/password-reset/request', asyncRoute(async (req, res) => {
+  if (!emailTransport) return res.status(503).json({ error: 'email_not_configured' })
+  const input = z.object({ email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()) }).parse(req.body)
+  const result = await pool.query('SELECT id, name, email, password_hash FROM users WHERE email = $1', [input.email])
+  if (result.rows[0]?.password_hash) await sendAccountActionEmail(req, result.rows[0], 'reset_password')
+  res.status(202).json({ accepted: true })
+}))
+
+app.post('/account/password-reset', asyncRoute(async (req, res) => {
+  const input = z.object({ token: z.string().min(32).max(256), password: z.string().min(10).max(200) }).parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const action = await client.query(
+      `SELECT id, user_id FROM account_action_tokens
+       WHERE token_hash = $1 AND purpose = 'reset_password' AND used_at IS NULL AND expires_at > NOW()
+       FOR UPDATE`,
+      [actionTokenHash(input.token)],
+    )
+    if (!action.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'invalid_or_expired_token' })
+    }
+    await client.query('UPDATE users SET password_hash = $2, password_changed_at = NOW() WHERE id = $1', [action.rows[0].user_id, await passwordHash(input.password)])
+    await client.query('UPDATE account_action_tokens SET used_at = NOW() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL', [action.rows[0].user_id, 'reset_password'])
+    await client.query('COMMIT')
+    res.json({ reset: true })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
 }))
 
 function asyncRoute(handler) {
@@ -352,6 +489,19 @@ app.patch('/me', requireUser, asyncRoute(async (req, res) => {
     [req.user.id, input.name ?? null, input.username ?? null],
   )
   res.json({ user: result.rows[0] })
+}))
+
+app.post('/me/password', requireUser, asyncRoute(async (req, res) => {
+  const input = z.object({
+    currentPassword: z.string().min(1).max(200),
+    password: z.string().min(10).max(200),
+  }).parse(req.body)
+  const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id])
+  if (!result.rows[0]?.password_hash) return res.status(400).json({ error: 'password_change_not_available' })
+  if (!await passwordMatches(input.currentPassword, result.rows[0].password_hash)) return res.status(400).json({ error: 'current_password_incorrect' })
+  await pool.query('UPDATE users SET password_hash = $2, password_changed_at = NOW() WHERE id = $1', [req.user.id, await passwordHash(input.password)])
+  await pool.query('UPDATE account_action_tokens SET used_at = NOW() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL', [req.user.id, 'reset_password'])
+  res.json({ changed: true })
 }))
 
 app.post('/me/avatar', requireUser, imageUpload.single('avatar'), asyncRoute(async (req, res) => {

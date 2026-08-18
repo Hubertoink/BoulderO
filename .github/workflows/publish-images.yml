@@ -16,6 +16,17 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build web application
+        run: |
+          npm ci
+          npm run build
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:

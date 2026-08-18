@@ -25,7 +25,7 @@ Das Image liefert ausschließlich die fertigen statischen Dateien über Nginx au
 
 Die Docker-Umgebung besteht aus drei Services: Web-App (Nginx), API (Express + Auth.js) und PostgreSQL mit PostGIS. Die API ist über `/api/health` hinter dem Webservice erreichbar. Der Browser kommuniziert nie direkt mit der Datenbank.
 
-Für Google-Anmeldung werden `AUTH_SECRET`, `GOOGLE_CLIENT_ID` und `GOOGLE_CLIENT_SECRET` aus `.env` benötigt. Ausgangspunkt ist [.env.example](.env.example). Der in Compose hinterlegte Secret-Standardwert ist ausschließlich für die lokale Entwicklung gedacht und darf nicht produktiv verwendet werden.
+E-Mail-Konten benötigen `APP_ORIGIN`, SMTP-Zugangsdaten und einen sicheren `AUTH_SECRET` aus `.env`. Ausgangspunkt ist [.env.example](.env.example). Neue Mitglieder bestätigen ihre Adresse per Link; Passwort-Reset und Passwortwechsel im Profil verwenden denselben SMTP-Versand. Google-Anmeldung bleibt optional.
 
 Für lokale Tests ist zusätzlich der Auth.js-Testmodus aktiv (`DEMO_MODE=true`). Er stellt drei getrennte Testprofile bereit: Mira Keller, Alex Winter und Lea Hofmann. Über „Anmelden“ kann zwischen ihnen gewechselt werden, um Folgen, gegenseitige Freunde und die Sichtbarkeit `Follower` beziehungsweise `Freunde` zu prüfen. Der Testmodus muss in Staging und Produktion auf `false` gesetzt werden.
 
@@ -41,7 +41,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Vor einer öffentlich erreichbaren Installation müssen mindestens `POSTGRES_PASSWORD` und `AUTH_SECRET` sicher gesetzt sowie `DEMO_MODE=false` konfiguriert werden. Google OAuth ist optional und benötigt eine auf die spätere Domain konfigurierte Callback-URL. Der Webservice lauscht standardmäßig auf Port `8090`; in einer Produktionsumgebung sollte davor ein TLS-fähiger Reverse Proxy eingesetzt werden.
+Vor einer öffentlich erreichbaren Installation müssen mindestens `POSTGRES_PASSWORD`, `AUTH_SECRET`, `APP_ORIGIN`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` und `SMTP_FROM` sicher gesetzt sowie `DEMO_MODE=false` konfiguriert werden. Für Mittwald lautet die SMTP-Konfiguration `SMTP_HOST=mail.agenturserver.de`, `SMTP_PORT=465`, `SMTP_SECURE=true`; Benutzername und Passwort stammen aus dem eingerichteten Postausgang. Der Webservice lauscht standardmäßig auf Port `8090`; in einer Produktionsumgebung sollte davor ein TLS-fähiger Reverse Proxy eingesetzt werden.
 
 Zum Aktualisieren der laufenden Installation:
 
@@ -60,7 +60,9 @@ AUTH_SECRET="..." POSTGRES_PASSWORD="..." \
   mw stack deploy -s <stack-id> -c compose.mittwald.yaml
 ```
 
-Der Webservice wird anschließend über einen Mittwald-Virtualhost auf Port `80/tcp` veröffentlicht. Für den ersten Web-Test ist `DEMO_MODE=true` vorgesehen; für eine reale Anmeldung ist ein eigener OAuth-Client zu hinterlegen und der Testmodus auszuschalten.
+Der Webservice wird anschließend über einen Mittwald-Virtualhost auf Port `80/tcp` veröffentlicht. Für reale Konten muss `DEMO_MODE=false` gelten. Die API erhält pro Umgebung eine eigene `APP_ORIGIN`-Variable, damit Bestätigungs- und Reset-Links korrekt zeigen: `https://bouldero.de` in Produktion und `https://dev.bouldero.de` in Staging. Der SMTP-Postausgang wird ebenfalls ausschließlich als Container-Umgebung konfiguriert.
+
+`main` veröffentlicht die Produktions-Tags `latest`; `dev` veröffentlicht getrennte Tags `dev`. Der GitHub-Workflow baut das Frontend vor jedem Image-Build frisch. Dadurch kann derselbe API- und Web-Quellstand getrennt nach Staging und Produktion ausgerollt werden.
 
 Für die vorläufige Verwaltung kann zusätzlich ein passwortgeschütztes Superadmin-Konto aktiviert werden. Die Werte `SUPERADMIN_EMAIL` und `SUPERADMIN_PASSWORD` müssen ausschließlich in der Deployment-Umgebung gesetzt werden. Das Konto erhält Zugriff auf „Hallen verwalten“ und kann neue Hallen mit Adresse und Koordinaten anlegen; gewöhnliche Konten erhalten hierfür keine API-Berechtigung.
 

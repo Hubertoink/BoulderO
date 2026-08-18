@@ -411,7 +411,7 @@ function ProfileAvatar({ user, progress, onUpload }) {
   return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event.target.files[0])} /><span>Profilfoto ändern</span></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenSocial, onOpenAdmin, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenSocial, onOpenAdmin, onChangePassword, progress, onUploadAvatar }) {
   if (!currentUser) {
     return (
       <main className="view content-view empty-state profile-empty">
@@ -451,6 +451,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
           <button onClick={onOpenSocial}><IconUserCircle size={18} /><span><b>Follower & Freunde</b><small>Demo-Profile und geteilte Einträge</small></span><IconChevronRight size={18} /></button>
           {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>Neue Boulderhallen anlegen</small></span><IconChevronRight size={18} /></button>}
+          {currentUser.role === 'member' && <button onClick={onChangePassword}><IconLock size={18} /><span><b>Passwort ändern</b><small>Dein Konto sicher halten</small></span><IconChevronRight size={18} /></button>}
           <button className="profile-actions__logout" onClick={onSignOut}><IconLogout size={18} />Abmelden</button>
         </section>
       </div>
@@ -707,19 +708,36 @@ function MessageDialog({ user, onClose, onRead }) {
   return <div className="composer-backdrop"><section className="journal-composer message-dialog" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Direktnachrichten</span><h2>{user.name}</h2></div><button className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div>{error && <p className="form-error">{error}</p>}<div className="message-list">{messages.map((message) => { const own = message.sender_id !== user.id; return <article className={own ? 'message message--own' : 'message message--received'} key={message.id}><span>{message.body}</span><small>{own ? 'Du' : user.name.split(' ')[0]} · {formatMessageTime(message.created_at)}</small></article> })}</div><form className="message-compose" onSubmit={send}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Nachricht schreiben …" maxLength="2000" /><button>Senden</button></form></section></div>
 }
 
-function SignInDialog({ configuration, onClose, onDemoSignIn, onSuperAdminSignIn, onMemberSignIn, onRegister }) {
-  const [mode, setMode] = useState('signin')
+function SignInDialog({ configuration, onClose, onDemoSignIn, onSuperAdminSignIn, onMemberSignIn, onRegister, onRequestPasswordReset, onResendVerification, onResetPassword, resetToken }) {
+  const [mode, setMode] = useState(resetToken ? 'reset' : 'signin')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
   const [error, setError] = useState('')
-  async function submitSuperAdmin(event) {
-    event.preventDefault()
-    setError('')
-    try { await onSuperAdminSignIn(email, password) } catch { setError('E-Mail oder Passwort sind nicht korrekt.') }
+  const [notice, setNotice] = useState('')
+  function switchMode(next) { setError(''); setNotice(''); setMode(next) }
+  async function submitSuperAdmin(event) { event.preventDefault(); setError(''); try { await onSuperAdminSignIn(email, password) } catch { setError('E-Mail oder Passwort sind nicht korrekt.') } }
+  async function submit(event) {
+    event.preventDefault(); setError(''); setNotice('')
+    try {
+      if (mode === 'signin') await onMemberSignIn(email, password)
+      if (mode === 'register') { await onRegister(name, email, password); setNotice('Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.'); switchMode('signin'); setNotice('Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.') }
+      if (mode === 'forgot') { await onRequestPasswordReset(email); setNotice('Falls ein Konto existiert, wurde ein Link zum Zurücksetzen versendet.') }
+      if (mode === 'reset') { if (password !== passwordConfirm) throw new Error('Die Passwörter stimmen nicht überein.'); await onResetPassword(resetToken, password); setNotice('Dein Passwort wurde geändert. Du kannst dich jetzt anmelden.'); setMode('signin'); setPassword(''); setPasswordConfirm('') }
+    } catch (submitError) { setError(submitError.message || 'Die Anfrage konnte nicht verarbeitet werden.') }
   }
-  async function submitMember(event) { event.preventDefault(); setError(''); try { if (mode === 'register') await onRegister(name, email, password); else await onMemberSignIn(email, password) } catch (submitError) { setError(submitError.message || 'Anmeldung nicht möglich.') } }
-  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="BoulderO Konto"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>{mode === 'register' ? 'Konto erstellen' : 'Anmelden'}</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><div className="auth-tabs"><button className={mode === 'signin' ? 'is-active' : ''} onClick={() => setMode('signin')}>Anmelden</button><button className={mode === 'register' ? 'is-active' : ''} onClick={() => setMode('register')}>Registrieren</button></div><form className="admin-login" onSubmit={submitMember}>{mode === 'register' && <label className="form-field"><span>Name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>}<label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="form-field"><span>Passwort</span><input required type="password" minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button">{mode === 'register' ? 'Konto erstellen' : 'Anmelden'}</button></form>{configuration?.superAdminEnabled && <form className="admin-login" onSubmit={submitSuperAdmin}><p className="auth-copy"><b>Verwaltung</b> · Superadmin-Zugang</p><button className="text-back">Als Verwaltung anmelden</button></form>}{configuration?.demoEnabled && <div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div>}<p className="auth-note"><IconLock size={15} />Passwörter werden sicher gespeichert. E-Mail-Bestätigung folgt mit dem SMTP-Setup.</p></section></div>
+  const title = ({ register: 'Konto erstellen', forgot: 'Passwort vergessen', reset: 'Neues Passwort', signin: 'Anmelden' })[mode]
+  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="BoulderO Konto"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>{title}</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{!resetToken && <div className="auth-tabs"><button className={mode === 'signin' ? 'is-active' : ''} onClick={() => switchMode('signin')}>Anmelden</button><button disabled={!configuration?.registrationEnabled} className={mode === 'register' ? 'is-active' : ''} onClick={() => switchMode('register')}>Registrieren</button></div>}<form className="admin-login" onSubmit={submit}>{mode === 'register' && <label className="form-field"><span>Name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>}{mode !== 'reset' && <label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}{mode !== 'forgot' && <label className="form-field"><span>{mode === 'reset' ? 'Neues Passwort' : 'Passwort'}</span><input required type="password" minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /></label>}{mode === 'reset' && <label className="form-field"><span>Passwort wiederholen</span><input required type="password" minLength="10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}{notice && <p className="form-notice">{notice}</p>}<button className="visit-button">{mode === 'register' ? 'Bestätigungs-E-Mail senden' : mode === 'forgot' ? 'Reset-Link senden' : mode === 'reset' ? 'Passwort speichern' : 'Anmelden'}</button></form>{mode === 'signin' && <div className="auth-links"><button type="button" className="text-back" onClick={() => switchMode('forgot')}>Passwort vergessen?</button><button type="button" className="text-back" onClick={async () => { try { await onResendVerification(email); setNotice('Falls dein Konto noch nicht bestätigt ist, wurde eine neue E-Mail gesendet.') } catch { setError('Die Bestätigungs-E-Mail konnte nicht gesendet werden.') } }}>Bestätigung erneut senden</button></div>}{mode === 'register' && !configuration?.registrationEnabled && <p className="form-error">Die E-Mail-Registrierung wird gerade eingerichtet.</p>}{mode === 'signin' && configuration?.superAdminEnabled && <form className="admin-login" onSubmit={submitSuperAdmin}><p className="auth-copy"><b>Verwaltung</b> · Superadmin-Zugang</p><button className="text-back">Als Verwaltung anmelden</button></form>}{mode === 'signin' && configuration?.demoEnabled && <div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div>}<p className="auth-note"><IconLock size={15} />Passwörter werden sicher gespeichert. Neue Konten werden per E-Mail bestätigt.</p></section></div>
+}
+
+function PasswordDialog({ onClose, onSave }) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [error, setError] = useState('')
+  async function submit(event) { event.preventDefault(); setError(''); try { if (password !== passwordConfirm) throw new Error('Die Passwörter stimmen nicht überein.'); await onSave(currentPassword, password) } catch (submitError) { setError(submitError.message || 'Passwort konnte nicht geändert werden.') } }
+  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>Passwort ändern</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><form className="admin-login" onSubmit={submit}><label className="form-field"><span>Aktuelles Passwort</span><input required type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label className="form-field"><span>Neues Passwort</span><input required type="password" minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label className="form-field"><span>Passwort wiederholen</span><input required type="password" minLength="10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button">Passwort ändern</button></form></section></div>
 }
 
 function App() {
@@ -739,6 +757,8 @@ function App() {
   const [progress, setProgress] = useState(null)
   const [authConfiguration, setAuthConfiguration] = useState(null)
   const [authOpen, setAuthOpen] = useState(false)
+  const [resetToken, setResetToken] = useState(null)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
   const [welcomeOpen, setWelcomeOpen] = useState(() => viewFromLocation() === 'map')
   const [messageUser, setMessageUser] = useState(null)
   const [lightboxImage, setLightboxImage] = useState(null)
@@ -762,7 +782,7 @@ function App() {
 
   useEffect(() => {
     const initialView = viewFromLocation()
-    if (!window.history.state?.boulderO) window.history.replaceState({ boulderO: true, view: initialView, position: 0 }, '', pathForView(initialView))
+    if (!window.history.state?.boulderO) window.history.replaceState({ boulderO: true, view: initialView, position: 0 }, '', `${pathForView(initialView)}${window.location.search}`)
     function onPopState() {
       setComposerOpen(false)
       setSelectedEntry(null)
@@ -772,6 +792,18 @@ function App() {
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search)
+    const verificationToken = parameters.get('verifyEmail')
+    const passwordToken = parameters.get('resetPassword')
+    if (!verificationToken && !passwordToken) return
+    window.history.replaceState(window.history.state, '', window.location.pathname)
+    if (passwordToken) { setResetToken(passwordToken); setAuthOpen(true); return }
+    fetch('/api/account/verify-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: verificationToken }) })
+      .then((response) => { if (!response.ok) throw new Error(); showToast('E-Mail bestätigt. Du kannst dich jetzt anmelden.') })
+      .catch(() => showToast('Der Bestätigungslink ist ungültig oder abgelaufen.'))
   }, [])
 
   const visitTotal = spots.reduce((sum, spot) => sum + spot.visits, 0)
@@ -854,8 +886,30 @@ function App() {
 
   async function registerMember(name, email, password) {
     const response = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) })
-    if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error === 'email_taken' ? 'Diese E-Mail-Adresse ist bereits registriert.' : 'Konto konnte nicht erstellt werden.') }
-    await signInMember(email, password)
+    if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error === 'email_taken' ? 'Diese E-Mail-Adresse ist bereits registriert.' : payload.error === 'email_not_configured' ? 'Die E-Mail-Registrierung wird gerade eingerichtet.' : 'Konto konnte nicht erstellt werden.') }
+  }
+
+  async function requestPasswordReset(email) {
+    const response = await fetch('/api/account/password-reset/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+    if (!response.ok) throw new Error('Der Reset-Link konnte nicht gesendet werden.')
+  }
+
+  async function resendVerification(email) {
+    const response = await fetch('/api/account/verification/resend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+    if (!response.ok) throw new Error('Die Bestätigungs-E-Mail konnte nicht gesendet werden.')
+  }
+
+  async function resetPassword(token, password) {
+    const response = await fetch('/api/account/password-reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) })
+    if (!response.ok) throw new Error('Der Reset-Link ist ungültig oder abgelaufen.')
+    setResetToken(null)
+  }
+
+  async function changePassword(currentPassword, password) {
+    const response = await fetch('/api/me/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword, password }) })
+    if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error === 'current_password_incorrect' ? 'Das aktuelle Passwort ist nicht korrekt.' : 'Passwort konnte nicht geändert werden.') }
+    setPasswordDialogOpen(false)
+    showToast('Passwort wurde geändert')
   }
 
   async function signOut() {
@@ -1021,10 +1075,10 @@ function App() {
         <div className="header-progress"><span><b>{uniqueVisited}</b>/10 Hallen</span><i><em style={{ width: `${uniqueVisited * 10}%` }} /></i></div>
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
-      {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><span className="eyebrow">Deine Boulderkarte</span><h1>Finde deine nächste Boulderhalle.</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div></section>}
+      {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div></section>}
       {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} onSelectSpot={selectSpot} onVisit={openComposer} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenSocial={() => navigate('friends')} onOpenAdmin={() => navigate('admin')} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenSocial={() => navigate('friends')} onOpenAdmin={() => navigate('admin')} onChangePassword={() => setPasswordDialogOpen(true)} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
@@ -1035,7 +1089,8 @@ function App() {
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} />}
       {selectedEntry && <JournalEntryDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} onUpdate={updateJournalEntry} />}
-      {authOpen && <SignInDialog configuration={authConfiguration} onClose={() => setAuthOpen(false)} onDemoSignIn={signInDemo} onSuperAdminSignIn={signInSuperAdmin} onMemberSignIn={signInMember} onRegister={registerMember} />}
+      {authOpen && <SignInDialog configuration={authConfiguration} resetToken={resetToken} onClose={() => { setAuthOpen(false); setResetToken(null) }} onDemoSignIn={signInDemo} onSuperAdminSignIn={signInSuperAdmin} onMemberSignIn={signInMember} onRegister={registerMember} onRequestPasswordReset={requestPasswordReset} onResendVerification={resendVerification} onResetPassword={resetPassword} />}
+      {passwordDialogOpen && <PasswordDialog onClose={() => setPasswordDialogOpen(false)} onSave={changePassword} />}
       {messageUser && <MessageDialog user={messageUser} onClose={() => setMessageUser(null)} onRead={async () => { const response = await fetch('/api/social/friends/summary'); if (response.ok) setFriendSummary(await response.json()) }} />}
       {lightboxImage && <Lightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />}
     </div>
