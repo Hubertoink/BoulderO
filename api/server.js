@@ -620,6 +620,7 @@ app.get('/social/friends/summary', requireUser, asyncRoute(async (req, res) => {
 app.get('/social/friends', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
     SELECT u.id, u.name, u.username, u.image,
+      (SELECT COUNT(DISTINCT v.spot_id)::int FROM visits v WHERE v.user_id = u.id) AS unique_spots,
       (SELECT MAX(v.visited_at) FROM visits v WHERE v.user_id = u.id) AS last_visit_at,
       (SELECT MAX(m.created_at) FROM direct_messages m
         WHERE (m.sender_id = $1 AND m.recipient_id = u.id) OR (m.sender_id = u.id AND m.recipient_id = $1)) AS last_message_at,
@@ -632,6 +633,84 @@ app.get('/social/friends', requireUser, asyncRoute(async (req, res) => {
     ORDER BY last_message_at DESC NULLS LAST, u.name
   `, [req.user.id])
   res.json({ friends: result.rows })
+}))
+
+app.get('/social/friend-suggestions', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query(`
+    WITH my_friends AS (
+      SELECT outgoing.followed_id AS friend_id
+        FROM follows outgoing
+        JOIN follows incoming
+          ON incoming.follower_id = outgoing.followed_id
+         AND incoming.followed_id = outgoing.follower_id
+         AND incoming.status = 'accepted'
+       WHERE outgoing.follower_id = $1
+         AND outgoing.status = 'accepted'
+    ), mutual_candidates AS (
+      SELECT candidate.id,
+             candidate.name,
+             candidate.username,
+             candidate.image,
+             (SELECT COUNT(DISTINCT visit.spot_id)::int FROM visits visit WHERE visit.user_id = candidate.id) AS unique_spots,
+             COUNT(DISTINCT my_friends.friend_id)::int AS mutual_friend_count
+        FROM my_friends
+        JOIN follows from_friend
+          ON from_friend.follower_id = my_friends.friend_id
+         AND from_friend.status = 'accepted'
+        JOIN follows to_friend
+          ON to_friend.follower_id = from_friend.followed_id
+         AND to_friend.followed_id = my_friends.friend_id
+         AND to_friend.status = 'accepted'
+        JOIN users candidate ON candidate.id = from_friend.followed_id
+       WHERE candidate.id <> $1
+         AND NOT EXISTS (
+           SELECT 1
+             FROM follows direct_outgoing
+             JOIN follows direct_incoming
+               ON direct_incoming.follower_id = direct_outgoing.followed_id
+              AND direct_incoming.followed_id = direct_outgoing.follower_id
+              AND direct_incoming.status = 'accepted'
+            WHERE direct_outgoing.follower_id = $1
+              AND direct_outgoing.followed_id = candidate.id
+              AND direct_outgoing.status = 'accepted'
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM friend_requests request
+            WHERE request.status = 'pending'
+              AND ((request.sender_id = $1 AND request.recipient_id = candidate.id)
+                OR (request.sender_id = candidate.id AND request.recipient_id = $1))
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM friend_suggestion_dismissals dismissal
+            WHERE dismissal.user_id = $1 AND dismissal.suggested_user_id = candidate.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM blocks block
+            WHERE (block.blocker_id = $1 AND block.blocked_id = candidate.id)
+               OR (block.blocker_id = candidate.id AND block.blocked_id = $1)
+         )
+       GROUP BY candidate.id
+    )
+    SELECT *
+      FROM mutual_candidates
+     ORDER BY mutual_friend_count DESC, name ASC, id ASC
+     LIMIT 2
+  `, [req.user.id])
+  res.json({ suggestions: result.rows })
+}))
+
+app.post('/social/friend-suggestions/:userId/dismiss', requireUser, asyncRoute(async (req, res) => {
+  const suggestedUserId = z.string().uuid().parse(req.params.userId)
+  if (suggestedUserId === req.user.id) return res.status(400).json({ error: 'cannot_dismiss_self' })
+  const target = await pool.query('SELECT id FROM users WHERE id = $1', [suggestedUserId])
+  if (!target.rowCount) return res.status(404).json({ error: 'user_not_found' })
+  await pool.query(
+    `INSERT INTO friend_suggestion_dismissals (user_id, suggested_user_id)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id, suggested_user_id) DO NOTHING`,
+    [req.user.id, suggestedUserId],
+  )
+  res.status(204).end()
 }))
 
 app.get('/social/friend-requests', requireUser, asyncRoute(async (req, res) => {

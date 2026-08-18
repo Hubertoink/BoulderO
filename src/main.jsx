@@ -1082,12 +1082,13 @@ function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead }
 
 function UserAvatar({ user }) {
   const initials = user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)
-  return <span className="person-avatar social-avatar">{user.image ? <img src={`/api/avatars/${user.id ?? user.user_id}`} alt="" /> : initials}</span>
+  return <span className="person-avatar social-avatar social-avatar--ranked">{user.image ? <img src={`/api/avatars/${user.id ?? user.user_id}`} alt="" /> : initials}<RankBadge uniqueSpots={user.unique_spots} /></span>
 }
 
 function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed }) {
   const [tab, setTab] = useState('friends')
   const [friends, setFriends] = useState([])
+  const [friendSuggestions, setFriendSuggestions] = useState([])
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] })
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -1095,9 +1096,10 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed }) {
   const [preview, setPreview] = useState(null)
   async function load() {
     try {
-      const [friendsResponse, requestsResponse, summaryResponse] = await Promise.all([fetch('/api/social/friends'), fetch('/api/social/friend-requests'), fetch('/api/social/friends/summary')])
-      if (!friendsResponse.ok || !requestsResponse.ok || !summaryResponse.ok) throw new Error('Freunde konnten nicht geladen werden.')
+      const [friendsResponse, suggestionsResponse, requestsResponse, summaryResponse] = await Promise.all([fetch('/api/social/friends'), fetch('/api/social/friend-suggestions'), fetch('/api/social/friend-requests'), fetch('/api/social/friends/summary')])
+      if (!friendsResponse.ok || !suggestionsResponse.ok || !requestsResponse.ok || !summaryResponse.ok) throw new Error('Freunde konnten nicht geladen werden.')
       setFriends((await friendsResponse.json()).friends)
+      setFriendSuggestions((await suggestionsResponse.json()).suggestions)
       setRequests(await requestsResponse.json())
       onSummaryChange(await summaryResponse.json())
     } catch (loadError) { setError(loadError.message) }
@@ -1131,7 +1133,47 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed }) {
     if (!response.ok) return setError('Die Vorschau konnte nicht geladen werden.')
     setPreview(await response.json())
   }
-  return <main className="view content-view compact-view social-view"><section className="social-section friends-section"><div className="section-heading"><h2>Freunde</h2><div className="friends-tabs"><button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>Freunde</button><button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => setTab('requests')}>Anfragen{requests.incoming.length > 0 && <b>{requests.incoming.length}</b>}</button><button className={tab === 'discover' ? 'is-active' : ''} onClick={() => setTab('discover')}>Entdecken</button></div></div>{error && <p className="form-error">{error}</p>}{tab === 'friends' && <div className="people-list friends-list">{!friends.length && <p className="journal-empty">Noch keine Freundschaften. Entdecke andere BoulderO-Nutzer:innen.</p>}{friends.map((user) => <article key={user.id}><UserAvatar user={user} /><div><h3>{user.name}</h3><p>@{user.username}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div><button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button><button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button>{preview?.user?.id === user.id && <div className="friend-preview"><b>Letztes von {preview.user.name}</b>{preview.plans.map((plan) => <p key={plan.id}><IconCalendarEvent size={14} /> {formatPlanDate(plan.starts_at)} · {plan.spot_name}</p>)}{preview.entries.map((entry) => <p key={entry.id}>war bei <b>{entry.spot_name}</b>{entry.body ? ` · ${entry.body}` : ''}</p>)}{!preview.entries.length && !preview.plans.length && <p>Noch nichts geteilt.</p>}<button type="button" onClick={() => onOpenUserFeed(preview.user)}>Feed von {preview.user.name.split(' ')[0]} öffnen</button></div>}</article>)}</div>}{tab === 'requests' && <div className="request-groups"><section><div className="section-heading"><h3>Eingegangen</h3><span>{requests.incoming.length}</span></div><div className="people-list">{!requests.incoming.length && <p className="journal-empty">Keine offenen Anfragen.</p>}{requests.incoming.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username}</p></div><button className="message-button" onClick={() => action(`/api/social/friend-requests/${request.id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${request.id}/accept`)}><IconCheck size={16} />Annehmen</button></article>)}</div></section><section><div className="section-heading"><h3>Gesendet</h3><span>{requests.outgoing.length}</span></div><div className="people-list">{!requests.outgoing.length && <p className="journal-empty">Keine gesendeten Anfragen.</p>}{requests.outgoing.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username} · Anfrage gesendet</p></div></article>)}</div></section></div>}{tab === 'discover' && <section className="friend-discover"><label className="search-field"><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name oder @username suchen" /></label>{query.trim().length > 0 && query.trim().length < 2 && <p className="journal-empty">Mindestens zwei Zeichen eingeben.</p>}<div className="people-list">{results.map((user) => <article key={user.id}><UserAvatar user={user} /><div><h3>{user.name}</h3><p>@{user.username}{user.follows_you ? ' · folgt dir' : ''}</p></div>{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : user.request_received ? <span className="relationship-actions"><button className="message-button" onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/accept`)}>Annehmen</button></span> : <button onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>}{!user.is_friend && <button className={user.following ? 'following' : ''} onClick={() => action(`/api/follows/${user.id}`, user.following ? 'DELETE' : 'POST')}>{user.following ? 'Folge ich' : 'Folgen'}</button>}</article>)}</div></section>}</section></main>
+  return (
+    <main className="view content-view compact-view social-view">
+      <section className="social-section friends-section">
+        <div className="section-heading">
+          <h2>Freunde</h2>
+          <div className="friends-tabs">
+            <button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>Freunde</button>
+            <button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => setTab('requests')}>Anfragen{requests.incoming.length > 0 && <b>{requests.incoming.length}</b>}</button>
+            <button className={tab === 'discover' ? 'is-active' : ''} onClick={() => setTab('discover')}>Entdecken</button>
+          </div>
+        </div>
+        {error && <p className="form-error">{error}</p>}
+        {tab === 'friends' && <>
+          {friendSuggestions.length > 0 && <section className="friend-suggestions">
+            <div className="section-heading"><div><span className="eyebrow">Für dich</span><h3>Personen, die du kennen könntest</h3></div><span>{friendSuggestions.length}</span></div>
+            <p>Vorgeschlagen über gemeinsame Kontakte.</p>
+            <div className="people-list">
+              {friendSuggestions.map((user) => <article key={user.id}>
+                <UserAvatar user={user} />
+                <div><h3>{user.name}</h3><p>@{user.username} · {user.mutual_friend_count} gemeinsame{user.mutual_friend_count === 1 ? 'r Kontakt' : ' Kontakte'}</p></div>
+                <button type="button" className="suggestion-dismiss" onClick={() => action(`/api/social/friend-suggestions/${user.id}/dismiss`)} aria-label={`${user.name} nicht mehr vorschlagen`} title="Nicht mehr vorschlagen"><IconX size={16} /></button>
+                <button type="button" onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>
+              </article>)}
+            </div>
+          </section>}
+          <div className="people-list friends-list">
+            {!friends.length && <p className="journal-empty">Noch keine Freundschaften. Entdecke andere BoulderO-Nutzer:innen.</p>}
+            {friends.map((user) => <article key={user.id}>
+              <UserAvatar user={user} />
+              <div><h3>{user.name}</h3><p>@{user.username}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div>
+              <button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button>
+              <button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button>
+              {preview?.user?.id === user.id && <div className="friend-preview"><b>Letztes von {preview.user.name}</b>{preview.plans.map((plan) => <p key={plan.id}><IconCalendarEvent size={14} /> {formatPlanDate(plan.starts_at)} · {plan.spot_name}</p>)}{preview.entries.map((entry) => <p key={entry.id}>war bei <b>{entry.spot_name}</b>{entry.body ? ` · ${entry.body}` : ''}</p>)}{!preview.entries.length && !preview.plans.length && <p>Noch nichts geteilt.</p>}<button type="button" onClick={() => onOpenUserFeed(preview.user)}>Feed von {preview.user.name.split(' ')[0]} öffnen</button></div>}
+            </article>)}
+          </div>
+        </>}
+        {tab === 'requests' && <div className="request-groups"><section><div className="section-heading"><h3>Eingegangen</h3><span>{requests.incoming.length}</span></div><div className="people-list">{!requests.incoming.length && <p className="journal-empty">Keine offenen Anfragen.</p>}{requests.incoming.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username}</p></div><button className="message-button" onClick={() => action(`/api/social/friend-requests/${request.id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${request.id}/accept`)}><IconCheck size={16} />Annehmen</button></article>)}</div></section><section><div className="section-heading"><h3>Gesendet</h3><span>{requests.outgoing.length}</span></div><div className="people-list">{!requests.outgoing.length && <p className="journal-empty">Keine gesendeten Anfragen.</p>}{requests.outgoing.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username} · Anfrage gesendet</p></div></article>)}</div></section></div>}
+        {tab === 'discover' && <section className="friend-discover"><label className="search-field"><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name oder @username suchen" /></label>{query.trim().length > 0 && query.trim().length < 2 && <p className="journal-empty">Mindestens zwei Zeichen eingeben.</p>}<div className="people-list">{results.map((user) => <article key={user.id}><UserAvatar user={user} /><div><h3>{user.name}</h3><p>@{user.username}{user.follows_you ? ' · folgt dir' : ''}</p></div>{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : user.request_received ? <span className="relationship-actions"><button className="message-button" onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/accept`)}>Annehmen</button></span> : <button onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>}{!user.is_friend && <button className={user.following ? 'following' : ''} onClick={() => action(`/api/follows/${user.id}`, user.following ? 'DELETE' : 'POST')}>{user.following ? 'Folge ich' : 'Folgen'}</button>}</article>)}</div></section>}
+      </section>
+    </main>
+  )
 }
 
 function formatMessageTime(value) {
