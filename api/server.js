@@ -151,6 +151,7 @@ providers.push(Credentials({
   authorize: async (credentials) => {
     const email = String(credentials?.email ?? '').trim().toLowerCase()
     const password = String(credentials?.password ?? '')
+    if (superAdminEnabled && matchesSecret(email, superAdminEmail) && matchesSecret(password, superAdminPassword)) return superAdmin
     const result = await pool.query('SELECT id, name, email, username, image, role, password_hash, email_verified_at FROM users WHERE email = $1', [email])
     const user = result.rows[0]
     if (!user || !user.email_verified_at || !await passwordMatches(password, user.password_hash)) return null
