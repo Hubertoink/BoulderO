@@ -75,8 +75,19 @@ const authConfig = {
 
 const app = express()
 app.set('trust proxy', true)
+app.get('/api/auth/configuration', (_req, res) => {
+  res.json({
+    demoEnabled: demoMode,
+    googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    superAdminEnabled,
+    demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
+  })
+})
+// Auth.js must retain the public `/api/auth` path for CSRF cookies, sessions,
+// and OAuth callbacks. The other API routes are defined without that prefix.
+app.use('/api/auth', ExpressAuth(authConfig))
 // Mittwald forwards the matching `/api` path prefix to the container. Strip it
-// here so the same application routes work locally and behind that ingress.
+// for all non-auth routes so they work locally and behind that ingress.
 app.use((req, _res, next) => {
   if (req.url === '/api' || req.url.startsWith('/api/')) {
     req.url = req.url.slice(4) || '/'
@@ -177,18 +188,6 @@ app.get('/health', asyncRoute(async (_req, res) => {
   await pool.query('SELECT 1')
   res.json({ status: 'ok' })
 }))
-
-app.get('/auth/configuration', (_req, res) => {
-  res.json({
-    demoEnabled: demoMode,
-    googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    superAdminEnabled,
-    demoProfiles: demoMode ? demoUsers.map(({ id, name, username }) => ({ id, name, username })) : [],
-  })
-})
-
-// Express 5 matches the complete Auth.js route tree through the prefix.
-app.use('/auth', ExpressAuth(authConfig))
 
 app.get('/me', requireUser, (req, res) => res.json({ user: req.user }))
 
