@@ -45,7 +45,7 @@ const navItems = [
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
 
-const appViews = new Set(['map', 'journal', 'social', 'friends', 'profile', 'badges', 'connections', 'admin'])
+const appViews = new Set(['map', 'journal', 'social', 'friends', 'profile', 'badges', 'connections', 'admin', 'audit'])
 
 function viewFromLocation() {
   const segment = window.location.pathname.split('/').filter(Boolean)[0]
@@ -483,7 +483,7 @@ function ProfileAvatar({ user, progress, onUpload }) {
   return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event.target.files[0])} /><span>Profilfoto ändern</span></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenAdmin, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
   if (!currentUser) {
     return (
       <main className="view content-view empty-state profile-empty">
@@ -523,6 +523,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
           <button onClick={onSuggestSpot}><IconMapPin size={18} /><span><b>Halle melden</b><small>Schlage eine Boulderhalle zur Prüfung vor</small></span><IconChevronRight size={18} /></button>
           {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>{spots.length} Hallen · {pendingSuggestionCount + pendingCorrectionCount} Hinweis{pendingSuggestionCount + pendingCorrectionCount === 1 ? '' : 'e'} offen</small></span>{pendingSuggestionCount + pendingCorrectionCount > 0 && <b className="admin-count-badge">{pendingSuggestionCount + pendingCorrectionCount > 99 ? '99+' : pendingSuggestionCount + pendingCorrectionCount}</b>}<IconChevronRight size={18} /></button>}
+          {currentUser.role === 'superadmin' && <button onClick={onOpenAudit}><IconLock size={18} /><span><b>Registrierungen & Anmeldungen</b><small>Audit der letzten Kontoereignisse</small></span><IconChevronRight size={18} /></button>}
           {currentUser.role === 'member' && <button onClick={onChangePassword}><IconLock size={18} /><span><b>Passwort ändern</b><small>Dein Konto sicher halten</small></span><IconChevronRight size={18} /></button>}
           <button className="profile-actions__logout" onClick={onSignOut}><IconLogout size={18} />Abmelden</button>
           <div className="profile-legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div>
@@ -687,11 +688,14 @@ function AuthAuditSection({ events }) {
   return <section className="admin-audit"><div className="section-heading"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierungen & Anmeldungen</h2></div><span>{events.length}</span></div><p>Erfolgreiche Registrierungen und Anmeldungen der letzten 100 Ereignisse.</p><div className="admin-table-wrap"><table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Konto</th><th>E-Mail</th></tr></thead><tbody>{events.length ? events.map((event) => <tr key={event.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</td><td><span className={`audit-event audit-event--${event.event_type}`}>{event.event_type === 'registration' ? 'Registrierung' : 'Anmeldung'}</span></td><td>{event.user_name}</td><td>{event.user_email}</td></tr>) : <tr><td colSpan="4">Noch keine Ereignisse seit der Aktivierung des Audits.</td></tr>}</tbody></table></div></section>
 }
 
+function AuditView({ events, onBack }) {
+  return <main className="view content-view compact-view admin-view"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Kontosicherheit</h1><p>Überblick über erfolgreiche Registrierungen und Anmeldungen.</p></div><AuthAuditSection events={events} /><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+}
+
 function AdminSpotsView({
   spots,
   suggestions,
   correctionReports,
-  authAudit,
   onCreate,
   onImport,
   onUpdate,
@@ -800,7 +804,6 @@ function AdminSpotsView({
           Halle anlegen
         </button>
       </div>
-      <AuthAuditSection events={authAudit} />
       {suggestions.length > 0 && (
         <section className="admin-suggestions">
           <div className="section-heading">
@@ -1080,12 +1083,14 @@ function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead }
   return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed'}</h2>{authorFilter && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{visiblePlans.length > 0 && <section className="planned-visit-list"><div className="section-heading"><h3>Geplante Besuche</h3><span>{visiblePlans.length}</span></div>{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} />)}</section>}{!visibleEntries.length && !visiblePlans.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article key={entry.id}><FeedAuthor entry={entry} />{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<p className="feed-body">{entry.body || 'Hat einen Besuch geteilt.'}</p>{!entry.media?.length && <h3>war bei {entry.spot_name}</h3>}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>Kommentar <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></section></main>
 }
 
-function UserAvatar({ user }) {
+function UserAvatar({ user, onOpenImage }) {
   const initials = user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)
-  return <span className="person-avatar social-avatar social-avatar--ranked">{user.image ? <img src={`/api/avatars/${user.id ?? user.user_id}`} alt="" /> : initials}<RankBadge uniqueSpots={user.unique_spots} /></span>
+  const avatar = <>{user.image ? <img src={`/api/avatars/${user.id ?? user.user_id}`} alt="" /> : initials}<RankBadge uniqueSpots={user.unique_spots} /></>
+  if (user.image && onOpenImage) return <button type="button" className="person-avatar social-avatar social-avatar--ranked social-avatar--zoomable" onClick={() => onOpenImage(`/api/avatars/${user.id ?? user.user_id}`, `Profilbild von ${user.name}`)} aria-label={`Profilbild von ${user.name} vergrößern`}>{avatar}</button>
+  return <span className="person-avatar social-avatar social-avatar--ranked">{avatar}</span>
 }
 
-function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed }) {
+function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenImage }) {
   const [tab, setTab] = useState('friends')
   const [friends, setFriends] = useState([])
   const [friendSuggestions, setFriendSuggestions] = useState([])
@@ -1161,7 +1166,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed }) {
           <div className="people-list friends-list">
             {!friends.length && <p className="journal-empty">Noch keine Freundschaften. Entdecke andere BoulderO-Nutzer:innen.</p>}
             {friends.map((user) => <article key={user.id}>
-              <UserAvatar user={user} />
+              <UserAvatar user={user} onOpenImage={onOpenImage} />
               <div><h3>{user.name}</h3><p>@{user.username}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div>
               <button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button>
               <button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button>
@@ -1661,11 +1666,12 @@ function App() {
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => { navigate('admin'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
-      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} authAudit={authAudit} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onBack={() => goBack('profile')} />}
+      {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={() => setFeedSummary({ unread_feed: 0 })} />}
-      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} />}
+      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
         {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; const feedNotifications = feedSummary.unread_feed; return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>
