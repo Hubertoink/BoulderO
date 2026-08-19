@@ -818,6 +818,7 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
     SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, s.name AS spot_name, s.district,
            u.id AS user_id, u.name AS user_name, u.username, u.image AS user_image,
+           (j.user_id = $1) AS is_owner,
            (SELECT COUNT(DISTINCT pv.spot_id)::int FROM visits pv WHERE pv.user_id = u.id) AS author_unique_spots,
            (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted')) AS is_friend,
            (SELECT COUNT(*)::int FROM entry_likes l WHERE l.journal_entry_id = j.id) AS like_count,
@@ -830,17 +831,51 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
       JOIN spots s ON s.id = v.spot_id
       JOIN users u ON u.id = j.user_id
       LEFT JOIN media m ON m.journal_entry_id = j.id
-     WHERE j.user_id <> $1
+     WHERE j.user_id = $1
+        OR (
+          j.visibility = 'public'
+          OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
+          OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
+        )
+     GROUP BY j.id, v.id, s.id, u.id
+     ORDER BY j.created_at DESC, j.id DESC
+     LIMIT 30
+  `, [req.user.id])
+  res.json({ entries: result.rows })
+}))
+
+app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
+  const bounds = z.object({
+    west: z.coerce.number().gte(-180).lte(180),
+    south: z.coerce.number().gte(-90).lte(90),
+    east: z.coerce.number().gte(-180).lte(180),
+    north: z.coerce.number().gte(-90).lte(90),
+  }).refine((value) => value.west < value.east && value.south < value.north, { message: 'Ungültiger Kartenausschnitt.' }).parse(req.query)
+  const result = await pool.query(`
+    SELECT j.id, j.body, j.created_at, v.visited_at, v.spot_id,
+           u.id AS user_id, u.name AS user_name, u.image AS user_image,
+           s.name AS spot_name,
+           COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type))
+             FILTER (WHERE m.id IS NOT NULL), '[]') AS media
+      FROM journal_entries j
+      JOIN visits v ON v.id = j.visit_id
+      JOIN spots s ON s.id = v.spot_id
+      JOIN users u ON u.id = j.user_id
+      LEFT JOIN media m ON m.journal_entry_id = j.id
+     WHERE s.status = 'active'
+       AND s.coordinates && ST_MakeEnvelope($2, $3, $4, $5, 4326)::geography
+       AND v.visited_at >= CURRENT_DATE - INTERVAL '6 days'
        AND (
-         j.visibility = 'public'
+         j.user_id = $1
+         OR j.visibility = 'public'
          OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
          OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
        )
      GROUP BY j.id, v.id, s.id, u.id
-     ORDER BY j.created_at DESC
-     LIMIT 30
-  `, [req.user.id])
-  res.json({ entries: result.rows })
+     ORDER BY j.created_at DESC, j.id DESC
+     LIMIT 24
+  `, [req.user.id, bounds.west, bounds.south, bounds.east, bounds.north])
+  res.json({ activities: result.rows })
 }))
 
 app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
@@ -851,7 +886,6 @@ app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
     SELECT (
       (SELECT COUNT(*) FROM entry_likes l JOIN journal_entries j ON j.id = l.journal_entry_id, last_seen WHERE j.user_id = $1 AND l.user_id <> $1 AND l.created_at > last_seen.value)
       + (SELECT COUNT(*) FROM entry_comments c JOIN journal_entries j ON j.id = c.journal_entry_id, last_seen WHERE j.user_id = $1 AND c.user_id <> $1 AND c.created_at > last_seen.value)
-      + (SELECT COUNT(*) FROM planned_visit_rsvps r JOIN planned_visits p ON p.id = r.planned_visit_id, last_seen WHERE p.user_id = $1 AND r.user_id <> $1 AND r.updated_at > last_seen.value)
     )::int AS unread_feed
   `, [req.user.id])
   res.json(result.rows[0])

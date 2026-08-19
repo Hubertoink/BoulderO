@@ -76,6 +76,23 @@ function userLocationIcon() {
   })
 }
 
+function escapeMarkerText(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
+}
+
+function activityIcon(activity, index, isPreview) {
+  const initials = activity.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
+  const description = (activity.body || `war bei ${activity.spot_name}`).replace(/\s+/g, ' ').slice(0, 118)
+  const imageId = activity.media?.[0]?.id
+  const preview = isPreview ? `<span class="map-activity-preview">${imageId ? `<img src="/api/media/${imageId}" alt="" />` : ''}<span><b>${escapeMarkerText(activity.user_name)}</b><small>${escapeMarkerText(description)}</small></span></span>` : ''
+  return L.divIcon({
+    className: 'map-activity-wrapper',
+    html: `<span class="map-activity-marker" style="--activity-delay:${(index % 6) * -0.55}s"><span class="map-activity-avatar">${escapeMarkerText(initials)}</span>${preview}</span>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+  })
+}
+
 function FocusMap({ spot }) {
   const map = useMap()
   useEffect(() => {
@@ -92,7 +109,52 @@ function FocusLocation({ location }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation }) {
+function MapActivityViewport({ onChange }) {
+  const map = useMap()
+  useEffect(() => {
+    function update() {
+      const bounds = map.getBounds()
+      const nextBounds = {
+        west: Number(bounds.getWest().toFixed(4)),
+        south: Number(bounds.getSouth().toFixed(4)),
+        east: Number(bounds.getEast().toFixed(4)),
+        north: Number(bounds.getNorth().toFixed(4)),
+      }
+      onChange((current) => current && Object.entries(nextBounds).every(([key, value]) => current[key] === value) ? current : nextBounds)
+    }
+    update()
+    map.on('moveend', update)
+    return () => map.off('moveend', update)
+  }, [map, onChange])
+  return null
+}
+
+function MapActivityLayer({ spots, activities, onSelect }) {
+  const [previewIndex, setPreviewIndex] = useState(0)
+  const markers = useMemo(() => {
+    const spotById = new Map(spots.map((spot) => [spot.id, spot]))
+    const visible = activities.filter((activity) => spotById.has(activity.spot_id))
+    const counts = new Map()
+    return visible.map((activity) => {
+      const spot = spotById.get(activity.spot_id)
+      const index = counts.get(activity.spot_id) ?? 0
+      counts.set(activity.spot_id, index + 1)
+      const total = visible.filter((item) => item.spot_id === activity.spot_id).length
+      const angle = (Math.PI * 2 * index) / Math.max(total, 1) - Math.PI / 2
+      return { activity, index, position: [spot.position[0] + Math.sin(angle) * 0.00022, spot.position[1] + Math.cos(angle) * 0.00034] }
+    })
+  }, [activities, spots])
+  useEffect(() => {
+    setPreviewIndex(0)
+    if (markers.length < 2) return undefined
+    const timer = window.setInterval(() => setPreviewIndex((current) => current + 1), 3000)
+    return () => window.clearInterval(timer)
+  }, [markers.length])
+  const previewId = markers.length ? markers[previewIndex % markers.length].activity.id : null
+  return markers.map(({ activity, index, position }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: () => onSelect(activity.spot_id) }} />)
+}
+
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, activities, onActivityBoundsChange }) {
   return (
     <div className="map-frame">
       <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas" eventHandlers={{ click: (event) => {
@@ -105,7 +167,9 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation }) 
         />
         <FocusMap spot={selectedSpot} />
         <FocusLocation location={userLocation} />
+        <MapActivityViewport onChange={onActivityBoundsChange} />
         {userLocation && <Marker position={userLocation} icon={userLocationIcon()} interactive={false} />}
+        <MapActivityLayer spots={spots} activities={activities} onSelect={onSelect} />
         {spots.map((spot) => (
           <Marker
             key={spot.id}
@@ -118,6 +182,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation }) 
       <div className="map-key" aria-label="Kartenlegende">
         <span><i className="key-dot key-dot--open" />Noch offen</span>
         <span><i className="key-dot key-dot--visited">✓</i>Besucht</span>
+        {activities.length > 0 && <span><i className="key-dot key-dot--activity" />Aktuelle Feed-Besuche</span>}
       </div>
       <div className="map-credits">Testdaten · Mannheim</div>
     </div>
@@ -161,9 +226,11 @@ function SpotSheet({ spot, onVisit, onPlan, onReport }) {
   )
 }
 
-function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
+function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
+  const [activityBounds, setActivityBounds] = useState(null)
+  const [activities, setActivities] = useState([])
 
   function requestUserLocation() {
     if (!navigator.geolocation) { onMessage('Standort wird von diesem Browser nicht unterstützt'); return }
@@ -188,6 +255,23 @@ function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, 
     }).catch(() => undefined)
     return () => { cancelled = true }
   }, [lastVisitedSpotId, spots])
+  useEffect(() => {
+    if (!currentUser || !activityBounds) {
+      setActivities([])
+      return undefined
+    }
+    const params = new URLSearchParams(Object.entries(activityBounds).map(([key, value]) => [key, String(value)]))
+    let cancelled = false
+    async function loadActivities() {
+      const response = await fetch(`/api/social/map-activity?${params}`)
+      if (!response.ok) return
+      const payload = await response.json()
+      if (!cancelled) setActivities(payload.activities)
+    }
+    loadActivities().catch(() => undefined)
+    const interval = window.setInterval(() => loadActivities().catch(() => undefined), 60000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [activityBounds, currentUser?.id])
   const visibleSpots = useMemo(() => {
     return spots.filter((spot) => {
       const matchesSearch = `${spot.name} ${spot.district}`.toLowerCase().includes(query.toLowerCase())
@@ -234,7 +318,7 @@ function MapView({ spots, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, 
         <span className="result-count">{visibleSpots.length} Orte</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} onDismiss={() => { if (!isPickingSpot) onSelectSpot(null) }} userLocation={userLocation} />
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} onDismiss={() => { if (!isPickingSpot) onSelectSpot(null) }} userLocation={userLocation} activities={activities} onActivityBoundsChange={setActivityBounds} />
       {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} />}
     </main>
   )
@@ -1058,7 +1142,7 @@ function formatFeedDate(value) {
 
 function FeedAuthor({ entry }) {
   const [expanded, setExpanded] = useState(false)
-  return <div className="feed-author"><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><time>{formatFeedDate(entry.visited_at)}</time>{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small></div>}</div>
+  return <div className="feed-author"><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><b>{entry.user_name}</b><time>{formatFeedDate(entry.created_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small></div>}</div>
 }
 
 function FeedMediaCarousel({ entry, onOpenImage }) {
@@ -1139,9 +1223,9 @@ function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead }
     await load()
   }
 
-  const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id)
+  const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id)
   const visiblePlans = (feedMode === 'friends' ? plannedVisits.filter((plan) => plan.is_friend || plan.is_owner) : plannedVisits).filter((plan) => !authorFilter || plan.user_id === authorFilter.id)
-  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed'}</h2>{authorFilter && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{visiblePlans.length > 0 && <section className="planned-visit-list"><div className="section-heading"><h3>Geplante Besuche</h3><span>{visiblePlans.length}</span></div>{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} />)}</section>}{!visibleEntries.length && !visiblePlans.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article key={entry.id}><FeedAuthor entry={entry} />{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<p className="feed-body">{entry.body || 'Hat einen Besuch geteilt.'}</p>{!entry.media?.length && <h3>war bei {entry.spot_name}</h3>}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>Kommentar <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></section></main>
+  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed'}</h2>{authorFilter && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{visiblePlans.length > 0 && <section className="planned-visit-list"><div className="section-heading"><h3>Geplante Besuche</h3><span>{visiblePlans.length}</span></div>{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} />)}</section>}{!visibleEntries.length && !visiblePlans.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></section></main>
 }
 
 function UserAvatar({ user, onOpenImage }) {
@@ -1756,7 +1840,7 @@ function App() {
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
-      {activeView === 'map' && <MapView spots={spots} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
+      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
