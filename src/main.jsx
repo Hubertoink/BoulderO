@@ -291,7 +291,6 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
         <MapActivityViewport onChange={onActivityBoundsChange} />
         {userLocation && <Marker position={userLocation} icon={userLocationIcon()} interactive={false} />}
         <MapActivityLayer activities={activities} />
-        <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
         {spots.map((spot) => (
           <Marker
             key={spot.id}
@@ -300,6 +299,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
             eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(spot.id) } }}
           />
         ))}
+        <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
       </MapContainer>
       <div className="map-key" aria-label="Kartenlegende">
         <span><i className="key-dot key-dot--open" />Noch offen</span>
@@ -336,7 +336,7 @@ function SpotPlans({ plans, onOpenPlanFeed }) {
   return <div className="spot-plans" ref={ref}><button type="button" className="spot-plans__toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={`${plans.length} geplante Besuche anzeigen`} title="Geplante Besuche"><IconCalendarEvent size={17} /><b>{plans.length}</b></button>{open && <div className="spot-plans__popover">{plans.map((plan) => <button type="button" key={plan.id} onClick={() => { setOpen(false); onOpenPlanFeed?.(plan) }}><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{formatPlanDate(plan.starts_at)}</small></span><IconChevronRight size={16} /></button>)}</div>}</div>
 }
 
-function SpotSheet({ spot, plans, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed, onOpenPlanFeed }) {
+function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed, onOpenPlanFeed }) {
   const visited = spot.visits > 0
   const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
   const daysSinceLastVisit = lastVisitDate ? Math.floor((Date.now() - lastVisitDate.getTime()) / 86400000) : 0
@@ -351,7 +351,7 @@ function SpotSheet({ spot, plans, onVisit, onPlan, onReport, hideOnMobile, onOpe
     <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
         <span className="eyebrow">{spot.district} · {spot.distance}</span>
-        <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}</div>
+        <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}<button type="button" className="icon-button ui-icon-button spot-sheet__close" onClick={onClose} aria-label="Hallenkarte schließen" title="Schließen"><IconX size={18} /></button></div>
       </div>
       <div className="spot-sheet__title-row">
         <div>
@@ -382,6 +382,8 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
   const [activities, setActivities] = useState([])
   const [mapPlans, setMapPlans] = useState([])
   const [selectedMapPlan, setSelectedMapPlan] = useState(null)
+  const [showPlanned, setShowPlanned] = useState(false)
+  const [showVisitMarkers, setShowVisitMarkers] = useState(true)
 
   function requestUserLocation() {
     if (!navigator.geolocation) { onMessage('Standort wird von diesem Browser nicht unterstützt'); return }
@@ -408,7 +410,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     return () => { cancelled = true }
   }, [spots])
   useEffect(() => {
-    if (!currentUser || filter === 'planned' || !activityBounds || activityBounds.zoom < 10) {
+    if (!currentUser || !showVisitMarkers || !activityBounds || activityBounds.zoom < 10) {
       setActivities([])
       return undefined
     }
@@ -432,7 +434,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     loadActivities().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setActivities([]) })
     const interval = window.setInterval(() => loadActivities().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setActivities([]) }), 60000)
     return () => { cancelled = true; controller.abort(); window.clearInterval(interval) }
-  }, [activityBounds, currentUser?.id, filter])
+  }, [activityBounds, currentUser?.id, showVisitMarkers])
   useEffect(() => {
     if (!currentUser) {
       setMapPlans([])
@@ -469,21 +471,22 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     }))
     onMessage(choice === 'going' ? 'Zusage gespeichert' : choice === 'interested' ? 'Interesse gespeichert' : 'Rückmeldung entfernt')
   }
+  const hallFilter = filter === 'planned' ? 'all' : filter
   const matchingSpots = useMemo(() => {
     return spots.filter((spot) => {
       const matchesSearch = `${spot.name} ${spot.district}`.toLowerCase().includes(query.toLowerCase())
       const area = Number(spot.area_sqm ?? String(spot.size ?? '').replace(/[^0-9]/g, ''))
-      const matchesFilter = filter === 'planned' || filter === 'all'
-        || (filter === 'visited' && spot.visits > 0)
-        || (filter === 'open' && spot.visits === 0)
-        || (filter === 'large' && area >= 1000)
-        || (filter === 'small' && area < 750)
-        || (filter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
+      const matchesFilter = hallFilter === 'all'
+        || (hallFilter === 'visited' && spot.visits > 0)
+        || (hallFilter === 'open' && spot.visits === 0)
+        || (hallFilter === 'large' && area >= 1000)
+        || (hallFilter === 'small' && area < 750)
+        || (hallFilter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
       return matchesSearch && matchesFilter
     })
-  }, [spots, query, filter])
+  }, [spots, query, hallFilter])
 
-  const visibleSpots = filter === 'planned' ? [] : matchingSpots
+  const visibleSpots = matchingSpots
   const selectedSpot = selectedId ? spots.find((spot) => spot.id === selectedId) ?? null : null
 
   return (
@@ -501,24 +504,25 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
         </div>
         <button type="button" className="toolbar-filter ui-icon-button" aria-label="Filter öffnen" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><IconAdjustmentsHorizontal size={19} /></button>
         <button type="button" className="toolbar-location ui-icon-button" aria-label="Meinen Standort anzeigen" onClick={requestUserLocation}><IconCurrentLocation size={19} /></button>
-        {filtersOpen && <div className="filter-menu" aria-label="Kartenfilter"><span className="eyebrow">Karte filtern</span>{[
-          ['all', 'Alle Hallen'], ['visited', 'Besucht'], ['open', 'Noch offen'], ['planned', 'Geplante Besuche'], ['large', 'Große Hallen'], ['small', 'Kompakt'], ['late', 'Bis spät geöffnet'],
-        ].map(([id, label]) => <button type="button" key={id} className={filter === id ? 'is-active' : ''} onClick={() => { setFilter(id); setFiltersOpen(false) }}>{label}{filter === id && <IconCheck size={15} />}</button>)}</div>}
+        {filtersOpen && <div className="filter-menu" aria-label="Kartenfilter"><span className="eyebrow">Hallen filtern</span>{[
+          ['all', 'Alle Hallen'], ['visited', 'Besucht'], ['open', 'Noch offen'], ['large', 'Große Hallen'], ['small', 'Kompakt'], ['late', 'Bis spät geöffnet'],
+        ].map(([id, label]) => <button type="button" key={id} className={hallFilter === id ? 'is-active' : ''} onClick={() => { setFilter(id); setFiltersOpen(false) }}>{label}{hallFilter === id && <IconCheck size={15} />}</button>)}<span className="eyebrow">Auf Karte zeigen</span><button type="button" className={showPlanned ? 'is-active' : ''} onClick={() => setShowPlanned((value) => !value)}>Geplante Besuche{showPlanned && <IconCheck size={15} />}</button><button type="button" className={showVisitMarkers ? 'is-active' : ''} onClick={() => setShowVisitMarkers((value) => !value)}>Besuchsmarker{showVisitMarkers && <IconCheck size={15} />}</button></div>}
       </div>
       <div className="filter-row">
         {[
           ['all', 'Alle Hallen'],
           ['visited', 'Besucht'],
           ['open', 'Noch offen'],
-          ['planned', 'Geplant'],
         ].map(([id, label]) => (
-          <button key={id} className={`filter-chip ${filter === id ? 'is-active' : ''}`} onClick={() => setFilter(id)}>{label}</button>
+          <button key={id} className={`filter-chip ${hallFilter === id ? 'is-active' : ''}`} onClick={() => setFilter(id)}>{label}</button>
         ))}
-        <span className="result-count">{filter === 'planned' ? `${mapPlans.length} Planungen` : `${visibleSpots.length} Orte`}</span>
+        <button type="button" className={`filter-chip filter-chip--planned ${showPlanned ? 'is-active' : ''}`} onClick={() => setShowPlanned((value) => !value)}>Geplant</button>
+        <button type="button" className={`filter-chip filter-chip--activity ${showVisitMarkers ? 'is-active' : ''}`} onClick={() => setShowVisitMarkers((value) => !value)}>Besuche</button>
+        <span className="result-count">{visibleSpots.length} Orte{showPlanned ? ` · ${mapPlans.length} Planungen` : ''}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={activities} plans={filter === 'planned' ? mapPlans : []} onActivityBoundsChange={setActivityBounds} />
-      {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={showVisitMarkers ? activities : []} plans={showPlanned ? mapPlans : []} onActivityBoundsChange={setActivityBounds} />
+      {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onClose={() => onSelectSpot(null)} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
       {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} onOpenPlanFeed={onOpenPlanFeed} onOpenMessage={onOpenMessage} onOpenUserFeed={onOpenUserFeed} />}
     </main>
   )
@@ -1898,6 +1902,7 @@ function SignInDialog({ configuration, onClose, onDemoSignIn, onMemberSignIn, on
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [passwordVisible, setPasswordVisible] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   function switchMode(next) { setError(''); setNotice(''); setMode(next) }
@@ -1924,16 +1929,16 @@ function SignInDialog({ configuration, onClose, onDemoSignIn, onMemberSignIn, on
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [mode, normalizedUsername])
   async function submit(event) {
-    event.preventDefault(); setError(''); setNotice('')
+    event.preventDefault(); if (submitting) return; setError(''); setNotice(''); setSubmitting(true)
     try {
       if (mode === 'signin') await onMemberSignIn(email, password)
       if (mode === 'register') { if (usernameStatus !== 'available') throw new Error('Wähle einen freien @Namen.'); const result = await onRegister(name, normalizedUsername, email, password); switchMode('signin'); setNotice(result?.deliveryFailed ? 'Dein Konto wurde angelegt, aber die Bestätigungs-E-Mail konnte noch nicht versendet werden. Du kannst sie hier erneut anfordern.' : 'Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.') }
       if (mode === 'forgot') { await onRequestPasswordReset(email); setNotice('Falls ein Konto existiert, wurde ein Link zum Zurücksetzen versendet.') }
       if (mode === 'reset') { if (password !== passwordConfirm) throw new Error('Die Passwörter stimmen nicht überein.'); await onResetPassword(resetToken, password); setNotice('Dein Passwort wurde geändert. Du kannst dich jetzt anmelden.'); setMode('signin'); setPassword(''); setPasswordConfirm('') }
-    } catch (submitError) { setError(submitError.message || 'Die Anfrage konnte nicht verarbeitet werden.') }
+    } catch (submitError) { setError(submitError.message || 'Die Anfrage konnte nicht verarbeitet werden.') } finally { setSubmitting(false) }
   }
   const title = ({ register: 'Konto erstellen', forgot: 'Passwort vergessen', reset: 'Neues Passwort', signin: 'Anmelden' })[mode]
-  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="BoulderO Konto"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>{title}</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{!resetToken && <div className="auth-tabs"><button className={mode === 'signin' ? 'is-active' : ''} onClick={() => switchMode('signin')}>Anmelden</button><button disabled={!configuration?.registrationEnabled} className={mode === 'register' ? 'is-active' : ''} onClick={() => switchMode('register')}>Registrieren</button></div>}<form className="admin-login" onSubmit={submit}>{mode === 'register' && <><label className="form-field"><span>Name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label className="form-field"><span>Dein @Name</span><span className={`username-input username-input--${usernameStatus}`}><b>@</b><input required value={username} minLength="3" maxLength="24" autoCapitalize="none" autoCorrect="off" spellCheck="false" onChange={(event) => setUsername(event.target.value.replace(/^@+/, '').toLowerCase())} placeholder="kerstin" aria-describedby="username-help" />{usernameStatus === 'available' && <IconCheck size={18} aria-label="@Name ist verfügbar" />}</span><small id="username-help" className={`username-help username-help--${usernameStatus}`}>{usernameStatus === 'available' ? '@Name ist verfügbar' : usernameStatus === 'checking' ? '@Name wird geprüft …' : usernameStatus === 'taken' ? '@Name ist bereits vergeben' : usernameStatus === 'invalid' ? '3–24 Zeichen: Kleinbuchstaben, Zahlen oder _' : 'So finden dich andere in BoulderO.'}</small></label></>}{mode !== 'reset' && <label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}{mode !== 'forgot' && <label className="form-field"><span>{mode === 'reset' ? 'Neues Passwort' : 'Passwort'}</span><span className="password-input"><input required type={passwordVisible ? 'text' : 'password'} minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" onClick={() => setPasswordVisible((value) => !value)} aria-label={passwordVisible ? 'Passwort verbergen' : 'Passwort anzeigen'}><IconEye size={18} /></button></span></label>}{mode === 'reset' && <label className="form-field"><span>Passwort wiederholen</span><input required type="password" minLength="10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}{notice && <p className="form-notice">{notice}</p>}<button className="visit-button" disabled={mode === 'register' && usernameStatus !== 'available'}>{mode === 'register' ? 'Bestätigungs-E-Mail senden' : mode === 'forgot' ? 'Reset-Link senden' : mode === 'reset' ? 'Passwort speichern' : 'Anmelden'}</button></form>{mode === 'signin' && <div className="auth-links"><button type="button" className="text-back" onClick={() => switchMode('forgot')}>Passwort vergessen?</button><button type="button" className="text-back" onClick={async () => { try { await onResendVerification(email); setNotice('Falls dein Konto noch nicht bestätigt ist, wurde eine neue E-Mail gesendet.') } catch { setError('Die Bestätigungs-E-Mail konnte nicht gesendet werden.') } }}>Bestätigung erneut senden</button></div>}{mode === 'register' && !configuration?.registrationEnabled && <p className="form-error">Die E-Mail-Registrierung wird gerade eingerichtet.</p>}{mode === 'signin' && configuration?.demoEnabled && <div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div>}<p className="auth-note"><IconLock size={15} />Passwörter werden sicher gespeichert. Neue Konten werden per E-Mail bestätigt.</p><div className="legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="BoulderO Konto"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>{title}</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{!resetToken && <div className="auth-tabs"><button className={mode === 'signin' ? 'is-active' : ''} onClick={() => switchMode('signin')}>Anmelden</button><button disabled={!configuration?.registrationEnabled} className={mode === 'register' ? 'is-active' : ''} onClick={() => switchMode('register')}>Registrieren</button></div>}<form className="admin-login" onSubmit={submit}>{mode === 'register' && <><label className="form-field"><span>Name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label className="form-field"><span>Dein @Name</span><span className={`username-input username-input--${usernameStatus}`}><b>@</b><input required value={username} minLength="3" maxLength="24" autoCapitalize="none" autoCorrect="off" spellCheck="false" onChange={(event) => setUsername(event.target.value.replace(/^@+/, '').toLowerCase())} placeholder="kerstin" aria-describedby="username-help" />{usernameStatus === 'available' && <IconCheck size={18} aria-label="@Name ist verfügbar" />}</span><small id="username-help" className={`username-help username-help--${usernameStatus}`}>{usernameStatus === 'available' ? '@Name ist verfügbar' : usernameStatus === 'checking' ? '@Name wird geprüft …' : usernameStatus === 'taken' ? '@Name ist bereits vergeben' : usernameStatus === 'invalid' ? '3–24 Zeichen: Kleinbuchstaben, Zahlen oder _' : 'So finden dich andere in BoulderO.'}</small></label></>}{mode !== 'reset' && <label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}{mode !== 'forgot' && <label className="form-field"><span>{mode === 'reset' ? 'Neues Passwort' : 'Passwort'}</span><span className="password-input"><input required type={passwordVisible ? 'text' : 'password'} minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" onClick={() => setPasswordVisible((value) => !value)} aria-label={passwordVisible ? 'Passwort verbergen' : 'Passwort anzeigen'}><IconEye size={18} /></button></span></label>}{mode === 'reset' && <label className="form-field"><span>Passwort wiederholen</span><input required type="password" minLength="10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}{notice && <p className="form-notice">{notice}</p>}<button className="visit-button" disabled={submitting || (mode === 'register' && usernameStatus !== 'available')}>{submitting ? 'Wird geprüft …' : mode === 'register' ? 'Bestätigungs-E-Mail senden' : mode === 'forgot' ? 'Reset-Link senden' : mode === 'reset' ? 'Passwort speichern' : 'Anmelden'}</button></form>{mode === 'signin' && <div className="auth-links"><button type="button" className="text-back" onClick={() => switchMode('forgot')}>Passwort vergessen?</button><button type="button" className="text-back" onClick={async () => { try { await onResendVerification(email); setNotice('Falls dein Konto noch nicht bestätigt ist, wurde eine neue E-Mail gesendet.') } catch { setError('Die Bestätigungs-E-Mail konnte nicht gesendet werden.') } }}>Bestätigung erneut senden</button></div>}{mode === 'register' && !configuration?.registrationEnabled && <p className="form-error">Die E-Mail-Registrierung wird gerade eingerichtet.</p>}{mode === 'signin' && configuration?.demoEnabled && <div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div>}<p className="auth-note"><IconLock size={15} />Passwörter werden sicher gespeichert. Neue Konten werden per E-Mail bestätigt.</p><div className="legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div></section></div>
 }
 
 function PasswordDialog({ onClose, onSave }) {
@@ -2143,7 +2148,12 @@ function App() {
   async function signInMember(email, password) {
     const csrfResponse = await fetch('/api/auth/csrf')
     const { csrfToken } = await csrfResponse.json()
-    await fetch('/api/auth/callback/member', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin, email, password }), redirect: 'manual' })
+    const signInResponse = await fetch('/api/auth/callback/member', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin, email, password }), redirect: 'manual' })
+    if (signInResponse.status === 429) {
+      const payload = await signInResponse.json().catch(() => ({}))
+      const minutes = Math.max(1, Math.ceil(Number(payload.retry_after_seconds ?? signInResponse.headers.get('Retry-After') ?? 60) / 60))
+      throw new Error(`Zu viele Anmeldeversuche. Bitte warte ${minutes} Minute${minutes === 1 ? '' : 'n'}.`)
+    }
     const response = await fetch('/api/me')
     if (!response.ok) throw new Error('E-Mail oder Passwort sind nicht korrekt.')
     const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); await loadAuthAudit(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')

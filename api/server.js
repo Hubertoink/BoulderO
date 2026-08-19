@@ -31,6 +31,9 @@ const appOrigin = process.env.APP_ORIGIN?.replace(/\/$/, '')
 const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.SMTP_FROM)
 const geocodingCache = new Map()
 let lastGeocodingRequestAt = 0
+const loginAttemptWindowMs = 15 * 60 * 1000
+const loginAttemptLimit = 10
+const loginAttemptsByIp = new Map()
 const emailTransport = process.env.EMAIL_TRANSPORT === 'json'
   ? nodemailer.createTransport({ jsonTransport: true })
   : smtpConfigured
@@ -197,6 +200,25 @@ const authConfig = {
 
 const app = express()
 app.set('trust proxy', true)
+function limitLoginAttempts(req, res, next) {
+  const now = Date.now()
+  const ip = req.ip || req.socket.remoteAddress || 'unknown'
+  const recentAttempts = (loginAttemptsByIp.get(ip) ?? []).filter((attempt) => now - attempt < loginAttemptWindowMs)
+  if (recentAttempts.length >= loginAttemptLimit) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((loginAttemptWindowMs - (now - recentAttempts[0])) / 1000))
+    res.set('Retry-After', String(retryAfterSeconds))
+    return res.status(429).json({ error: 'too_many_login_attempts', retry_after_seconds: retryAfterSeconds })
+  }
+  recentAttempts.push(now)
+  loginAttemptsByIp.set(ip, recentAttempts)
+  next()
+}
+app.post([
+  '/api/auth/callback/member',
+  '/auth/callback/member',
+  '/api/auth/callback/superadmin',
+  '/auth/callback/superadmin',
+], limitLoginAttempts)
 app.get('/api/auth/configuration', (_req, res) => {
   res.json({
     demoEnabled: demoMode,
