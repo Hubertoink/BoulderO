@@ -106,11 +106,20 @@ function activityIcon(activity, index, isPreview) {
 
 function planMapIcon(plan) {
   const day = new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(new Date(plan.starts_at))
+  const attendees = (plan.attendees ?? []).slice(0, 6)
+  const attendeeIcons = attendees.map((person, index) => {
+    const angle = ((Math.PI * 2 * index) / attendees.length) - Math.PI / 2
+    const initials = person.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
+    const avatar = person.user_image ? `<img src="/api/avatars/${encodeURIComponent(person.user_id)}" alt="" onerror="this.remove()" />` : ''
+    const responseClass = person.response === 'going' ? 'is-going' : 'is-interested'
+    return `<span class="map-plan-attendee ${responseClass}" style="--plan-attendee-x:${(Math.cos(angle) * 26).toFixed(1)}px;--plan-attendee-y:${(Math.sin(angle) * 26).toFixed(1)}px;--plan-attendee-delay:${(index * -.42).toFixed(2)}s">${escapeMarkerText(initials)}${avatar}</span>`
+  }).join('')
+  const overflow = (plan.attendees?.length ?? 0) > attendees.length ? `<span class="map-plan-attendee map-plan-attendee--more">+${plan.attendees.length - attendees.length}</span>` : ''
   return L.divIcon({
     className: 'map-plan-wrapper',
-    html: `<span class="map-plan-marker"><small>${day}</small></span>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
+    html: `<span class="map-plan-marker"><small>${day}</small>${attendeeIcons}${overflow}</span>`,
+    iconSize: [88, 88],
+    iconAnchor: [44, 44],
   })
 }
 

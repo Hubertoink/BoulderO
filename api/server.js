@@ -1102,20 +1102,26 @@ app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
   if (bounds.west >= bounds.east || bounds.south >= bounds.north) return res.status(400).json({ error: 'invalid_map_bounds' })
   const result = await pool.query(`
     SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id,
-           s.id AS spot_id, s.name AS spot_name, s.district, s.address, s.latitude, s.longitude,
+           s.id AS spot_id, s.name AS spot_name, s.district, s.address,
+           ST_Y(s.coordinates::geometry) AS latitude, ST_X(s.coordinates::geometry) AS longitude,
            u.name AS user_name, u.username, u.image AS user_image,
            (p.user_id = $1) AS is_owner,
            (SELECT COUNT(*)::int FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.response = 'going') AS going_count,
            (SELECT COUNT(*)::int FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.response = 'interested') AS interested_count,
+           COALESCE((
+             SELECT json_agg(json_build_object('user_id', attendee.id, 'user_name', attendee.name, 'user_image', attendee.image, 'response', r.response) ORDER BY r.response, attendee.name)
+               FROM planned_visit_rsvps r
+               JOIN users attendee ON attendee.id = r.user_id
+              WHERE r.planned_visit_id = p.id
+           ), '[]'::json) AS attendees,
            (SELECT response FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1) AS my_response
       FROM planned_visits p
       JOIN spots s ON s.id = p.spot_id
       JOIN users u ON u.id = p.user_id
      WHERE p.status = 'scheduled'
-       AND p.starts_at >= NOW()
+       AND p.starts_at >= CURRENT_DATE
        AND p.starts_at < NOW() + INTERVAL '90 days'
-       AND s.longitude BETWEEN $2 AND $3
-       AND s.latitude BETWEEN $4 AND $5
+       AND s.coordinates && ST_MakeEnvelope($2, $4, $3, $5, 4326)::geography
        AND (
          p.user_id = $1
          OR p.visibility = 'public'
