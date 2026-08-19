@@ -55,6 +55,7 @@ import {
   PasswordDialog,
   PlannedVisitDialog,
   ProfileView,
+  RankBadge,
   SignInDialog,
   SpotCorrectionDialog,
   SpotSuggestionDialog,

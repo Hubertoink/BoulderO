@@ -1233,5 +1233,5 @@ function PasswordDialog({ onClose, onSave }) {
 export {
   AdminSpotsView, BadgesView, FeedView, FriendsView, JournalComposer, JournalEntryDialog,
   JournalView, LegalDialog, Lightbox, MapView, MessageDialog, PasswordDialog, PlannedVisitDialog,
-  ProfileView, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
+  ProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
 }
