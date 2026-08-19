@@ -1094,12 +1094,13 @@ app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
 
 app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
   const bounds = z.object({
-    west: z.coerce.number().finite(),
-    south: z.coerce.number().finite(),
-    east: z.coerce.number().finite(),
-    north: z.coerce.number().finite(),
-  }).parse(req.query)
-  if (bounds.west >= bounds.east || bounds.south >= bounds.north) return res.status(400).json({ error: 'invalid_map_bounds' })
+    global: z.coerce.boolean().optional(),
+    west: z.coerce.number().finite().optional(),
+    south: z.coerce.number().finite().optional(),
+    east: z.coerce.number().finite().optional(),
+    north: z.coerce.number().finite().optional(),
+  }).refine((value) => value.global || [value.west, value.south, value.east, value.north].every((coordinate) => coordinate !== undefined), { message: 'map_bounds_required' }).parse(req.query)
+  if (!bounds.global && (bounds.west >= bounds.east || bounds.south >= bounds.north)) return res.status(400).json({ error: 'invalid_map_bounds' })
   const result = await pool.query(`
     SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id,
            s.id AS spot_id, s.name AS spot_name, s.district, s.address,
@@ -1121,7 +1122,7 @@ app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
      WHERE p.status = 'scheduled'
        AND p.starts_at >= CURRENT_DATE
        AND p.starts_at < NOW() + INTERVAL '90 days'
-       AND s.coordinates && ST_MakeEnvelope($2, $4, $3, $5, 4326)::geography
+       AND ($2::boolean OR s.coordinates && ST_MakeEnvelope($3, $5, $4, $6, 4326)::geography)
        AND (
          p.user_id = $1
          OR p.visibility = 'public'
@@ -1131,7 +1132,7 @@ app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id) OR (b.blocker_id = p.user_id AND b.blocked_id = $1))
      ORDER BY p.starts_at ASC
      LIMIT 80
-  `, [req.user.id, bounds.west, bounds.east, bounds.south, bounds.north])
+  `, [req.user.id, bounds.global ?? false, bounds.west ?? 0, bounds.east ?? 0, bounds.south ?? 0, bounds.north ?? 0])
   res.json({ plannedVisits: result.rows })
 }))
 

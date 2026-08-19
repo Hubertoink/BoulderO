@@ -329,7 +329,14 @@ function SpotVisitors({ spotId, onOpenUserFeed }) {
   return <div className="spot-visitors" ref={visitorRef}><div className="spot-visitors__heading"><span>Schon dort gewesen</span><button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>{visitors.slice(0, 5).map((visitor, index) => <span className="spot-visitors__avatar" style={{ zIndex: 5 - index }} key={visitor.id}>{visitor.image ? <img src={`/api/avatars/${visitor.id}`} alt="" /> : visitor.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>)}{visitors.length > 5 && <b>+{visitors.length - 5}</b>}</button></div>{open && <div className="spot-visitors__popover">{visitors.map((visitor) => <button type="button" key={visitor.id} onClick={() => { setOpen(false); onOpenUserFeed(visitor) }}><span className="person-avatar">{visitor.image ? <img src={`/api/avatars/${visitor.id}`} alt="" /> : visitor.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{visitor.name}</b><small>@{visitor.username} · zuletzt {formatFeedDate(visitor.last_visited_at)}</small></span><IconChevronRight size={16} /></button>)}</div>}</div>
 }
 
-function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed }) {
+function SpotPlans({ plans, onOpenPlanFeed }) {
+  const [open, setOpen] = useState(false)
+  const ref = useOutsideDismiss(open, () => setOpen(false))
+  if (!plans.length) return null
+  return <div className="spot-plans" ref={ref}><button type="button" className="spot-plans__toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={`${plans.length} geplante Besuche anzeigen`} title="Geplante Besuche"><IconCalendarEvent size={17} /><b>{plans.length}</b></button>{open && <div className="spot-plans__popover">{plans.map((plan) => <button type="button" key={plan.id} onClick={() => { setOpen(false); onOpenPlanFeed?.(plan) }}><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{formatPlanDate(plan.starts_at)}</small></span><IconChevronRight size={16} /></button>)}</div>}</div>
+}
+
+function SpotSheet({ spot, plans, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed, onOpenPlanFeed }) {
   const visited = spot.visits > 0
   const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
   const daysSinceLastVisit = lastVisitDate ? Math.floor((Date.now() - lastVisitDate.getTime()) / 86400000) : 0
@@ -344,7 +351,7 @@ function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFe
     <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
         <span className="eyebrow">{spot.district} · {spot.distance}</span>
-        {visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}
+        <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}</div>
       </div>
       <div className="spot-sheet__title-row">
         <div>
@@ -427,11 +434,12 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     return () => { cancelled = true; controller.abort(); window.clearInterval(interval) }
   }, [activityBounds, currentUser?.id, filter])
   useEffect(() => {
-    if (!currentUser || filter !== 'planned' || !activityBounds || activityBounds.zoom < 10) {
+    if (!currentUser) {
       setMapPlans([])
       return undefined
     }
-    const params = new URLSearchParams(['west', 'south', 'east', 'north'].map((key) => [key, String(activityBounds[key])]))
+    // While the planning volume is still small, keep upcoming plans available across the map.
+    const params = new URLSearchParams({ global: 'true' })
     const controller = new AbortController()
     let cancelled = false
     async function loadPlans() {
@@ -441,8 +449,9 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
       if (!cancelled) setMapPlans(payload.plannedVisits)
     }
     loadPlans().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setMapPlans([]) })
-    return () => { cancelled = true; controller.abort() }
-  }, [activityBounds, currentUser?.id, filter])
+    const interval = window.setInterval(() => loadPlans().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setMapPlans([]) }), 60000)
+    return () => { cancelled = true; controller.abort(); window.clearInterval(interval) }
+  }, [currentUser?.id])
   async function updateMapPlanRsvp(plan, choice) {
     const response = await fetch(`/api/planned-visits/${plan.id}/rsvp`, choice ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response: choice }) } : { method: 'DELETE' })
     if (!response.ok) { onMessage('Deine Zusage konnte nicht aktualisiert werden.'); return }
@@ -452,7 +461,12 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
       const wasInterested = current.my_response === 'interested' ? 1 : 0
       return { ...current, my_response: choice, going_count: Number(current.going_count) - wasGoing + (choice === 'going' ? 1 : 0), interested_count: Number(current.interested_count) - wasInterested + (choice === 'interested' ? 1 : 0) }
     })
-    setActivityBounds((current) => current ? { ...current } : current)
+    setMapPlans((current) => current.map((item) => {
+      if (item.id !== plan.id) return item
+      const wasGoing = item.my_response === 'going' ? 1 : 0
+      const wasInterested = item.my_response === 'interested' ? 1 : 0
+      return { ...item, my_response: choice, going_count: Number(item.going_count) - wasGoing + (choice === 'going' ? 1 : 0), interested_count: Number(item.interested_count) - wasInterested + (choice === 'interested' ? 1 : 0) }
+    }))
     onMessage(choice === 'going' ? 'Zusage gespeichert' : choice === 'interested' ? 'Interesse gespeichert' : 'Rückmeldung entfernt')
   }
   const matchingSpots = useMemo(() => {
@@ -503,8 +517,8 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
         <span className="result-count">{filter === 'planned' ? `${mapPlans.length} Planungen` : `${visibleSpots.length} Orte`}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={activities} plans={mapPlans} onActivityBoundsChange={setActivityBounds} />
-      {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} hideOnMobile={Boolean(query)} />}
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={activities} plans={filter === 'planned' ? mapPlans : []} onActivityBoundsChange={setActivityBounds} />
+      {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
       {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} onOpenPlanFeed={onOpenPlanFeed} onOpenMessage={onOpenMessage} onOpenUserFeed={onOpenUserFeed} />}
     </main>
   )
