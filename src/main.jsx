@@ -39,6 +39,7 @@ import {
 import 'leaflet/dist/leaflet.css'
 import './styles.css'
 import { initialSpots, mannheimCenter } from './data/spots'
+import { AuditView, RegisteredUsersDialog } from './features/admin/AuthAudit.jsx'
 
 const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
@@ -1151,64 +1152,6 @@ function SpotSuggestionReviewDialog({ suggestion, onApprove, onReject, onClose }
     try { await onReject(suggestion.id); onClose() } catch (rejectError) { setError(rejectError.message || 'Der Vorschlag konnte nicht abgelehnt werden.') } finally { setSaving(false) }
   }
   return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${suggestion.name} prüfen`}><div className="composer-header"><div><span className="eyebrow">Hallenvorschlag prüfen</span><h2>{suggestion.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="suggestion-meta">Gemeldet von {suggestion.submitted_by_name} · {suggestion.submitted_by_email}</p>{suggestion.notes && <p className="suggestion-note"><b>Hinweis:</b> {suggestion.notes}</p>}<form onSubmit={approve}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><SuggestionCoordinatePicker latitude={draft.latitude} longitude={draft.longitude} onChange={(latitude, longitude) => setDraft((current) => ({ ...current, latitude, longitude }))} /><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={draft.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<div className="suggestion-review-actions"><button type="button" className="danger" disabled={saving} onClick={reject}>Ablehnen</button><button className="visit-button" disabled={saving}>{saving ? 'Wird geprüft …' : 'Freigeben und veröffentlichen'}</button></div></form></section></div>
-}
-
-function LegacyAdminSpotsView({ spots, onCreate, onImport, onUpdate, onDelete, onBack }) {
-  const [form, setForm] = useState({ name: '', district: '', address: '', website: '', imageUrl: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
-  const [imageFile, setImageFile] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [error, setError] = useState('')
-  const [filter, setFilter] = useState('')
-  const [editingSpot, setEditingSpot] = useState(null)
-  const [deletingId, setDeletingId] = useState(null)
-  const csvInput = useRef(null)
-  const imageInput = useRef(null)
-  function update(field, value) { setForm((current) => ({ ...current, [field]: value })) }
-  async function submit(event) {
-    event.preventDefault()
-    setSaving(true)
-    setError('')
-    try {
-      await onCreate({ ...form, areaSqm: form.areaSqm ? Number(form.areaSqm) : null, latitude: Number(form.latitude), longitude: Number(form.longitude) }, imageFile)
-      setForm({ name: '', district: '', address: '', website: '', imageUrl: '', openingHours: '', areaSqm: '', latitude: '', longitude: '' })
-      setImageFile(null)
-      if (imageInput.current) imageInput.current.value = ''
-    } catch (submitError) {
-      setError(submitError.message || 'Die Halle konnte nicht angelegt werden.')
-    } finally {
-      setSaving(false)
-    }
-  }
-  async function importCsv(event) {
-    const [file] = event.target.files
-    if (!file) return
-    setImporting(true)
-    setError('')
-    try { await onImport(file) } catch (importError) { setError(importError.message || 'Der Import konnte nicht verarbeitet werden.') } finally {
-      setImporting(false)
-      event.target.value = ''
-    }
-  }
-  const filteredSpots = spots.filter((spot) => `${spot.name} ${spot.district} ${spot.address}`.toLowerCase().includes(filter.trim().toLowerCase()))
-  async function removeSpot(spot) {
-    if (!window.confirm(`„${spot.name}“ aus der Karte entfernen?`)) return
-    setDeletingId(spot.id)
-    try { await onDelete(spot.id) } catch (deleteError) { setError(deleteError.message || 'Die Halle konnte nicht gelöscht werden.') } finally { setDeletingId(null) }
-  }
-  return <main className="view content-view compact-view admin-view"><div className="page-intro"><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label><label className="form-field"><span>Bild hochladen</span><input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} wird nach dem Speichern verknüpft.` : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label><label className="form-field"><span>Oder Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} placeholder="https://…/halle.jpg" /><small>Praktisch für den CSV-Massenimport.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>Halle</th><th>Stadtteil</th><th>Adresse</th><th>Quelle</th><th aria-label="Aktionen" /></tr></thead><tbody>{filteredSpots.map((spot) => <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr>)}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{editingSpot && <SpotEditDialog spot={editingSpot} onSave={(input) => onUpdate(editingSpot.id, input)} onClose={() => setEditingSpot(null)} />}</main>
-}
-
-function AuthAuditSection({ events, stats, onOpenUsers }) {
-  return <section className="admin-audit"><div className="section-heading"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierungen & Anmeldungen</h2></div><span>{events.length}</span></div><p>Erfolgreiche Registrierungen und Anmeldungen der letzten 100 Ereignisse.</p><div className="admin-kpis" aria-label="BoulderO Kennzahlen"><button type="button" className="admin-kpi-button" onClick={onOpenUsers} aria-label="Registrierte Nutzer anzeigen"><strong>{stats?.registered_users ?? '–'}</strong><span>Registrierte Nutzer</span></button><div><strong>{stats?.journal_entries ?? '–'}</strong><span>Beiträge</span></div><div><strong>{stats?.active_spots ?? '–'}</strong><span>Aktive Hallen</span></div></div><div className="admin-table-wrap"><table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Konto</th><th>E-Mail</th></tr></thead><tbody>{events.length ? events.map((event) => <tr key={event.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</td><td><span className={`audit-event audit-event--${event.event_type}`}>{event.event_type === 'registration' ? 'Registrierung' : 'Anmeldung'}</span></td><td>{event.user_name}</td><td>{event.user_email}</td></tr>) : <tr><td colSpan="4">Noch keine Ereignisse seit der Aktivierung des Audits.</td></tr>}</tbody></table></div></section>
-}
-
-function RegisteredUsersDialog({ users, total, loading, onClose }) {
-  return <div className="composer-backdrop"><section className="journal-composer admin-users-dialog" role="dialog" aria-modal="true" aria-label="Registrierte Nutzer"><div className="composer-header"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierte Nutzer</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">{total > users.length ? `Die ersten ${users.length} von ${total} angelegten BoulderO-Konten.` : 'Alle angelegten BoulderO-Konten.'}</p><div className="admin-table-wrap"><table><thead><tr><th>Nutzer</th><th>E-Mail</th><th>Registriert</th><th>Letzte Anmeldung</th></tr></thead><tbody>{loading ? <tr><td colSpan="4">Nutzer werden geladen …</td></tr> : users.length ? users.map((user) => <tr key={user.id}><td><span className="admin-user"><span className="person-avatar">{user.image ? <img src={`/api/avatars/${user.id}`} alt="" /> : user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{user.name}</b><small>@{user.username}</small></span></span></td><td>{user.email}</td><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(user.created_at))}</td><td>{user.last_login_at ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(user.last_login_at)) : 'Noch keine'}</td></tr>) : <tr><td colSpan="4">Keine registrierten Nutzer gefunden.</td></tr>}</tbody></table></div></section></div>
-}
-
-function AuditView({ events, stats, onBack, onOpenUsers }) {
-  return <main className="view content-view compact-view admin-view"><div className="admin-page-content"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Kontosicherheit</h1><p>Überblick über erfolgreiche Registrierungen und Anmeldungen.</p></div><AuthAuditSection events={events} stats={stats} onOpenUsers={onOpenUsers} /><button className="text-back" onClick={onBack}>Zurück zum Profil</button></div></main>
 }
 
 function CsvImportReview({ preview, decisions, onDecisionChange, onBulk, onApply, onClose, applying }) {
