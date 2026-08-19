@@ -603,16 +603,32 @@ function journalMonthLabel(monthKey) {
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
 }
 
-function JournalUpcomingPlans({ onLogPlan }) {
-  const [plans, setPlans] = useState([])
-  const [mode, setMode] = useState('upcoming')
-  useEffect(() => { fetch('/api/social/planned-visits?scope=all').then((response) => response.ok ? response.json() : { plannedVisits: [] }).then((payload) => setPlans(payload.plannedVisits)).catch(() => setPlans([])) }, [])
-  const visible = plans.filter((plan) => mode === 'mine' ? plan.is_owner : mode === 'interested' ? plan.my_response === 'interested' : plan.is_owner || plan.my_response === 'going')
-  if (!plans.length) return null
-  return <section className="journal-plans"><div className="section-heading"><h2>Deine nächsten Besuche</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => setMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => setMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => setMode('mine')}>Von mir</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{plan.is_owner && new Date(plan.starts_at) <= new Date() && <button type="button" onClick={() => onLogPlan(plan)}><IconBookmark size={16} />Besuch festhalten</button>}</article>)}</div></section>
+function PastPlanDecisionDialog({ plan, onLogPlan, onMarkMissed, onClose }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function markMissed() {
+    setSaving(true); setError('')
+    try { await onMarkMissed(plan); onClose() } catch (markError) { setError(markError.message || 'Der Status konnte nicht gespeichert werden.') } finally { setSaving(false) }
+  }
+  return <div className="composer-backdrop"><section className="journal-composer plan-attendance-dialog" role="dialog" aria-modal="true" aria-label="Vergangene Planung abschließen"><div className="composer-header"><div><span className="eyebrow">Vergangene Planung</span><h2>{plan.spot_name}</h2><p>{formatPlanDate(plan.starts_at)}</p></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Hat der geplante Besuch stattgefunden?</p>{error && <p className="form-error">{error}</p>}<div className="plan-attendance-dialog__actions"><button type="button" className="plan-attendance-dialog__missed" disabled={saving} onClick={markMissed}>Nicht stattgefunden</button><button type="button" className="visit-button" disabled={saving} onClick={() => { onLogPlan(plan); onClose() }}><IconCheck size={17} />Besuch eintragen</button></div></section></div>
 }
 
-function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage, onLogPlan }) {
+function JournalUpcomingPlans({ onLogPlan, onMarkMissed }) {
+  const [plans, setPlans] = useState([])
+  const [mode, setMode] = useState('upcoming')
+  const [decisionPlan, setDecisionPlan] = useState(null)
+  useEffect(() => {
+    const from = new Date(Date.now() - 270 * 24 * 60 * 60 * 1000).toISOString()
+    const to = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+    fetch(`/api/social/planned-visits?scope=all&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((response) => response.ok ? response.json() : { plannedVisits: [] }).then((payload) => setPlans(payload.plannedVisits)).catch(() => setPlans([]))
+  }, [])
+  const pastPlans = plans.filter((plan) => plan.is_owner && new Date(plan.starts_at) < new Date())
+  const visible = plans.filter((plan) => mode === 'past' ? plan.is_owner && new Date(plan.starts_at) < new Date() : mode === 'mine' ? plan.is_owner && new Date(plan.starts_at) >= new Date() : mode === 'interested' ? plan.my_response === 'interested' && new Date(plan.starts_at) >= new Date() : (plan.is_owner || plan.my_response === 'going') && new Date(plan.starts_at) >= new Date())
+  if (!plans.length) return null
+  return <><section className="journal-plans"><div className="section-heading"><h2>{mode === 'past' ? 'Vergangene Planungen' : 'Deine nächsten Besuche'}</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => setMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => setMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => setMode('mine')}>Von mir</button><button className={mode === 'past' ? 'is-active' : ''} onClick={() => setMode('past')}>Vergangen{pastPlans.length > 0 && <b>{pastPlans.length}</b>}</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{mode === 'past' ? 'Bitte Status festlegen' : plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{mode === 'past' ? <button type="button" onClick={() => setDecisionPlan(plan)}><IconCheck size={16} />Status wählen</button> : null}</article>)}</div></section>{decisionPlan && <PastPlanDecisionDialog plan={decisionPlan} onLogPlan={onLogPlan} onMarkMissed={async (plan) => { await onMarkMissed(plan); setPlans((current) => current.filter((item) => item.id !== plan.id)) }} onClose={() => setDecisionPlan(null)} />}</>
+}
+
+function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage, onLogPlan, onMarkPlanMissed }) {
   const [filters, setFilters] = useState({ hall: 'all', year: 'all', month: 'all', from: '', to: '', type: 'all' })
   const [filtersOpen, setFiltersOpen] = useState(false)
   if (!currentUser) {
@@ -653,7 +669,7 @@ function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenCompos
         </div>
         <button className="journal-add" onClick={onOpenComposer}><IconPlus size={18} />Eintrag</button>
       </div>
-      <JournalUpcomingPlans onLogPlan={onLogPlan} />
+      <JournalUpcomingPlans onLogPlan={onLogPlan} onMarkMissed={onMarkPlanMissed} />
       <section className="journal-summary">
         <div><strong>{visitTotal}</strong><span>Besuche</span></div>
         <div className="journal-summary__ratio"><strong>{uniqueHallCount}</strong><i>/</i><small>{hallTotal}</small><span>Hallen besucht</span></div>
@@ -2026,6 +2042,12 @@ function App() {
     setComposerOpen(true)
   }
 
+  async function markPlanMissed(plan) {
+    const response = await fetch(`/api/planned-visits/${plan.id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Nicht stattgefunden' }) })
+    if (!response.ok) throw new Error('Die Planung konnte nicht als nicht stattgefunden markiert werden.')
+    showToast('Planung als nicht stattgefunden markiert')
+  }
+
   async function createJournalEntry(entry) {
     const response = await fetch('/api/visits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotId: entry.spotId, visitedAt: entry.visitedAt, startedAt: entry.startedAt, endedAt: entry.endedAt, body: entry.body, visibility: entry.visibility }) })
     if (!response.ok) throw new Error('Der Besuch konnte nicht gespeichert werden.')
@@ -2035,6 +2057,10 @@ function App() {
       entry.files.forEach((file) => formData.append('photos', file))
       const upload = await fetch(`/api/journal/${journalEntry.id}/photos`, { method: 'POST', body: formData })
       if (!upload.ok) throw new Error('Der Text wurde gespeichert, aber mindestens ein Foto konnte nicht hochgeladen werden.')
+    }
+    if (entry.plannedVisitId) {
+      const completion = await fetch(`/api/planned-visits/${entry.plannedVisitId}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journalEntryId: journalEntry.id }) })
+      if (!completion.ok) throw new Error('Der Besuch wurde gespeichert, aber die Planung konnte nicht abgeschlossen werden.')
     }
     await loadPrivateData()
     showToast(entry.visibility === 'private' ? 'Privater Tagebucheintrag gespeichert' : 'Geteilter Tagebucheintrag gespeichert')
@@ -2128,7 +2154,6 @@ function App() {
     const response = await fetch('/api/admin/spots/import/apply', { method: 'POST', body: formData })
     if (!response.ok) throw new Error('Die ausgewählten Hallen konnten nicht angewendet werden. Bitte prüfe die Auswahl.')
     const { created, updated, skipped } = await response.json()
-    if (entry.plannedVisitId) await fetch(`/api/planned-visits/${entry.plannedVisitId}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journalEntryId: journalEntry.id }) })
     await loadPrivateData()
     showToast(`${created} angelegt, ${updated} aktualisiert, ${skipped} übersprungen`)
   }
@@ -2214,7 +2239,7 @@ function App() {
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
-      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} />}
+      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
