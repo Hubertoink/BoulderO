@@ -80,17 +80,26 @@ function escapeMarkerText(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 }
 
+const activityIconCache = new Map()
+
 function activityIcon(activity, index, isPreview) {
+  const cacheKey = [activity.id, index, isPreview, activity.user_name, activity.user_image, activity.body, activity.media?.[0]?.id].join('|')
+  const cached = activityIconCache.get(cacheKey)
+  if (cached) return cached
   const initials = activity.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
   const description = (activity.body || `war bei ${activity.spot_name}`).replace(/\s+/g, ' ').slice(0, 118)
   const imageId = activity.media?.[0]?.id
   const preview = isPreview ? `<span class="map-activity-preview">${imageId ? `<img src="/api/media/${imageId}" alt="" />` : ''}<span><b>${escapeMarkerText(activity.user_name)}</b><small>${escapeMarkerText(description)}</small></span></span>` : ''
-  return L.divIcon({
+  const avatar = activity.user_image ? `<img src="/api/avatars/${encodeURIComponent(activity.user_id)}" alt="" onerror="this.remove()" />` : ''
+  const icon = L.divIcon({
     className: 'map-activity-wrapper',
-    html: `<span class="map-activity-marker" style="--activity-delay:${(index % 6) * -0.55}s"><span class="map-activity-avatar">${escapeMarkerText(initials)}</span>${preview}</span>`,
+    html: `<span class="map-activity-marker" style="--activity-delay:${(index % 6) * -0.55}s"><span class="map-activity-avatar">${escapeMarkerText(initials)}${avatar}</span>${preview}</span>`,
     iconSize: [38, 38],
     iconAnchor: [19, 19],
   })
+  if (activityIconCache.size > 300) activityIconCache.clear()
+  activityIconCache.set(cacheKey, icon)
+  return icon
 }
 
 function FocusMap({ spot }) {
@@ -119,6 +128,7 @@ function MapActivityViewport({ onChange }) {
         south: Number(bounds.getSouth().toFixed(4)),
         east: Number(bounds.getEast().toFixed(4)),
         north: Number(bounds.getNorth().toFixed(4)),
+        zoom: map.getZoom(),
       }
       onChange((current) => current && Object.entries(nextBounds).every(([key, value]) => current[key] === value) ? current : nextBounds)
     }
@@ -130,20 +140,34 @@ function MapActivityViewport({ onChange }) {
 }
 
 function MapActivityLayer({ spots, activities, onSelect }) {
+  const map = useMap()
+  const [zoom, setZoom] = useState(() => map.getZoom())
   const [previewIndex, setPreviewIndex] = useState(0)
+  useEffect(() => {
+    const updateZoom = () => setZoom(map.getZoom())
+    map.on('zoomend', updateZoom)
+    return () => map.off('zoomend', updateZoom)
+  }, [map])
   const markers = useMemo(() => {
     const spotById = new Map(spots.map((spot) => [spot.id, spot]))
     const visible = activities.filter((activity) => spotById.has(activity.spot_id))
+    const totals = new Map()
+    visible.forEach((activity) => totals.set(activity.spot_id, (totals.get(activity.spot_id) ?? 0) + 1))
     const counts = new Map()
     return visible.map((activity) => {
       const spot = spotById.get(activity.spot_id)
       const index = counts.get(activity.spot_id) ?? 0
       counts.set(activity.spot_id, index + 1)
-      const total = visible.filter((item) => item.spot_id === activity.spot_id).length
-      const angle = (Math.PI * 2 * index) / Math.max(total, 1) - Math.PI / 2
-      return { activity, index, position: [spot.position[0] + Math.sin(angle) * 0.00022, spot.position[1] + Math.cos(angle) * 0.00034] }
+      const ringIndex = Math.floor(index / 6)
+      const indexOnRing = index % 6
+      const countOnRing = Math.min(6, totals.get(activity.spot_id) - ringIndex * 6)
+      const angle = (Math.PI * 2 * indexOnRing) / Math.max(countOnRing, 1) - Math.PI / 2 + ringIndex * .38
+      const radius = 38 + ringIndex * 24
+      const basePoint = map.project(spot.position, zoom)
+      const position = map.unproject(basePoint.add([Math.cos(angle) * radius, Math.sin(angle) * radius]), zoom)
+      return { activity, index, position }
     })
-  }, [activities, spots])
+  }, [activities, map, spots, zoom])
   useEffect(() => {
     setPreviewIndex(0)
     if (markers.length < 2) return undefined
@@ -151,6 +175,7 @@ function MapActivityLayer({ spots, activities, onSelect }) {
     return () => window.clearInterval(timer)
   }, [markers.length])
   const previewId = markers.length ? markers[previewIndex % markers.length].activity.id : null
+  if (zoom < 10) return null
   return markers.map(({ activity, index, position }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: () => onSelect(activity.spot_id) }} />)
 }
 
@@ -256,17 +281,25 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     return () => { cancelled = true }
   }, [lastVisitedSpotId, spots])
   useEffect(() => {
-    if (!currentUser || !activityBounds) {
+    if (!currentUser || !activityBounds || activityBounds.zoom < 10) {
       setActivities([])
       return undefined
     }
-    const params = new URLSearchParams(Object.entries(activityBounds).map(([key, value]) => [key, String(value)]))
+    const params = new URLSearchParams(['west', 'south', 'east', 'north'].map((key) => [key, String(activityBounds[key])]))
     let cancelled = false
     async function loadActivities() {
       const response = await fetch(`/api/social/map-activity?${params}`)
       if (!response.ok) return
       const payload = await response.json()
-      if (!cancelled) setActivities(payload.activities)
+      if (!cancelled) setActivities((current) => {
+        const existing = new Map(current.map((activity) => [activity.id, activity]))
+        const next = payload.activities.map((activity) => {
+          const previous = existing.get(activity.id)
+          const sameMedia = previous?.media?.length === activity.media?.length && previous?.media?.every((media, index) => media.id === activity.media[index].id)
+          return previous && previous.body === activity.body && previous.user_name === activity.user_name && previous.user_image === activity.user_image && sameMedia ? previous : activity
+        })
+        return current.length === next.length && current.every((activity, index) => activity === next[index]) ? current : next
+      })
     }
     loadActivities().catch(() => undefined)
     const interval = window.setInterval(() => loadActivities().catch(() => undefined), 60000)
