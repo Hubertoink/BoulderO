@@ -1534,6 +1534,21 @@ app.get('/admin/auth-audit', ...requireSuperAdmin, asyncRoute(async (req, res) =
   res.json({ events: result.rows, stats: stats.rows[0] })
 }))
 
+app.get('/admin/users', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const limit = z.coerce.number().int().min(1).max(1000).parse(req.query.limit ?? 1000)
+  const result = await pool.query(
+    `SELECT u.id, u.name, u.username, u.email, u.image, u.role, u.created_at,
+            (SELECT MAX(a.created_at)
+               FROM auth_audit_events a
+              WHERE a.user_id = u.id AND a.event_type = 'login') AS last_login_at
+       FROM users u
+      ORDER BY u.created_at DESC, u.name ASC
+      LIMIT $1`,
+    [limit],
+  )
+  res.json({ users: result.rows })
+}))
+
 app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
   const result = await pool.query(`
     SELECT id, name, district, address, website, opening_hours, area_sqm, image_url,
