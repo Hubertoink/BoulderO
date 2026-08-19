@@ -685,9 +685,55 @@ function RankBadge({ progress, uniqueSpots }) {
   return badge ? <span className={`rank-badge rank-badge--${badge.threshold}`} title={badge.name}><IconMedal size={15} /></span> : null
 }
 
+async function cropAvatarImage(file, zoom, position) {
+  const sourceUrl = URL.createObjectURL(file)
+  const source = await new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Das Bild konnte nicht verarbeitet werden.'))
+    image.src = sourceUrl
+  })
+  URL.revokeObjectURL(sourceUrl)
+  const size = 720
+  const baseScale = Math.max(size / source.naturalWidth, size / source.naturalHeight)
+  const scale = baseScale * zoom
+  const width = source.naturalWidth * scale
+  const height = source.naturalHeight * scale
+  const overflowX = Math.max(0, width - size)
+  const overflowY = Math.max(0, height - size)
+  const canvas = document.createElement('canvas')
+  canvas.width = size; canvas.height = size
+  canvas.getContext('2d').drawImage(source, (size - width) / 2 + position.x * overflowX / 2, (size - height) / 2 + position.y * overflowY / 2, width, height)
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', .9))
+  if (!blob) throw new Error('Das Bild konnte nicht verarbeitet werden.')
+  return new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'profilbild'}.jpg`, { type: 'image/jpeg' })
+}
+
+function AvatarCropDialog({ file, onClose, onSave }) {
+  const [zoom, setZoom] = useState(1)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [drag, setDrag] = useState(null)
+  const previewUrl = useMemo(() => URL.createObjectURL(file), [file])
+  useEffect(() => () => URL.revokeObjectURL(previewUrl), [previewUrl])
+  function move(event) {
+    if (!drag) return
+    const factor = 1 / Math.max(.25, zoom - .35)
+    setPosition({ x: Math.max(-1, Math.min(1, drag.position.x + (event.clientX - drag.x) / 120 * factor)), y: Math.max(-1, Math.min(1, drag.position.y + (event.clientY - drag.y) / 120 * factor)) })
+  }
+  async function save() {
+    setSaving(true); setError('')
+    try { await onSave(await cropAvatarImage(file, zoom, position)); onClose() } catch (saveError) { setError(saveError.message || 'Profilfoto konnte nicht gespeichert werden.') } finally { setSaving(false) }
+  }
+  return <div className="composer-backdrop avatar-crop-backdrop"><section className="journal-composer avatar-crop-dialog" role="dialog" aria-modal="true" aria-label="Profilfoto zuschneiden"><div className="composer-header"><div><span className="eyebrow">Profilfoto</span><h2>Bild auswählen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Ziehe das Bild im Kreis an die gewünschte Position und passe den Ausschnitt mit dem Zoom an.</p><div className="avatar-crop-stage" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setDrag({ x: event.clientX, y: event.clientY, position }) }} onPointerMove={move} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}><img src={previewUrl} alt="Vorschau für dein Profilfoto" style={{ transform: `translate(${position.x * (zoom - 1) * 50}%, ${position.y * (zoom - 1) * 50}%) scale(${zoom})` }} /><span /></div><label className="avatar-crop-zoom"><span>Zoom</span><input type="range" min="1" max="3" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>{error && <p className="form-error">{error}</p>}<div className="avatar-crop-actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="button" className="visit-button" disabled={saving} onClick={save}>{saving ? 'Wird gespeichert …' : 'Foto übernehmen'}</button></div></section></div>
+}
+
 function ProfileAvatar({ user, progress, onUpload }) {
   const input = useRef(null)
-  return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event.target.files[0])} /><span>Profilfoto ändern</span></div>
+  const [file, setFile] = useState(null)
+  function chooseFile(event) { const selected = event.target.files?.[0]; event.target.value = ''; if (selected) setFile(selected) }
+  return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseFile} /><span>Profilfoto ändern</span>{file && <AvatarCropDialog file={file} onClose={() => setFile(null)} onSave={onUpload} />}</div>
 }
 
 function AccountDeletionDialog({ username, onClose, onDelete }) {
@@ -2032,7 +2078,7 @@ function App() {
     const formData = new FormData()
     formData.append('avatar', await optimizePhoto(file))
     const response = await fetch('/api/me/avatar', { method: 'POST', body: formData })
-    if (!response.ok) return showToast('Profilfoto konnte nicht hochgeladen werden')
+    if (!response.ok) throw new Error('Profilfoto konnte nicht hochgeladen werden.')
     const { user } = await response.json()
     setCurrentUser(user)
     showToast('Profilfoto aktualisiert')
