@@ -947,7 +947,7 @@ app.post('/social/friend-requests/:requestId/decline', requireUser, asyncRoute(a
 
 app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
-    SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, s.name AS spot_name, s.district,
+    SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, v.spot_id, s.name AS spot_name, s.district,
            u.id AS user_id, u.name AS user_name, u.username, u.image AS user_image,
            (j.user_id = $1) AS is_owner,
            (SELECT COUNT(DISTINCT pv.spot_id)::int FROM visits pv WHERE pv.user_id = u.id) AS author_unique_spots,
@@ -969,7 +969,7 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
           OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
         )
      GROUP BY j.id, v.id, s.id, u.id
-     ORDER BY j.created_at DESC, j.id DESC
+     ORDER BY v.visited_at DESC, j.created_at DESC, j.id DESC
      LIMIT 30
   `, [req.user.id])
   res.json({ entries: result.rows })
@@ -1004,10 +1004,32 @@ app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
          OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
        )
      GROUP BY j.id, v.id, s.id, u.id
-     ORDER BY j.created_at DESC, j.id DESC
+     ORDER BY v.visited_at DESC, j.created_at DESC, j.id DESC
      LIMIT 24
   `, [req.user.id, bounds.west, bounds.south, bounds.east, bounds.north])
   res.json({ activities: result.rows })
+}))
+
+app.get('/social/spots/:spotId/visitors', requireUser, asyncRoute(async (req, res) => {
+  const spotId = z.string().uuid().parse(req.params.spotId)
+  const result = await pool.query(`
+    SELECT u.id, u.name, u.username, u.image, MAX(v.visited_at) AS last_visited_at
+      FROM journal_entries j
+      JOIN visits v ON v.id = j.visit_id
+      JOIN users u ON u.id = j.user_id
+     WHERE v.spot_id = $2
+       AND (
+         j.user_id = $1
+         OR j.visibility = 'public'
+         OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
+         OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
+       )
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = j.user_id) OR (b.blocker_id = j.user_id AND b.blocked_id = $1))
+     GROUP BY u.id
+     ORDER BY MAX(v.visited_at) DESC, u.name
+     LIMIT 12
+  `, [req.user.id, spotId])
+  res.json({ visitors: result.rows })
 }))
 
 app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
@@ -1067,6 +1089,43 @@ app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
      ORDER BY p.starts_at ASC
      LIMIT 120
   `, [req.user.id, from, to, filters.response ?? null, filters.scope])
+  res.json({ plannedVisits: result.rows })
+}))
+
+app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
+  const bounds = z.object({
+    west: z.coerce.number().finite(),
+    south: z.coerce.number().finite(),
+    east: z.coerce.number().finite(),
+    north: z.coerce.number().finite(),
+  }).parse(req.query)
+  if (bounds.west >= bounds.east || bounds.south >= bounds.north) return res.status(400).json({ error: 'invalid_map_bounds' })
+  const result = await pool.query(`
+    SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id,
+           s.id AS spot_id, s.name AS spot_name, s.district, s.address, s.latitude, s.longitude,
+           u.name AS user_name, u.username, u.image AS user_image,
+           (p.user_id = $1) AS is_owner,
+           (SELECT COUNT(*)::int FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.response = 'going') AS going_count,
+           (SELECT COUNT(*)::int FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.response = 'interested') AS interested_count,
+           (SELECT response FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1) AS my_response
+      FROM planned_visits p
+      JOIN spots s ON s.id = p.spot_id
+      JOIN users u ON u.id = p.user_id
+     WHERE p.status = 'scheduled'
+       AND p.starts_at >= NOW()
+       AND p.starts_at < NOW() + INTERVAL '90 days'
+       AND s.longitude BETWEEN $2 AND $3
+       AND s.latitude BETWEEN $4 AND $5
+       AND (
+         p.user_id = $1
+         OR p.visibility = 'public'
+         OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted'))
+         OR (p.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = p.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
+       )
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id) OR (b.blocker_id = p.user_id AND b.blocked_id = $1))
+     ORDER BY p.starts_at ASC
+     LIMIT 80
+  `, [req.user.id, bounds.west, bounds.east, bounds.south, bounds.north])
   res.json({ plannedVisits: result.rows })
 }))
 

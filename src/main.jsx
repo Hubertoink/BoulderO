@@ -103,6 +103,16 @@ function activityIcon(activity, index, isPreview) {
   return icon
 }
 
+function planMapIcon(plan) {
+  const day = new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(new Date(plan.starts_at))
+  return L.divIcon({
+    className: 'map-plan-wrapper',
+    html: `<span class="map-plan-marker"><small>${day}</small></span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  })
+}
+
 function FocusMap({ spot }) {
   const map = useMap()
   useEffect(() => {
@@ -208,6 +218,30 @@ function MapActivityLayer({ activities, onSelect }) {
   return markers.map(({ activity, index, position }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(activity.spot_id) } }} />)
 }
 
+function MapPlanLayer({ plans, onSelect }) {
+  const map = useMap()
+  const [zoom, setZoom] = useState(() => map.getZoom())
+  useEffect(() => {
+    const updateZoom = () => setZoom(map.getZoom())
+    map.on('zoomend', updateZoom)
+    return () => map.off('zoomend', updateZoom)
+  }, [map])
+  const markers = useMemo(() => {
+    const totals = new Map()
+    plans.forEach((plan) => totals.set(plan.spot_id, (totals.get(plan.spot_id) ?? 0) + 1))
+    const counts = new Map()
+    return plans.map((plan) => {
+      const index = counts.get(plan.spot_id) ?? 0
+      counts.set(plan.spot_id, index + 1)
+      const angle = (Math.PI * 2 * index) / Math.max(totals.get(plan.spot_id), 1) - Math.PI / 2
+      const basePoint = map.project([Number(plan.latitude), Number(plan.longitude)], zoom)
+      return { plan, position: map.unproject(basePoint.add([Math.cos(angle) * 25, Math.sin(angle) * 25]), zoom) }
+    })
+  }, [plans, map, zoom])
+  if (zoom < 10) return null
+  return markers.map(({ plan, position }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
+}
+
 function MobileMapDismiss({ onDismiss }) {
   useMapEvents({
     click: () => {
@@ -217,7 +251,7 @@ function MobileMapDismiss({ onDismiss }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, activities, onActivityBoundsChange }) {
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, activities, plans, onSelectPlan, onActivityBoundsChange }) {
   return (
     <div className="map-frame">
       <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas">
@@ -232,6 +266,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, ac
         <MapActivityViewport onChange={onActivityBoundsChange} />
         {userLocation && <Marker position={userLocation} icon={userLocationIcon()} interactive={false} />}
         <MapActivityLayer activities={activities} onSelect={onSelect} />
+        <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
         {spots.map((spot) => (
           <Marker
             key={spot.id}
@@ -245,13 +280,31 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, ac
         <span><i className="key-dot key-dot--open" />Noch offen</span>
         <span><i className="key-dot key-dot--visited">✓</i>Besucht</span>
         {activities.length > 0 && <span><i className="key-dot key-dot--activity" />Aktuelle Feed-Besuche</span>}
+        {plans.length > 0 && <span><i className="key-dot key-dot--plan" />Geplante Besuche</span>}
       </div>
       <div className="map-credits">Testdaten · Mannheim</div>
     </div>
   )
 }
 
-function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile }) {
+function SpotVisitors({ spotId, onOpenUserFeed }) {
+  const [visitors, setVisitors] = useState([])
+  const [open, setOpen] = useState(false)
+  const visitorRef = useOutsideDismiss(open, () => setOpen(false))
+  useEffect(() => {
+    if (!onOpenUserFeed) { setVisitors([]); return undefined }
+    let cancelled = false
+    fetch(`/api/social/spots/${spotId}/visitors`, { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : { visitors: [] })
+      .then((payload) => { if (!cancelled) setVisitors(payload.visitors) })
+      .catch(() => { if (!cancelled) setVisitors([]) })
+    return () => { cancelled = true }
+  }, [spotId, onOpenUserFeed])
+  if (!visitors.length) return null
+  return <div className="spot-visitors" ref={visitorRef}><div className="spot-visitors__heading"><span>Schon dort gewesen</span><button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>{visitors.slice(0, 5).map((visitor, index) => <span className="spot-visitors__avatar" style={{ zIndex: 5 - index }} key={visitor.id}>{visitor.image ? <img src={`/api/avatars/${visitor.id}`} alt="" /> : visitor.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>)}{visitors.length > 5 && <b>+{visitors.length - 5}</b>}</button></div>{open && <div className="spot-visitors__popover">{visitors.map((visitor) => <button type="button" key={visitor.id} onClick={() => { setOpen(false); onOpenUserFeed(visitor) }}><span className="person-avatar">{visitor.image ? <img src={`/api/avatars/${visitor.id}`} alt="" /> : visitor.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{visitor.name}</b><small>@{visitor.username} · zuletzt {formatFeedDate(visitor.last_visited_at)}</small></span><IconChevronRight size={16} /></button>)}</div>}</div>
+}
+
+function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed }) {
   const visited = spot.visits > 0
   const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
   const daysSinceLastVisit = lastVisitDate ? Math.floor((Date.now() - lastVisitDate.getTime()) / 86400000) : 0
@@ -279,6 +332,7 @@ function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile }) {
         <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
         <span><b>Deine Besuche</b>{spot.visits}</span>
       </div>
+      <SpotVisitors spotId={spot.id} onOpenUserFeed={onOpenUserFeed} />
       <button className={`visit-button ${visited ? 'is-visited' : ''}`} onClick={() => onVisit(spot.id)}>
         <IconCheck size={19} />
         {visited ? 'Weiteren Besuch eintragen' : 'Ersten Besuch eintragen'}
@@ -288,11 +342,13 @@ function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile }) {
   )
 }
 
-function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
+function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, onOpenUserFeed, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
   const [activityBounds, setActivityBounds] = useState(null)
   const [activities, setActivities] = useState([])
+  const [mapPlans, setMapPlans] = useState([])
+  const [selectedMapPlan, setSelectedMapPlan] = useState(null)
 
   function requestUserLocation() {
     if (!navigator.geolocation) { onMessage('Standort wird von diesem Browser nicht unterstützt'); return }
@@ -303,8 +359,9 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     )
   }
   useEffect(() => {
-    const lastVisitedSpot = spots.find((spot) => spot.id === lastVisitedSpotId)
-    if (lastVisitedSpot) onSelectSpot(lastVisitedSpot.id)
+    const requestedSpotId = new URLSearchParams(window.location.search).get('spot')
+    const spotToFocus = spots.find((spot) => spot.id === requestedSpotId) ?? spots.find((spot) => spot.id === lastVisitedSpotId)
+    if (spotToFocus) onSelectSpot(spotToFocus.id)
     if (!navigator.geolocation || !navigator.permissions?.query) return undefined
     let cancelled = false
     navigator.permissions.query({ name: 'geolocation' }).then((permission) => {
@@ -318,7 +375,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     return () => { cancelled = true }
   }, [lastVisitedSpotId, spots])
   useEffect(() => {
-    if (!currentUser || !activityBounds || activityBounds.zoom < 10) {
+    if (!currentUser || filter === 'planned' || !activityBounds || activityBounds.zoom < 10) {
       setActivities([])
       return undefined
     }
@@ -342,12 +399,29 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     loadActivities().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setActivities([]) })
     const interval = window.setInterval(() => loadActivities().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setActivities([]) }), 60000)
     return () => { cancelled = true; controller.abort(); window.clearInterval(interval) }
-  }, [activityBounds, currentUser?.id])
-  const visibleSpots = useMemo(() => {
+  }, [activityBounds, currentUser?.id, filter])
+  useEffect(() => {
+    if (!currentUser || filter !== 'planned' || !activityBounds || activityBounds.zoom < 10) {
+      setMapPlans([])
+      return undefined
+    }
+    const params = new URLSearchParams(['west', 'south', 'east', 'north'].map((key) => [key, String(activityBounds[key])]))
+    const controller = new AbortController()
+    let cancelled = false
+    async function loadPlans() {
+      const response = await fetch(`/api/social/map-plans?${params}`, { signal: controller.signal, cache: 'no-store' })
+      if (!response.ok) throw new Error('Kartenplanungen konnten nicht geladen werden.')
+      const payload = await response.json()
+      if (!cancelled) setMapPlans(payload.plannedVisits)
+    }
+    loadPlans().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setMapPlans([]) })
+    return () => { cancelled = true; controller.abort() }
+  }, [activityBounds, currentUser?.id, filter])
+  const matchingSpots = useMemo(() => {
     return spots.filter((spot) => {
       const matchesSearch = `${spot.name} ${spot.district}`.toLowerCase().includes(query.toLowerCase())
       const area = Number(spot.area_sqm ?? String(spot.size ?? '').replace(/[^0-9]/g, ''))
-      const matchesFilter = filter === 'all'
+      const matchesFilter = filter === 'planned' || filter === 'all'
         || (filter === 'visited' && spot.visits > 0)
         || (filter === 'open' && spot.visits === 0)
         || (filter === 'large' && area >= 1000)
@@ -357,6 +431,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     })
   }, [spots, query, filter])
 
+  const visibleSpots = filter === 'planned' ? [] : matchingSpots
   const selectedSpot = selectedId ? spots.find((spot) => spot.id === selectedId) ?? null : null
 
   return (
@@ -369,13 +444,13 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}
           </label>
           {query && <div className="search-results" id="search-results" role="listbox">
-            {visibleSpots.length ? visibleSpots.slice(0, 6).map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spot.district} · {spot.distance}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
+            {matchingSpots.length ? matchingSpots.slice(0, 6).map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spot.district} · {spot.distance}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
           </div>}
         </div>
         <button type="button" className="toolbar-filter ui-icon-button" aria-label="Filter öffnen" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><IconAdjustmentsHorizontal size={19} /></button>
         <button type="button" className="toolbar-location ui-icon-button" aria-label="Meinen Standort anzeigen" onClick={requestUserLocation}><IconCurrentLocation size={19} /></button>
         {filtersOpen && <div className="filter-menu" aria-label="Kartenfilter"><span className="eyebrow">Karte filtern</span>{[
-          ['all', 'Alle Hallen'], ['visited', 'Besucht'], ['open', 'Noch offen'], ['large', 'Große Hallen'], ['small', 'Kompakt'], ['late', 'Bis spät geöffnet'],
+          ['all', 'Alle Hallen'], ['visited', 'Besucht'], ['open', 'Noch offen'], ['planned', 'Geplante Besuche'], ['large', 'Große Hallen'], ['small', 'Kompakt'], ['late', 'Bis spät geöffnet'],
         ].map(([id, label]) => <button type="button" key={id} className={filter === id ? 'is-active' : ''} onClick={() => { setFilter(id); setFiltersOpen(false) }}>{label}{filter === id && <IconCheck size={15} />}</button>)}</div>}
       </div>
       <div className="filter-row">
@@ -383,14 +458,16 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
           ['all', 'Alle Hallen'],
           ['visited', 'Besucht'],
           ['open', 'Noch offen'],
+          ['planned', 'Geplant'],
         ].map(([id, label]) => (
           <button key={id} className={`filter-chip ${filter === id ? 'is-active' : ''}`} onClick={() => setFilter(id)}>{label}</button>
         ))}
-        <span className="result-count">{visibleSpots.length} Orte</span>
+        <span className="result-count">{filter === 'planned' ? `${mapPlans.length} Planungen` : `${visibleSpots.length} Orte`}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} onDismiss={() => { if (!isPickingSpot) onSelectSpot(null) }} userLocation={userLocation} activities={activities} onActivityBoundsChange={setActivityBounds} />
-      {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} hideOnMobile={Boolean(query)} />}
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} activities={activities} plans={mapPlans} onActivityBoundsChange={setActivityBounds} />
+      {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} hideOnMobile={Boolean(query)} />}
+      {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} />}
     </main>
   )
 }
@@ -532,6 +609,25 @@ function visibilityLabel(value) {
   return ({ private: 'Privat', friends: 'Freunde', followers: 'Follower', public: 'Community' })[value] ?? 'Privat'
 }
 
+function MapPlanSheet({ plan, onClose }) {
+  const start = formatPlanDate(plan.starts_at)
+  const ownResponse = plan.my_response === 'going' ? 'Du hast zugesagt' : plan.my_response === 'interested' ? 'Du bist interessiert' : ''
+  return <aside className="spot-sheet map-plan-sheet"><div className="spot-sheet__topline"><span className="eyebrow">Geplant</span><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Planung schließen"><IconX size={18} /></button></div><div className="map-plan-sheet__author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>plant einen Besuch</small></span></div><h2>{plan.spot_name}</h2><p>{plan.district} · {plan.address}</p><div className="spot-meta"><span><b>Wann</b>{start}</span><span><b>Dabei</b>{plan.going_count}</span><span><b>Interessiert</b>{plan.interested_count}</span></div>{plan.note && <p className="map-plan-sheet__note">{plan.note}</p>}{ownResponse && <span className="map-plan-sheet__response">{ownResponse}</span>}</aside>
+}
+
+function useOutsideDismiss(isOpen, onDismiss) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!isOpen) return undefined
+    function dismiss(event) {
+      if (ref.current && !ref.current.contains(event.target)) onDismiss()
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [isOpen, onDismiss])
+  return ref
+}
+
 function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
   const [body, setBody] = useState(entry.body ?? '')
   const [visibility, setVisibility] = useState(entry.visibility ?? 'private')
@@ -544,6 +640,7 @@ function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState('')
   const fileInput = useRef(null)
+  const menuRef = useOutsideDismiss(menuOpen, () => setMenuOpen(false))
 
   async function save() {
     setSaving(true); setError('')
@@ -575,7 +672,7 @@ function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
   }
 
   return <div className="composer-backdrop"><section className="journal-composer entry-dialog" role="dialog" aria-modal="true" aria-label="Tagebucheintrag">
-    <div className="composer-header"><div><span className="eyebrow">{formatJournalDate(entry.visited_at).day} {formatJournalDate(entry.visited_at).month} · {visibilityLabel(entry.visibility)}</span><h2>{entry.spot_name}</h2><p>{entry.district}</p></div><div className="entry-dialog__header-actions"><div className="friend-more-menu"><button type="button" className="icon-button ui-icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Eintrag verwalten"><IconDots size={19} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" className="danger" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}><IconTrash size={16} />Eintrag löschen</button></div>}</div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div></div>
+    <div className="composer-header"><div><span className="eyebrow">{formatJournalDate(entry.visited_at).day} {formatJournalDate(entry.visited_at).month} · {visibilityLabel(entry.visibility)}</span><h2>{entry.spot_name}</h2><p>{entry.district}</p></div><div className="entry-dialog__header-actions"><div className="friend-more-menu" ref={menuRef}><button type="button" className="icon-button ui-icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Eintrag verwalten"><IconDots size={19} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" className="danger" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}><IconTrash size={16} />Eintrag löschen</button></div>}</div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div></div>
     <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} /></label>
     <label className="form-field"><span>Dein Erfahrungsbericht</span><textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength="4000" /></label>
     {(media.length > 0 || newFiles.length > 0) && <div className="entry-photo-grid">{media.map((item) => <figure key={item.id}><img src={`/api/media/${item.id}`} alt={`Foto von ${entry.spot_name}`} /><button type="button" onClick={() => removeExistingPhoto(item.id)} aria-label="Foto im Entwurf entfernen"><IconX size={15} /></button></figure>)}{newFiles.map((item, index) => <figure key={item.preview}><img src={item.preview} alt="Neues Foto im Entwurf" /><button type="button" onClick={() => removeNewPhoto(index)} aria-label="Neues Foto entfernen"><IconX size={15} /></button></figure>)}</div>}
@@ -701,28 +798,35 @@ function RankBadge({ progress, uniqueSpots }) {
   return badge ? <span className={`rank-badge rank-badge--${badge.threshold}`} title={badge.name}><IconMedal size={15} /></span> : null
 }
 
-async function cropAvatarImage(file, zoom, position) {
-  const sourceUrl = URL.createObjectURL(file)
-  const source = await new Promise((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('Das Bild konnte nicht verarbeitet werden.'))
-    image.src = sourceUrl
-  })
-  URL.revokeObjectURL(sourceUrl)
-  const size = 720
-  const baseScale = Math.max(size / source.naturalWidth, size / source.naturalHeight)
-  const scale = baseScale * zoom
-  const width = source.naturalWidth * scale
-  const height = source.naturalHeight * scale
+function avatarCropLayout(size, sourceWidth, sourceHeight, zoom, position) {
+  const baseScale = Math.max(size / sourceWidth, size / sourceHeight)
+  const width = sourceWidth * baseScale * zoom
+  const height = sourceHeight * baseScale * zoom
   const overflowX = Math.max(0, width - size)
   const overflowY = Math.max(0, height - size)
-  const canvas = document.createElement('canvas')
-  canvas.width = size; canvas.height = size
-  canvas.getContext('2d').drawImage(source, (size - width) / 2 + position.x * overflowX / 2, (size - height) / 2 + position.y * overflowY / 2, width, height)
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', .9))
-  if (!blob) throw new Error('Das Bild konnte nicht verarbeitet werden.')
-  return new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'profilbild'}.jpg`, { type: 'image/jpeg' })
+  return { width, height, overflowX, overflowY, left: (size - width) / 2 + position.x * overflowX / 2, top: (size - height) / 2 + position.y * overflowY / 2 }
+}
+
+async function cropAvatarImage(file, zoom, position) {
+  const sourceUrl = URL.createObjectURL(file)
+  try {
+    const source = await new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Das Bild konnte nicht verarbeitet werden.'))
+      image.src = sourceUrl
+    })
+    const size = 720
+    const layout = avatarCropLayout(size, source.naturalWidth, source.naturalHeight, zoom, position)
+    const canvas = document.createElement('canvas')
+    canvas.width = size; canvas.height = size
+    canvas.getContext('2d').drawImage(source, layout.left, layout.top, layout.width, layout.height)
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', .9))
+    if (!blob) throw new Error('Das Bild konnte nicht verarbeitet werden.')
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'profilbild'}.jpg`, { type: 'image/jpeg' })
+  } finally {
+    URL.revokeObjectURL(sourceUrl)
+  }
 }
 
 function AvatarCropDialog({ file, onClose, onSave }) {
@@ -731,25 +835,41 @@ function AvatarCropDialog({ file, onClose, onSave }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [drag, setDrag] = useState(null)
+  const [imageSize, setImageSize] = useState(null)
+  const [stageSize, setStageSize] = useState(280)
+  const stageRef = useRef(null)
   const previewUrl = useMemo(() => URL.createObjectURL(file), [file])
   useEffect(() => () => URL.revokeObjectURL(previewUrl), [previewUrl])
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return undefined
+    const updateSize = () => setStageSize(stage.clientWidth || 280)
+    updateSize()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateSize)
+      return () => window.removeEventListener('resize', updateSize)
+    }
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [])
+  const layout = imageSize ? avatarCropLayout(stageSize, imageSize.width, imageSize.height, zoom, position) : null
   function move(event) {
     if (!drag) return
-    const factor = 1 / Math.max(.25, zoom - .35)
-    setPosition({ x: Math.max(-1, Math.min(1, drag.position.x + (event.clientX - drag.x) / 120 * factor)), y: Math.max(-1, Math.min(1, drag.position.y + (event.clientY - drag.y) / 120 * factor)) })
+    const clamp = (value) => Math.max(-1, Math.min(1, value))
+    setPosition({ x: drag.layout.overflowX ? clamp(drag.position.x + (event.clientX - drag.x) * 2 / drag.layout.overflowX) : 0, y: drag.layout.overflowY ? clamp(drag.position.y + (event.clientY - drag.y) * 2 / drag.layout.overflowY) : 0 })
   }
   async function save() {
     setSaving(true); setError('')
     try { await onSave(await cropAvatarImage(file, zoom, position)); onClose() } catch (saveError) { setError(saveError.message || 'Profilfoto konnte nicht gespeichert werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop avatar-crop-backdrop"><section className="journal-composer avatar-crop-dialog" role="dialog" aria-modal="true" aria-label="Profilfoto zuschneiden"><div className="composer-header"><div><span className="eyebrow">Profilfoto</span><h2>Bild auswählen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Ziehe das Bild im Kreis an die gewünschte Position und passe den Ausschnitt mit dem Zoom an.</p><div className="avatar-crop-stage" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setDrag({ x: event.clientX, y: event.clientY, position }) }} onPointerMove={move} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}><img src={previewUrl} alt="Vorschau für dein Profilfoto" style={{ transform: `translate(${position.x * (zoom - 1) * 50}%, ${position.y * (zoom - 1) * 50}%) scale(${zoom})` }} /><span /></div><label className="avatar-crop-zoom"><span>Zoom</span><input type="range" min="1" max="3" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>{error && <p className="form-error">{error}</p>}<div className="avatar-crop-actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="button" className="visit-button" disabled={saving} onClick={save}>{saving ? 'Wird gespeichert …' : 'Foto übernehmen'}</button></div></section></div>
+  return <div className="composer-backdrop avatar-crop-backdrop"><section className="journal-composer avatar-crop-dialog" role="dialog" aria-modal="true" aria-label="Profilfoto zuschneiden"><div className="composer-header"><div><span className="eyebrow">Profilfoto</span><h2>Bild auswählen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Ziehe das Bild im Kreis an die gewünschte Position und passe den Ausschnitt mit dem Zoom an.</p><div className="avatar-crop-stage" ref={stageRef} onPointerDown={(event) => { if (!layout) return; event.currentTarget.setPointerCapture(event.pointerId); setDrag({ x: event.clientX, y: event.clientY, position, layout }) }} onPointerMove={move} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}>{imageSize && <img src={previewUrl} alt="Vorschau für dein Profilfoto" draggable="false" style={{ width: layout.width, height: layout.height, left: layout.left, top: layout.top }} />}{!imageSize && <img className="avatar-crop-stage__loader" src={previewUrl} alt="Vorschau für dein Profilfoto" onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />}<span className="avatar-crop-guide" /></div><label className="avatar-crop-zoom"><span>Zoom</span><input type="range" min="1" max="3" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>{error && <p className="form-error">{error}</p>}<div className="avatar-crop-actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="button" className="visit-button" disabled={saving} onClick={save}>{saving ? 'Wird gespeichert …' : 'Foto übernehmen'}</button></div></section></div>
 }
 
-function ProfileAvatar({ user, progress, onUpload }) {
+function ProfileAvatar({ user, progress, onChooseFile }) {
   const input = useRef(null)
-  const [file, setFile] = useState(null)
-  function chooseFile(event) { const selected = event.target.files?.[0]; event.target.value = ''; if (selected) setFile(selected) }
-  return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseFile} /><span>Profilfoto ändern</span>{file && <AvatarCropDialog file={file} onClose={() => setFile(null)} onSave={onUpload} />}</div>
+  function chooseFile(event) { const selected = event.target.files?.[0]; event.target.value = ''; if (selected) onChooseFile(selected) }
+  return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}?v=${encodeURIComponent(user.image)}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseFile} /><span>Profilfoto ändern</span></div>
 }
 
 function AccountDeletionDialog({ username, onClose, onDelete }) {
@@ -765,6 +885,7 @@ function AccountDeletionDialog({ username, onClose, onDelete }) {
 
 function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [avatarFile, setAvatarFile] = useState(null)
   if (!currentUser) {
     return (
       <main className="view content-view empty-state profile-empty">
@@ -786,7 +907,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
         <section className="profile-hero">
           <div className="profile-hero__shade" />
           <div className="profile-hero__content">
-            <ProfileAvatar user={currentUser} progress={progress} onUpload={onUploadAvatar} />
+            <ProfileAvatar user={currentUser} progress={progress} onChooseFile={setAvatarFile} />
             <h1>{currentUser.name}</h1>
             <p>@{currentUser.username ?? 'boulderfan'} · Mannheim</p>
           </div>
@@ -811,6 +932,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
           <div className="profile-legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div>
         </section>
       </div>
+      {avatarFile && <AvatarCropDialog file={avatarFile} onClose={() => setAvatarFile(null)} onSave={onUploadAvatar} />}
       {deleteOpen && <AccountDeletionDialog username={currentUser.username} onClose={() => setDeleteOpen(false)} onDelete={onDeleteAccount} />}
     </main>
   )
@@ -1392,7 +1514,13 @@ function formatFeedDate(value) {
 
 function FeedAuthor({ entry }) {
   const [expanded, setExpanded] = useState(false)
-  return <div className="feed-author"><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><b>{entry.user_name}</b><time>{formatFeedDate(entry.created_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small></div>}</div>
+  const authorRef = useOutsideDismiss(expanded, () => setExpanded(false))
+  function openSpotOnMap() {
+    const current = window.history.state
+    window.history.pushState({ boulderO: true, view: 'map', position: (current?.position ?? 0) + 1 }, '', `/map?spot=${encodeURIComponent(entry.spot_id)}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+  return <div className="feed-author" ref={authorRef}><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><b>{entry.user_name}</b><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}<button type="button" className="ui-icon-button feed-author__map-link" onClick={openSpotOnMap} aria-label={`${entry.spot_name} auf der Karte öffnen`} title="Auf Karte anzeigen"><IconMapPin size={17} /></button>{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small></div>}</div>
 }
 
 function FeedMediaCarousel({ entry, onOpenImage }) {
@@ -1417,8 +1545,10 @@ function PlannedVisitCard({ plan, onRsvp, onEdit, onCancel, onLogVisit }) {
   const [people, setPeople] = useState([])
   const [peopleOpen, setPeopleOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  async function togglePeople() { if (!peopleOpen) { const response = await fetch(`/api/planned-visits/${plan.id}/rsvps`); if (response.ok) setPeople((await response.json()).rsvps) }; setPeopleOpen((value) => !value) }
-  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">{plan.is_owner ? 'Deine Planung' : 'Geplant'}</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{plan.is_owner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{plan.is_owner && <div className="plan-card-menu"><button type="button" className="friend-more-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people"><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{plan.is_owner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!plan.is_owner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</div></article>
+  const peopleRef = useOutsideDismiss(peopleOpen, () => setPeopleOpen(false))
+  const menuRef = useOutsideDismiss(menuOpen, () => setMenuOpen(false))
+  async function togglePeople() { if (!peopleOpen) { const response = await fetch(`/api/planned-visits/${plan.id}/rsvps`); if (response.ok) setPeople((await response.json()).rsvps) }; setMenuOpen(false); setPeopleOpen((value) => !value) }
+  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">{plan.is_owner ? 'Deine Planung' : 'Geplant'}</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{plan.is_owner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{plan.is_owner && <div className="plan-card-menu" ref={menuRef}><button type="button" className="friend-more-button" onClick={() => { setPeopleOpen(false); setMenuOpen((value) => !value) }} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people" ref={peopleRef}><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{plan.is_owner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!plan.is_owner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</div></article>
 }
 
 function planDayKey(value) {
@@ -1465,7 +1595,7 @@ function PlanNotifications({ notifications, onRead }) {
   return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const copy = notification.type === 'plan_cancelled' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} abgesagt.` : notification.type === 'plan_updated' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} geändert.` : `${notification.actor_name ?? 'Jemand'} ist ${payload.response === 'going' ? 'dabei' : 'interessiert'} bei ${payload.spotName ?? notification.spot_name}.`; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
 }
 
-function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan }) {
+function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan }) {
   const [entries, setEntries] = useState([])
   const [plannedVisits, setPlannedVisits] = useState([])
   const [calendarDays, setCalendarDays] = useState([])
@@ -1539,7 +1669,7 @@ function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead, 
 
   const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id)
   const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
-  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{section === 'feed' ? (authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed') : 'Planung'}</h2>{authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button><button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button></div></div>{section === 'feed' ? <><div className="feed-toggle feed-toggle--secondary"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div>{!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></> : <><PlanNotifications notifications={notifications} onRead={readPlanNotifications} /><div className="planning-layout"><PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} /><div className="planning-list"><div className="plan-filters"><button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button><button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button><button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button></div><div className="plan-filters plan-filters--response"><button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button><button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button><button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button></div>{selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}{!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}<div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div></div></div></>}{editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}{cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}</section></main>
+  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{section === 'feed' ? (authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed') : 'Planung'}</h2>{authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button><button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button></div></div>{section === 'feed' ? <><div className="feed-filter-row"><div className="feed-toggle feed-toggle--secondary"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></> : <><PlanNotifications notifications={notifications} onRead={readPlanNotifications} /><div className="planning-layout"><PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} /><div className="planning-list"><div className="plan-filters"><button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button><button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button><button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button></div><div className="plan-filters plan-filters--response"><button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button><button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button><button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button></div>{selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}{!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}<div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div></div></div></>}{editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}{cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}</section></main>
 }
 
 function UserAvatar({ user, onOpenImage }) {
@@ -1559,6 +1689,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(null)
   const [friendMenuId, setFriendMenuId] = useState(null)
+  const friendMenuRef = useOutsideDismiss(friendMenuId !== null, () => setFriendMenuId(null))
   async function load() {
     try {
       const [friendsResponse, suggestionsResponse, requestsResponse, summaryResponse] = await Promise.all([fetch('/api/social/friends'), fetch('/api/social/friend-suggestions'), fetch('/api/social/friend-requests'), fetch('/api/social/friends/summary')])
@@ -1630,7 +1761,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
             {friends.map((user) => <article key={user.id}>
               <UserAvatar user={user} onOpenImage={onOpenImage} />
               <div><h3>{user.name}</h3><p>@{user.username}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div>
-              <div className="friend-row-actions"><button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button><button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button><div className="friend-more-menu"><button type="button" className="friend-more-button" onClick={() => setFriendMenuId((current) => current === user.id ? null : user.id)} aria-label={`Beziehungsoptionen für ${user.name}`} aria-expanded={friendMenuId === user.id} title="Beziehungsoptionen"><IconDots size={19} /></button>{friendMenuId === user.id && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setFriendMenuId(null); action(`/api/follows/${user.id}`, 'DELETE') }}>Nicht mehr folgen</button><button type="button" className="danger" onClick={() => { setFriendMenuId(null); action(`/api/social/friends/${user.id}`, 'DELETE') }}>Freundschaft beenden</button></div>}</div></div>
+              <div className="friend-row-actions"><button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button><button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button><div className="friend-more-menu" ref={friendMenuId === user.id ? friendMenuRef : null}><button type="button" className="friend-more-button" onClick={() => setFriendMenuId((current) => current === user.id ? null : user.id)} aria-label={`Beziehungsoptionen für ${user.name}`} aria-expanded={friendMenuId === user.id} title="Beziehungsoptionen"><IconDots size={19} /></button>{friendMenuId === user.id && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setFriendMenuId(null); action(`/api/follows/${user.id}`, 'DELETE') }}>Nicht mehr folgen</button><button type="button" className="danger" onClick={() => { setFriendMenuId(null); action(`/api/social/friends/${user.id}`, 'DELETE') }}>Freundschaft beenden</button></div>}</div></div>
               {preview?.user?.id === user.id && <div className="friend-preview"><b>Letztes von {preview.user.name}</b>{preview.plans.map((plan) => <p key={plan.id}><IconCalendarEvent size={14} /> {formatPlanDate(plan.starts_at)} · {plan.spot_name}</p>)}{preview.entries.map((entry) => <p key={entry.id}>war bei <b>{entry.spot_name}</b>{entry.body ? ` · ${entry.body}` : ''}</p>)}{!preview.entries.length && !preview.plans.length && <p>Noch nichts geteilt.</p>}<button type="button" onClick={() => onOpenUserFeed(preview.user)}>Feed von {preview.user.name.split(' ')[0]} öffnen</button></div>}
             </article>)}
           </div>
@@ -2238,7 +2369,7 @@ function App() {
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
-      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
+      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
