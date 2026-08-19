@@ -82,10 +82,11 @@ function escapeMarkerText(value) {
 }
 
 const activityIconCache = new Map()
+const planIconCache = new Map()
 let activePlanningAuthorFilter = null
 
-function activityIcon(activity, index, isPreview) {
-  const cacheKey = [activity.id, index, isPreview, activity.user_name, activity.user_image, activity.body, activity.media?.[0]?.id].join('|')
+function activityIcon(activity, index, offset, isPreview) {
+  const cacheKey = [activity.id, index, offset.x, offset.y, isPreview, activity.user_name, activity.user_image, activity.body, activity.media?.[0]?.id].join('|')
   const cached = activityIconCache.get(cacheKey)
   if (cached) return cached
   const initials = activity.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
@@ -95,16 +96,25 @@ function activityIcon(activity, index, isPreview) {
   const avatar = activity.user_image ? `<img src="/api/avatars/${encodeURIComponent(activity.user_id)}" alt="" onerror="this.remove()" />` : ''
   const icon = L.divIcon({
     className: 'map-activity-wrapper',
-    html: `<span class="map-activity-marker" style="--activity-delay:${(index % 6) * -0.55}s"><span class="map-activity-avatar">${escapeMarkerText(initials)}${avatar}</span>${preview}</span>`,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
+    html: `<span class="map-activity-stage"><span class="map-activity-offset" style="--activity-offset-x:${offset.x}px;--activity-offset-y:${offset.y}px"><span class="map-activity-marker" style="--activity-delay:${(index % 6) * -0.55}s"><span class="map-activity-avatar">${escapeMarkerText(initials)}${avatar}</span>${preview}</span></span></span>`,
+    iconSize: [120, 120],
+    iconAnchor: [60, 60],
   })
   if (activityIconCache.size > 300) activityIconCache.clear()
   activityIconCache.set(cacheKey, icon)
   return icon
 }
 
-function planMapIcon(plan) {
+function planMapIcon(plan, offset) {
+  const cacheKey = [
+    plan.id,
+    plan.starts_at,
+    offset.x,
+    offset.y,
+    ...(plan.attendees ?? []).map((person) => [person.user_id, person.user_name, person.user_image, person.response].join(':')),
+  ].join('|')
+  const cached = planIconCache.get(cacheKey)
+  if (cached) return cached
   const day = new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(new Date(plan.starts_at))
   const attendees = (plan.attendees ?? []).slice(0, 6)
   const attendeeIcons = attendees.map((person, index) => {
@@ -117,10 +127,13 @@ function planMapIcon(plan) {
   const overflow = (plan.attendees?.length ?? 0) > attendees.length ? `<span class="map-plan-attendee map-plan-attendee--more">+${plan.attendees.length - attendees.length}</span>` : ''
   return L.divIcon({
     className: 'map-plan-wrapper',
-    html: `<span class="map-plan-marker"><small>${day}</small>${attendeeIcons}${overflow}</span>`,
-    iconSize: [88, 88],
-    iconAnchor: [44, 44],
+    html: `<span class="map-plan-stage"><span class="map-plan-offset" style="--plan-offset-x:${offset.x}px;--plan-offset-y:${offset.y}px"><span class="map-plan-marker"><small>${day}</small>${attendeeIcons}${overflow}</span></span></span>`,
+    iconSize: [130, 130],
+    iconAnchor: [65, 65],
   })
+  if (planIconCache.size > 300) planIconCache.clear()
+  planIconCache.set(cacheKey, icon)
+  return icon
 }
 
 function FocusMap({ spot }) {
@@ -212,11 +225,9 @@ function MapActivityLayer({ activities }) {
       const countOnRing = Math.min(6, totals.get(activity.spot_id) - ringIndex * 6)
       const angle = (Math.PI * 2 * indexOnRing) / Math.max(countOnRing, 1) - Math.PI / 2 + ringIndex * .38
       const radius = 38 + ringIndex * 24
-      const basePoint = map.project([Number(activity.latitude), Number(activity.longitude)], zoom)
-      const position = map.unproject(basePoint.add([Math.cos(angle) * radius, Math.sin(angle) * radius]), zoom)
-      return { activity, index, position }
+      return { activity, index, position: [Number(activity.latitude), Number(activity.longitude)], offset: { x: Number((Math.cos(angle) * radius).toFixed(1)), y: Number((Math.sin(angle) * radius).toFixed(1)) } }
     })
-  }, [activities, map, zoom])
+  }, [activities])
   useEffect(() => {
     setPreviewIndex(0)
     if (markers.length < 2) return undefined
@@ -225,7 +236,7 @@ function MapActivityLayer({ activities }) {
   }, [markers.length])
   const previewId = markers.length ? markers[previewIndex % markers.length].activity.id : null
   if (zoom < 10) return null
-  return markers.map(({ activity, index, position }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); const current = window.history.state; window.history.pushState({ boulderO: true, view: 'social', position: (current?.position ?? 0) + 1 }, '', `/social?entry=${encodeURIComponent(activity.id)}`); window.dispatchEvent(new PopStateEvent('popstate')) } }} />)
+  return markers.map(({ activity, index, position, offset }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, offset, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); const current = window.history.state; window.history.pushState({ boulderO: true, view: 'social', position: (current?.position ?? 0) + 1 }, '', `/social?entry=${encodeURIComponent(activity.id)}`); window.dispatchEvent(new PopStateEvent('popstate')) } }} />)
 }
 
 function MapPlanLayer({ plans, onSelect }) {
@@ -243,13 +254,17 @@ function MapPlanLayer({ plans, onSelect }) {
     return plans.map((plan) => {
       const index = counts.get(plan.spot_id) ?? 0
       counts.set(plan.spot_id, index + 1)
-      const angle = (Math.PI * 2 * index) / Math.max(totals.get(plan.spot_id), 1) - Math.PI / 2
-      const basePoint = map.project([Number(plan.latitude), Number(plan.longitude)], zoom)
-      return { plan, position: map.unproject(basePoint.add([Math.cos(angle) * 25, Math.sin(angle) * 25]), zoom) }
+      const total = totals.get(plan.spot_id) ?? 1
+      const ringIndex = Math.floor(index / 5)
+      const indexOnRing = index % 5
+      const countOnRing = Math.min(5, total - ringIndex * 5)
+      const angle = (Math.PI * 2 * indexOnRing) / Math.max(countOnRing, 1) - Math.PI / 2 + ringIndex * .38
+      const radius = total === 1 ? 0 : 34 + ringIndex * 26
+      return { plan, position: [Number(plan.latitude), Number(plan.longitude)], offset: { x: Number((Math.cos(angle) * radius).toFixed(1)), y: Number((Math.sin(angle) * radius).toFixed(1)) } }
     })
-  }, [plans, map, zoom])
+  }, [plans])
   if (zoom < 10) return null
-  return markers.map(({ plan, position }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
+  return markers.map(({ plan, position, offset }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan, offset)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
 }
 
 function MobileMapDismiss({ onDismiss }) {
@@ -352,7 +367,7 @@ function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFe
   )
 }
 
-function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, onOpenUserFeed, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
+function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, onOpenUserFeed, onOpenPlanFeed, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
   const [locationFocusRequest, setLocationFocusRequest] = useState(0)
@@ -490,7 +505,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
       <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={activities} plans={mapPlans} onActivityBoundsChange={setActivityBounds} />
       {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} hideOnMobile={Boolean(query)} />}
-      {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} />}
+      {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} onOpenPlanFeed={onOpenPlanFeed} />}
     </main>
   )
 }
@@ -632,9 +647,9 @@ function visibilityLabel(value) {
   return ({ private: 'Privat', friends: 'Freunde', followers: 'Follower', public: 'Community' })[value] ?? 'Privat'
 }
 
-function MapPlanSheet({ plan, onClose, onRsvp }) {
+function MapPlanSheet({ plan, onClose, onRsvp, onOpenPlanFeed }) {
   const start = formatPlanDate(plan.starts_at)
-  return <aside className="spot-sheet map-plan-sheet"><div className="spot-sheet__topline"><span className="eyebrow">Geplant</span><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Planung schließen"><IconX size={18} /></button></div><div className="map-plan-sheet__author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>plant einen Besuch</small></span></div><h2>{plan.spot_name}</h2><p>{plan.district} · {plan.address}</p><div className="spot-meta"><span><b>Wann</b>{start}</span><span><b>Dabei</b>{plan.going_count}</span><span><b>Interessiert</b>{plan.interested_count}</span></div>{plan.note && <p className="map-plan-sheet__note">{plan.note}</p>}{plan.is_owner ? <span className="map-plan-sheet__response">Deine Planung</span> : <div className="map-plan-sheet__actions"><button type="button" className={plan.my_response === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, plan.my_response === 'interested' ? null : 'interested')}>Interessiert</button><button type="button" className={plan.my_response === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, plan.my_response === 'going' ? null : 'going')}>{plan.my_response === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</aside>
+  return <aside className="spot-sheet map-plan-sheet"><div className="spot-sheet__topline"><span className="eyebrow">Geplant</span><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Planung schließen"><IconX size={18} /></button></div><div className="map-plan-sheet__author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>plant einen Besuch</small></span></div><h2>{plan.spot_name}</h2><p>{plan.district} · {plan.address}</p><div className="spot-meta"><span><b>Wann</b>{start}</span><span><b>Dabei</b>{plan.going_count}</span><span><b>Interessiert</b>{plan.interested_count}</span></div>{plan.note && <p className="map-plan-sheet__note">{plan.note}</p>}{plan.is_owner ? <div className="map-plan-sheet__own-actions"><span className="map-plan-sheet__response">Deine Planung</span><button type="button" className="journal-plan-open" onClick={() => onOpenPlanFeed?.(plan)} aria-label={`${plan.spot_name} im Planungsfeed öffnen`} title="Im Planungsfeed öffnen"><IconChevronRight size={18} /></button></div> : <div className="map-plan-sheet__actions"><button type="button" className={plan.my_response === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, plan.my_response === 'interested' ? null : 'interested')}>Interessiert</button><button type="button" className={plan.my_response === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, plan.my_response === 'going' ? null : 'going')}>{plan.my_response === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</aside>
 }
 
 function useOutsideDismiss(isOpen, onDismiss) {
@@ -2426,7 +2441,7 @@ function App() {
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
-      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
+      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} onOpenPlanFeed={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
