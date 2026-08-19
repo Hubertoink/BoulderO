@@ -191,6 +191,7 @@ button { cursor: pointer; }
 @media (max-width: 560px) { .avatar-crop-dialog { border-radius: 12px 12px 0 0; }.avatar-crop-stage { width: min(100%, 250px); } }
 
 .journal-plans .plan-filters button { position: relative; }.journal-plans .plan-filters button b { min-width: 16px; height: 16px; margin-left: 4px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--open); color: var(--ivory); font-size: 9px; line-height: 1; }.plan-attendance-dialog { max-width: 480px; }.plan-attendance-dialog .composer-header p { margin: 5px 0 0; color: var(--ink-soft); font-size: 12px; }.plan-attendance-dialog__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 20px; }.plan-attendance-dialog__actions button { min-height: 42px; margin: 0; }.plan-attendance-dialog__missed { border: 1px solid #c88680; background: var(--paper); color: #9d4540; font-size: 12px; font-weight: 750; }
+.journal-plans .journal-plan-open { width: 32px; min-width: 32px; height: 32px; min-height: 32px; display: grid; place-items: center; margin-left: auto; padding: 0; border: 1px solid var(--line); background: var(--paper); color: var(--yale-blue); }.journal-plans .journal-plan-open:hover { border-color: var(--yale-blue); background: var(--soft-linen); }
 
 .admin-audit { margin: 26px 0; padding: 18px; border: 1px solid var(--line); background: var(--soft-linen); }
 .admin-audit h2 { margin: 3px 0 0; font-size: 20px; }
@@ -251,6 +252,8 @@ button { cursor: pointer; }
     font-size: 10px;
   }
 }
+
+.plan-author-scope { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; padding: 9px 10px; border: 1px solid #c8d7cf; background: #f5faf4; }.plan-author-scope span { min-width: 0; display: grid; gap: 2px; }.plan-author-scope b { font-size: 12px; }.plan-author-scope small { color: var(--ink-soft); font-size: 10px; }.plan-author-scope button { min-height: 29px; flex: 0 0 auto; padding: 0 7px; border: 0; background: transparent; color: var(--yale-blue); font-size: 10px; font-weight: 750; }
 
 /* Map dialogs own the mobile viewport and prevent gesture chaining to Leaflet. */
 html.map-dialog-open,

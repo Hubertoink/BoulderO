@@ -82,6 +82,7 @@ function escapeMarkerText(value) {
 }
 
 const activityIconCache = new Map()
+let activePlanningAuthorFilter = null
 
 function activityIcon(activity, index, isPreview) {
   const cacheKey = [activity.id, index, isPreview, activity.user_name, activity.user_image, activity.body, activity.media?.[0]?.id].join('|')
@@ -121,11 +122,11 @@ function FocusMap({ spot }) {
   return null
 }
 
-function FocusLocation({ location }) {
+function FocusLocation({ location, request }) {
   const map = useMap()
   useEffect(() => {
-    if (location) map.flyTo(location, 14, { duration: .45 })
-  }, [location, map])
+    if (location && request > 0) map.flyTo(location, 14, { duration: .45 })
+  }, [location, request, map])
   return null
 }
 
@@ -251,7 +252,7 @@ function MobileMapDismiss({ onDismiss }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, activities, plans, onSelectPlan, onActivityBoundsChange }) {
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, onSelectPlan, onActivityBoundsChange }) {
   return (
     <div className="map-frame">
       <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas">
@@ -260,7 +261,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, ac
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <FocusMap spot={selectedSpot} />
-        <FocusLocation location={userLocation} />
+        <FocusLocation location={userLocation} request={locationFocusRequest} />
         <MapViewportResize />
         <MobileMapDismiss onDismiss={onDismiss} />
         <MapActivityViewport onChange={onActivityBoundsChange} />
@@ -345,6 +346,7 @@ function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFe
 function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSpot, onVisit, onPlan, onReport, onOpenUserFeed, query, setQuery, filter, setFilter, isPickingSpot, onCancelPicker, onMessage }) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
+  const [locationFocusRequest, setLocationFocusRequest] = useState(0)
   const [activityBounds, setActivityBounds] = useState(null)
   const [activities, setActivities] = useState([])
   const [mapPlans, setMapPlans] = useState([])
@@ -353,14 +355,14 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
   function requestUserLocation() {
     if (!navigator.geolocation) { onMessage('Standort wird von diesem Browser nicht unterstützt'); return }
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => { setUserLocation([coords.latitude, coords.longitude]); onMessage('Dein Standort wird auf der Karte angezeigt') },
+      ({ coords }) => { setUserLocation([coords.latitude, coords.longitude]); setLocationFocusRequest((value) => value + 1); onMessage('Dein Standort wird auf der Karte angezeigt') },
       () => onMessage('Standort konnte nicht bestimmt werden. Prüfe die Browserfreigabe.'),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     )
   }
   useEffect(() => {
     const requestedSpotId = new URLSearchParams(window.location.search).get('spot')
-    const spotToFocus = spots.find((spot) => spot.id === requestedSpotId) ?? spots.find((spot) => spot.id === lastVisitedSpotId)
+    const spotToFocus = spots.find((spot) => spot.id === requestedSpotId)
     if (spotToFocus) onSelectSpot(spotToFocus.id)
     if (!navigator.geolocation || !navigator.permissions?.query) return undefined
     let cancelled = false
@@ -373,7 +375,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
       )
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [lastVisitedSpotId, spots])
+  }, [spots])
   useEffect(() => {
     if (!currentUser || filter === 'planned' || !activityBounds || activityBounds.zoom < 10) {
       setActivities([])
@@ -465,7 +467,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
         <span className="result-count">{filter === 'planned' ? `${mapPlans.length} Planungen` : `${visibleSpots.length} Orte`}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} activities={activities} plans={mapPlans} onActivityBoundsChange={setActivityBounds} />
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={activities} plans={mapPlans} onActivityBoundsChange={setActivityBounds} />
       {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} hideOnMobile={Boolean(query)} />}
       {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} />}
     </main>
@@ -710,7 +712,7 @@ function PastPlanDecisionDialog({ plan, onLogPlan, onMarkMissed, onClose }) {
   return <div className="composer-backdrop"><section className="journal-composer plan-attendance-dialog" role="dialog" aria-modal="true" aria-label="Vergangene Planung abschließen"><div className="composer-header"><div><span className="eyebrow">Vergangene Planung</span><h2>{plan.spot_name}</h2><p>{formatPlanDate(plan.starts_at)}</p></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Hat der geplante Besuch stattgefunden?</p>{error && <p className="form-error">{error}</p>}<div className="plan-attendance-dialog__actions"><button type="button" className="plan-attendance-dialog__missed" disabled={saving} onClick={markMissed}>Nicht stattgefunden</button><button type="button" className="visit-button" disabled={saving} onClick={() => { onLogPlan(plan); onClose() }}><IconCheck size={17} />Besuch eintragen</button></div></section></div>
 }
 
-function JournalUpcomingPlans({ onLogPlan, onMarkMissed }) {
+function JournalUpcomingPlans({ onLogPlan, onMarkMissed, onOpenPlan }) {
   const [plans, setPlans] = useState([])
   const [mode, setMode] = useState('upcoming')
   const [decisionPlan, setDecisionPlan] = useState(null)
@@ -722,10 +724,10 @@ function JournalUpcomingPlans({ onLogPlan, onMarkMissed }) {
   const pastPlans = plans.filter((plan) => plan.is_owner && new Date(plan.starts_at) < new Date())
   const visible = plans.filter((plan) => mode === 'past' ? plan.is_owner && new Date(plan.starts_at) < new Date() : mode === 'mine' ? plan.is_owner && new Date(plan.starts_at) >= new Date() : mode === 'interested' ? plan.my_response === 'interested' && new Date(plan.starts_at) >= new Date() : (plan.is_owner || plan.my_response === 'going') && new Date(plan.starts_at) >= new Date())
   if (!plans.length) return null
-  return <><section className="journal-plans"><div className="section-heading"><h2>{mode === 'past' ? 'Vergangene Planungen' : 'Deine nächsten Besuche'}</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => setMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => setMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => setMode('mine')}>Von mir</button><button className={mode === 'past' ? 'is-active' : ''} onClick={() => setMode('past')}>Vergangen{pastPlans.length > 0 && <b>{pastPlans.length}</b>}</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{mode === 'past' ? 'Bitte Status festlegen' : plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{mode === 'past' ? <button type="button" onClick={() => setDecisionPlan(plan)}><IconCheck size={16} />Status wählen</button> : null}</article>)}</div></section>{decisionPlan && <PastPlanDecisionDialog plan={decisionPlan} onLogPlan={onLogPlan} onMarkMissed={async (plan) => { await onMarkMissed(plan); setPlans((current) => current.filter((item) => item.id !== plan.id)) }} onClose={() => setDecisionPlan(null)} />}</>
+  return <><section className="journal-plans"><div className="section-heading"><h2>{mode === 'past' ? 'Vergangene Planungen' : 'Deine nächsten Besuche'}</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => setMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => setMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => setMode('mine')}>Von mir</button><button className={mode === 'past' ? 'is-active' : ''} onClick={() => setMode('past')}>Vergangen{pastPlans.length > 0 && <b>{pastPlans.length}</b>}</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{mode === 'past' ? 'Bitte Status festlegen' : plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{mode === 'past' ? <button type="button" onClick={() => setDecisionPlan(plan)}><IconCheck size={16} />Status wählen</button> : null}<button type="button" className="journal-plan-open" onClick={() => onOpenPlan(plan)} aria-label={`${plan.spot_name} im Planungsfeed öffnen`} title="Im Planungsfeed öffnen"><IconChevronRight size={18} /></button></article>)}</div></section>{decisionPlan && <PastPlanDecisionDialog plan={decisionPlan} onLogPlan={onLogPlan} onMarkMissed={async (plan) => { await onMarkMissed(plan); setPlans((current) => current.filter((item) => item.id !== plan.id)) }} onClose={() => setDecisionPlan(null)} />}</>
 }
 
-function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage, onLogPlan, onMarkPlanMissed }) {
+function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage, onLogPlan, onMarkPlanMissed, onOpenPlan }) {
   const [filters, setFilters] = useState({ hall: 'all', year: 'all', month: 'all', from: '', to: '', type: 'all' })
   const [filtersOpen, setFiltersOpen] = useState(false)
   if (!currentUser) {
@@ -766,7 +768,7 @@ function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenCompos
         </div>
         <button className="journal-add" onClick={onOpenComposer}><IconPlus size={18} />Eintrag</button>
       </div>
-      <JournalUpcomingPlans onLogPlan={onLogPlan} onMarkMissed={onMarkPlanMissed} />
+      <JournalUpcomingPlans onLogPlan={onLogPlan} onMarkMissed={onMarkPlanMissed} onOpenPlan={onOpenPlan} />
       <section className="journal-summary">
         <div><strong>{visitTotal}</strong><span>Besuche</span></div>
         <div className="journal-summary__ratio"><strong>{uniqueHallCount}</strong><i>/</i><small>{hallTotal}</small><span>Hallen besucht</span></div>
@@ -1565,7 +1567,8 @@ function PlanCalendar({ month, days, selectedDay, onMonthChange, onDayChange }) 
   const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
   const byDay = new Map(days.map((day) => [String(day.day).slice(0, 10), day]))
   const cells = Array.from({ length: Math.ceil((startOffset + count) / 7) * 7 }, (_, index) => index - startOffset + 1)
-  return <section className="plan-calendar"><div className="plan-calendar__header"><button type="button" className="ui-icon-button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Vorheriger Monat"><IconChevronLeft size={18} /></button><b>{new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(month)}</b><button type="button" className="ui-icon-button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Nächster Monat"><IconChevronRight size={18} /></button></div><div className="plan-calendar__weekdays">{['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((day) => <span key={day}>{day}</span>)}</div><div className="plan-calendar__days">{cells.map((number, index) => { if (number < 1 || number > count) return <span key={`empty-${index}`} />; const key = `${planMonthKey(month)}-${String(number).padStart(2, '0')}`; const day = byDay.get(key); return <button key={key} type="button" className={`${selectedDay === key ? 'is-selected ' : ''}${day ? 'has-plans' : ''}`} onClick={() => onDayChange(selectedDay === key ? null : key)}><span>{number}</span>{day && <i className="plan-calendar__dots">{day.own_count > 0 && <b className="is-own" />}{day.going_count > 0 && <b className="is-going" />}{day.interested_count > 0 && <b className="is-interested" />}{day.total > day.own_count + day.going_count + day.interested_count && <b className="is-other" />}</i>}</button> })}</div></section>
+  const authorScope = activePlanningAuthorFilter
+  return <div className="plan-calendar-wrap">{authorScope && <div className="plan-author-scope"><span><b>Planung von {authorScope.author.name}</b><small>@{authorScope.author.username}</small></span><button type="button" onClick={authorScope.onClear}>Filter zurücksetzen</button></div>}<section className="plan-calendar"><div className="plan-calendar__header"><button type="button" className="ui-icon-button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Vorheriger Monat"><IconChevronLeft size={18} /></button><b>{new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(month)}</b><button type="button" className="ui-icon-button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Nächster Monat"><IconChevronRight size={18} /></button></div><div className="plan-calendar__weekdays">{['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((day) => <span key={day}>{day}</span>)}</div><div className="plan-calendar__days">{cells.map((number, index) => { if (number < 1 || number > count) return <span key={`empty-${index}`} />; const key = `${planMonthKey(month)}-${String(number).padStart(2, '0')}`; const day = byDay.get(key); return <button key={key} type="button" className={`${selectedDay === key ? 'is-selected ' : ''}${day ? 'has-plans' : ''}`} onClick={() => onDayChange(selectedDay === key ? null : key)}><span>{number}</span>{day && <i className="plan-calendar__dots">{day.own_count > 0 && <b className="is-own" />}{day.going_count > 0 && <b className="is-going" />}{day.interested_count > 0 && <b className="is-interested" />}{day.total > day.own_count + day.going_count + day.interested_count && <b className="is-other" />}</i>}</button> })}</div></section></div>
 }
 
 function PlanEditorDialog({ plan, spots, onSave, onClose }) {
@@ -1595,7 +1598,7 @@ function PlanNotifications({ notifications, onRead }) {
   return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const copy = notification.type === 'plan_cancelled' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} abgesagt.` : notification.type === 'plan_updated' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} geändert.` : `${notification.actor_name ?? 'Jemand'} ist ${payload.response === 'going' ? 'dabei' : 'interessiert'} bei ${payload.spotName ?? notification.spot_name}.`; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
 }
 
-function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan }) {
+function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan, planFocus, onPlanFocusConsumed }) {
   const [entries, setEntries] = useState([])
   const [plannedVisits, setPlannedVisits] = useState([])
   const [calendarDays, setCalendarDays] = useState([])
@@ -1630,6 +1633,16 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   }, [])
   useEffect(() => { fetch(`/api/social/planned-visits/calendar?month=${planMonthKey(calendarMonth)}`).then((response) => response.ok ? response.json() : { days: [] }).then((payload) => setCalendarDays(payload.days)).catch(() => setCalendarDays([])) }, [calendarMonth])
   useEffect(() => { if (section !== 'plans') return; fetch('/api/notifications?unreadOnly=true').then((response) => response.ok ? response.json() : { notifications: [] }).then((payload) => setNotifications(payload.notifications)).catch(() => setNotifications([])) }, [section])
+  useEffect(() => {
+    if (!planFocus) return
+    const date = new Date(planFocus.starts_at)
+    setSection('plans')
+    setPlanScope('all')
+    setPlanResponse('all')
+    setCalendarMonth(new Date(date.getFullYear(), date.getMonth(), 1))
+    setSelectedDay(planDayKey(planFocus.starts_at))
+    onPlanFocusConsumed()
+  }, [planFocus, onPlanFocusConsumed])
 
   async function toggleLike(entry) {
     await fetch(`/api/social/entries/${entry.id}/like`, { method: entry.liked_by_me ? 'DELETE' : 'POST' })
@@ -1669,6 +1682,7 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
 
   const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id)
   const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
+  activePlanningAuthorFilter = section === 'plans' && authorFilter ? { author: authorFilter, onClear: onClearAuthorFilter } : null
   return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{section === 'feed' ? (authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed') : 'Planung'}</h2>{authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button><button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button></div></div>{section === 'feed' ? <><div className="feed-filter-row"><div className="feed-toggle feed-toggle--secondary"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></> : <><PlanNotifications notifications={notifications} onRead={readPlanNotifications} /><div className="planning-layout"><PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} /><div className="planning-list"><div className="plan-filters"><button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button><button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button><button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button></div><div className="plan-filters plan-filters--response"><button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button><button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button><button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button></div>{selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}{!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}<div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div></div></div></>}{editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}{cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}</section></main>
 }
 
@@ -1872,6 +1886,7 @@ function App() {
   const [friendSummary, setFriendSummary] = useState({ unread_messages: 0, pending_requests: 0 })
   const [feedSummary, setFeedSummary] = useState({ unread_feed: 0 })
   const [feedAuthorFilter, setFeedAuthorFilter] = useState(null)
+  const [feedPlanFocus, setFeedPlanFocus] = useState(null)
   const [spotSuggestions, setSpotSuggestions] = useState([])
   const [spotCorrectionReports, setSpotCorrectionReports] = useState([])
   const [authAudit, setAuthAudit] = useState([])
@@ -2370,12 +2385,12 @@ function App() {
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
-      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} />}
+      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} />}
-      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} />}
+      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
         {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
