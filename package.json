@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "api": "node api/server.js",
-    "import:spots": "node scripts/import-spots.js"
+    "import:spots": "node scripts/import-spots.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@auth/express": "^0.12.3",
@@ -21,12 +22,15 @@
     "express": "^5.2.1",
     "leaflet": "^1.9.4",
     "multer": "^2.2.0",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^9.0.5",
     "pg": "^8.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",
     "zod": "^4.4.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

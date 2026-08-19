@@ -1203,8 +1203,8 @@ function AuthAuditSection({ events, stats, onOpenUsers }) {
   return <section className="admin-audit"><div className="section-heading"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierungen & Anmeldungen</h2></div><span>{events.length}</span></div><p>Erfolgreiche Registrierungen und Anmeldungen der letzten 100 Ereignisse.</p><div className="admin-kpis" aria-label="BoulderO Kennzahlen"><button type="button" className="admin-kpi-button" onClick={onOpenUsers} aria-label="Registrierte Nutzer anzeigen"><strong>{stats?.registered_users ?? '–'}</strong><span>Registrierte Nutzer</span></button><div><strong>{stats?.journal_entries ?? '–'}</strong><span>Beiträge</span></div><div><strong>{stats?.active_spots ?? '–'}</strong><span>Aktive Hallen</span></div></div><div className="admin-table-wrap"><table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Konto</th><th>E-Mail</th></tr></thead><tbody>{events.length ? events.map((event) => <tr key={event.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</td><td><span className={`audit-event audit-event--${event.event_type}`}>{event.event_type === 'registration' ? 'Registrierung' : 'Anmeldung'}</span></td><td>{event.user_name}</td><td>{event.user_email}</td></tr>) : <tr><td colSpan="4">Noch keine Ereignisse seit der Aktivierung des Audits.</td></tr>}</tbody></table></div></section>
 }
 
-function RegisteredUsersDialog({ users, loading, onClose }) {
-  return <div className="composer-backdrop"><section className="journal-composer admin-users-dialog" role="dialog" aria-modal="true" aria-label="Registrierte Nutzer"><div className="composer-header"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierte Nutzer</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Alle angelegten BoulderO-Konten.</p><div className="admin-table-wrap"><table><thead><tr><th>Nutzer</th><th>E-Mail</th><th>Registriert</th><th>Letzte Anmeldung</th></tr></thead><tbody>{loading ? <tr><td colSpan="4">Nutzer werden geladen …</td></tr> : users.length ? users.map((user) => <tr key={user.id}><td><span className="admin-user"><span className="person-avatar">{user.image ? <img src={`/api/avatars/${user.id}`} alt="" /> : user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{user.name}</b><small>@{user.username}</small></span></span></td><td>{user.email}</td><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(user.created_at))}</td><td>{user.last_login_at ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(user.last_login_at)) : 'Noch keine'}</td></tr>) : <tr><td colSpan="4">Keine registrierten Nutzer gefunden.</td></tr>}</tbody></table></div></section></div>
+function RegisteredUsersDialog({ users, total, loading, onClose }) {
+  return <div className="composer-backdrop"><section className="journal-composer admin-users-dialog" role="dialog" aria-modal="true" aria-label="Registrierte Nutzer"><div className="composer-header"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierte Nutzer</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">{total > users.length ? `Die ersten ${users.length} von ${total} angelegten BoulderO-Konten.` : 'Alle angelegten BoulderO-Konten.'}</p><div className="admin-table-wrap"><table><thead><tr><th>Nutzer</th><th>E-Mail</th><th>Registriert</th><th>Letzte Anmeldung</th></tr></thead><tbody>{loading ? <tr><td colSpan="4">Nutzer werden geladen …</td></tr> : users.length ? users.map((user) => <tr key={user.id}><td><span className="admin-user"><span className="person-avatar">{user.image ? <img src={`/api/avatars/${user.id}`} alt="" /> : user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{user.name}</b><small>@{user.username}</small></span></span></td><td>{user.email}</td><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(user.created_at))}</td><td>{user.last_login_at ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(user.last_login_at)) : 'Noch keine'}</td></tr>) : <tr><td colSpan="4">Keine registrierten Nutzer gefunden.</td></tr>}</tbody></table></div></section></div>
 }
 
 function AuditView({ events, stats, onBack, onOpenUsers }) {
@@ -1984,6 +1984,7 @@ function App() {
   const [authAudit, setAuthAudit] = useState([])
   const [adminStats, setAdminStats] = useState(null)
   const [adminUsers, setAdminUsers] = useState([])
+  const [adminUsersTotal, setAdminUsersTotal] = useState(0)
   const [adminUsersOpen, setAdminUsersOpen] = useState(false)
   const [adminUsersLoading, setAdminUsersLoading] = useState(false)
   const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false)
@@ -2112,7 +2113,9 @@ function App() {
     try {
       const response = await fetch('/api/admin/users')
       if (!response.ok) throw new Error()
-      setAdminUsers((await response.json()).users)
+      const payload = await response.json()
+      setAdminUsers(payload.users)
+      setAdminUsersTotal(payload.total)
     } catch {
       setAdminUsers([])
       showToast('Die Nutzerliste konnte nicht geladen werden.')
@@ -2530,7 +2533,7 @@ function App() {
       {selectedEntry && <JournalEntryDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} onUpdate={updateJournalEntry} onDelete={deleteJournalEntry} />}
       {authOpen && <SignInDialog configuration={authConfiguration} resetToken={resetToken} onClose={() => { setAuthOpen(false); setResetToken(null) }} onDemoSignIn={signInDemo} onMemberSignIn={signInMember} onRegister={registerMember} onRequestPasswordReset={requestPasswordReset} onResendVerification={resendVerification} onResetPassword={resetPassword} onOpenPrivacy={() => { setAuthOpen(false); setLegalDialog('privacy') }} onOpenImprint={() => { setAuthOpen(false); setLegalDialog('imprint') }} />}
       {passwordDialogOpen && <PasswordDialog onClose={() => setPasswordDialogOpen(false)} onSave={changePassword} />}
-      {adminUsersOpen && <RegisteredUsersDialog users={adminUsers} loading={adminUsersLoading} onClose={() => setAdminUsersOpen(false)} />}
+      {adminUsersOpen && <RegisteredUsersDialog users={adminUsers} total={adminUsersTotal} loading={adminUsersLoading} onClose={() => setAdminUsersOpen(false)} />}
       {suggestionDialogOpen && <SpotSuggestionDialog onSubmit={submitSpotSuggestion} onClose={() => setSuggestionDialogOpen(false)} />}
       {legalDialog && <LegalDialog kind={legalDialog} onClose={() => setLegalDialog(null)} />}
       {messageUser && <MessageDialog user={messageUser} onClose={() => setMessageUser(null)} onRead={async () => { const response = await fetch('/api/social/friends/summary'); if (response.ok) setFriendSummary(await response.json()) }} />}

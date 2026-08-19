@@ -14,6 +14,7 @@ import Google from '@auth/express/providers/google'
 import PostgresAdapter from '@auth/pg-adapter'
 import { Pool } from 'pg'
 import { z } from 'zod'
+import { areMutualFollowers, isEntryVisible } from './visibility.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const uploadRoot = process.env.UPLOAD_DIR ?? '/app/uploads'
@@ -381,18 +382,28 @@ async function ensureManagedUsers() {
   }
 }
 
-async function canViewEntry(viewerId, entryUserId, visibility) {
-  if (viewerId === entryUserId) return true
-  if (visibility === 'public') return true
-  if (visibility === 'private') return false
+async function relationshipState(firstUserId, secondUserId) {
   const relationship = await pool.query(
     `SELECT
-       EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND followed_id = $2 AND status = 'accepted') AS follows_author,
-       EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followed_id = $1 AND status = 'accepted') AS author_follows_back`,
-    [viewerId, entryUserId],
+       EXISTS(SELECT 1 FROM blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)) AS blocked,
+       EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND followed_id = $2 AND status = 'accepted') AS first_follows_second,
+       EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followed_id = $1 AND status = 'accepted') AS second_follows_first`,
+    [firstUserId, secondUserId],
   )
-  const { follows_author: followsAuthor, author_follows_back: authorFollowsBack } = relationship.rows[0]
-  return visibility === 'followers' ? followsAuthor : followsAuthor && authorFollowsBack
+  return relationship.rows[0]
+}
+
+async function canViewEntry(viewerId, entryUserId, visibility) {
+  if (viewerId === entryUserId) return true
+  const relationship = await relationshipState(viewerId, entryUserId)
+  return isEntryVisible({
+    viewerId,
+    ownerId: entryUserId,
+    visibility,
+    blocked: relationship.blocked,
+    followsOwner: relationship.first_follows_second,
+    ownerFollowsViewer: relationship.second_follows_first,
+  })
 }
 
 async function getViewableEntry(viewerId, entryId) {
@@ -403,12 +414,13 @@ async function getViewableEntry(viewerId, entryId) {
 }
 
 async function areFriends(firstUserId, secondUserId) {
-  const result = await pool.query(
-    `SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND followed_id = $2 AND status = 'accepted')
-        AND EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followed_id = $1 AND status = 'accepted') AS friends`,
-    [firstUserId, secondUserId],
-  )
-  return result.rows[0].friends
+  if (firstUserId === secondUserId) return false
+  const relationship = await relationshipState(firstUserId, secondUserId)
+  return areMutualFollowers({
+    blocked: relationship.blocked,
+    firstFollowsSecond: relationship.first_follows_second,
+    secondFollowsFirst: relationship.second_follows_first,
+  })
 }
 
 async function notifyPlanUsers(client, planId, actorId, type, payload, recipientIds) {
@@ -990,6 +1002,7 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
           OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
           OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
         )
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = j.user_id) OR (b.blocker_id = j.user_id AND b.blocked_id = $1))
      GROUP BY j.id, v.id, s.id, u.id
      ORDER BY v.visited_at DESC, j.created_at DESC, j.id DESC
      LIMIT 30
@@ -1025,6 +1038,7 @@ app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
          OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
          OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
        )
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = j.user_id) OR (b.blocker_id = j.user_id AND b.blocked_id = $1))
      GROUP BY j.id, v.id, s.id, u.id
      ORDER BY v.visited_at DESC, j.created_at DESC, j.id DESC
      LIMIT 24
@@ -1536,17 +1550,20 @@ app.get('/admin/auth-audit', ...requireSuperAdmin, asyncRoute(async (req, res) =
 
 app.get('/admin/users', ...requireSuperAdmin, asyncRoute(async (req, res) => {
   const limit = z.coerce.number().int().min(1).max(1000).parse(req.query.limit ?? 1000)
-  const result = await pool.query(
-    `SELECT u.id, u.name, u.username, u.email, u.image, u.role, u.created_at,
+  const [result, count] = await Promise.all([
+    pool.query(
+      `SELECT u.id, u.name, u.username, u.email, u.image, u.role, u.created_at,
             (SELECT MAX(a.created_at)
                FROM auth_audit_events a
               WHERE a.user_id = u.id AND a.event_type = 'login') AS last_login_at
        FROM users u
       ORDER BY u.created_at DESC, u.name ASC
       LIMIT $1`,
-    [limit],
-  )
-  res.json({ users: result.rows })
+      [limit],
+    ),
+    pool.query('SELECT COUNT(*)::int AS total FROM users'),
+  ])
+  res.json({ users: result.rows, total: count.rows[0].total })
 }))
 
 app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
