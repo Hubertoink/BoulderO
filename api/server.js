@@ -3,6 +3,8 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { ZipArchive } from 'archiver'
+import ExcelJS from 'exceljs'
 import express from 'express'
 import multer from 'multer'
 import nodemailer from 'nodemailer'
@@ -724,8 +726,10 @@ app.get('/social/friend-requests', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.get('/social/discover', requireUser, asyncRoute(async (req, res) => {
-  const input = z.object({ q: z.string().trim().min(2).max(64) }).parse(req.query)
-  const pattern = `%${input.q.replace(/[\\%_]/g, '\\$&')}%`
+  const input = z.object({ q: z.string().trim().max(64) }).parse(req.query)
+  const query = input.q.replace(/^@+/, '')
+  if (query.length < 2) return res.status(400).json({ error: 'search_query_too_short' })
+  const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`
   const result = await pool.query(`
     SELECT u.id, u.name, u.username, u.image,
       EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = u.id AND f.status = 'accepted') AS following,
@@ -768,6 +772,19 @@ app.post('/social/friend-requests/:userId', requireUser, asyncRoute(async (req, 
   } finally {
     client.release()
   }
+}))
+
+app.delete('/social/friends/:userId', requireUser, asyncRoute(async (req, res) => {
+  const targetId = z.string().uuid().parse(req.params.userId)
+  if (targetId === req.user.id) return res.status(400).json({ error: 'cannot_unfriend_self' })
+  if (!await areFriends(req.user.id, targetId)) return res.status(404).json({ error: 'friendship_not_found' })
+  await pool.query(
+    `DELETE FROM follows
+      WHERE status = 'accepted'
+        AND ((follower_id = $1 AND followed_id = $2) OR (follower_id = $2 AND followed_id = $1))`,
+    [req.user.id, targetId],
+  )
+  res.status(204).end()
 }))
 
 app.post('/social/friend-requests/:requestId/accept', requireUser, asyncRoute(async (req, res) => {
@@ -1093,14 +1110,92 @@ app.get('/admin/spot-suggestions', ...requireSuperAdmin, asyncRoute(async (_req,
 
 app.get('/admin/auth-audit', ...requireSuperAdmin, asyncRoute(async (req, res) => {
   const limit = z.coerce.number().int().min(1).max(500).parse(req.query.limit ?? 100)
-  const result = await pool.query(
-    `SELECT id, event_type, user_id, user_name, user_email, created_at
-       FROM auth_audit_events
-      ORDER BY created_at DESC
-      LIMIT $1`,
-    [limit],
-  )
-  res.json({ events: result.rows })
+  const [result, stats] = await Promise.all([
+    pool.query(
+      `SELECT id, event_type, user_id, user_name, user_email, created_at
+         FROM auth_audit_events
+        ORDER BY created_at DESC
+        LIMIT $1`,
+      [limit],
+    ),
+    pool.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM users) AS registered_users,
+        (SELECT COUNT(*)::int FROM journal_entries) AS journal_entries,
+        (SELECT COUNT(*)::int FROM spots WHERE status = 'active') AS active_spots
+    `),
+  ])
+  res.json({ events: result.rows, stats: stats.rows[0] })
+}))
+
+app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
+  const result = await pool.query(`
+    SELECT id, name, district, address, website, opening_hours, area_sqm, image_url,
+           source, source_external_id, source_license, status, created_at, updated_at,
+           ST_Y(coordinates::geometry) AS latitude,
+           ST_X(coordinates::geometry) AS longitude
+      FROM spots
+     ORDER BY name ASC
+  `)
+
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'BoulderO'
+  workbook.created = new Date()
+  const sheet = workbook.addWorksheet('Hallen')
+  sheet.columns = [
+    { header: 'id', key: 'id', width: 38 },
+    { header: 'name', key: 'name', width: 32 },
+    { header: 'district', key: 'district', width: 22 },
+    { header: 'address', key: 'address', width: 42 },
+    { header: 'website', key: 'website', width: 42 },
+    { header: 'opening_hours', key: 'opening_hours', width: 30 },
+    { header: 'area_sqm', key: 'area_sqm', width: 13 },
+    { header: 'latitude', key: 'latitude', width: 15 },
+    { header: 'longitude', key: 'longitude', width: 15 },
+    { header: 'image_url', key: 'image_url', width: 52 },
+    { header: 'image_export_path', key: 'image_export_path', width: 42 },
+    { header: 'source', key: 'source', width: 20 },
+    { header: 'source_external_id', key: 'source_external_id', width: 28 },
+    { header: 'source_license', key: 'source_license', width: 28 },
+    { header: 'status', key: 'status', width: 14 },
+    { header: 'created_at', key: 'created_at', width: 24 },
+    { header: 'updated_at', key: 'updated_at', width: 24 },
+  ]
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFF4F9E9' } }
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF153243' } }
+  sheet.views = [{ state: 'frozen', ySplit: 1 }]
+  sheet.autoFilter = { from: 'A1', to: 'Q1' }
+
+  const localImages = []
+  for (const spot of result.rows) {
+    let imageExportPath = ''
+    if (spot.image_url?.startsWith('upload:')) {
+      const storageKey = spot.image_url.slice('upload:'.length)
+      const absolutePath = path.resolve(uploadRoot, storageKey)
+      const imageDirectory = path.resolve(uploadRoot, 'spot-images')
+      if (absolutePath.startsWith(`${imageDirectory}${path.sep}`)) {
+        const extension = path.extname(storageKey).toLowerCase() || '.jpg'
+        imageExportPath = `bilder/${spot.id}${extension}`
+        localImages.push({ absolutePath, archivePath: imageExportPath })
+      }
+    }
+    sheet.addRow({ ...spot, image_export_path: imageExportPath })
+  }
+  const xlsx = await workbook.xlsx.writeBuffer()
+
+  res.attachment('bouldero-hallen-export.zip')
+  const archive = new ZipArchive({ zlib: { level: 9 } })
+  archive.on('error', (error) => res.destroy(error))
+  archive.pipe(res)
+  archive.append(Buffer.from(xlsx), { name: 'bouldero-hallen.xlsx' })
+  for (const image of localImages) {
+    try {
+      archive.append(await fs.readFile(image.absolutePath), { name: image.archivePath })
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  await archive.finalize()
 }))
 
 app.get('/admin/spot-corrections', ...requireSuperAdmin, asyncRoute(async (_req, res) => {

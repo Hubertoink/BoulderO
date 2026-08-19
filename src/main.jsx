@@ -14,6 +14,7 @@ import {
   IconClock,
   IconCurrentLocation,
   IconDownload,
+  IconDots,
   IconEye,
   IconFlag,
   IconLock,
@@ -727,12 +728,12 @@ function LegacyAdminSpotsView({ spots, onCreate, onImport, onUpdate, onDelete, o
   return <main className="view content-view compact-view admin-view"><div className="page-intro"><h1>Hallen anlegen</h1><p>Neue Boulderhallen werden nach dem Speichern direkt auf der Karte veröffentlicht.</p></div><section className="admin-surface"><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} placeholder="z. B. Mo–Fr 10:00–22:00" /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label><label className="form-field"><span>Bild hochladen</span><input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} wird nach dem Speichern verknüpft.` : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label><label className="form-field"><span>Oder Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} placeholder="https://…/halle.jpg" /><small>Praktisch für den CSV-Massenimport.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section><section className="admin-import"><div><span className="eyebrow">Mehrere Hallen</span><h2>CSV importieren</h2><p>Maximal 500 Hallen; Pflichtspalten: name, district, address, latitude und longitude. image_url ist optional.</p></div><div className="admin-import__actions"><button type="button" className="text-back" onClick={downloadHallTemplate}><IconDownload size={16} />Vorlage herunterladen</button><label className="visit-button"><IconPlus size={18} />{importing ? 'Import wird verarbeitet …' : 'CSV auswählen'}<input ref={csvInput} type="file" accept=".csv,text/csv" onChange={importCsv} disabled={importing} /></label></div></section><section className="admin-list"><div className="section-heading"><h2>Aktive Hallen</h2><span>{filteredSpots.length} / {spots.length}</span></div><label className="admin-filter"><IconSearch size={17} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Nach Name, Stadtteil oder Adresse filtern" /></label><div className="admin-table-wrap"><table><thead><tr><th>Halle</th><th>Stadtteil</th><th>Adresse</th><th>Quelle</th><th aria-label="Aktionen" /></tr></thead><tbody>{filteredSpots.map((spot) => <tr key={spot.id}><td>{spot.name}</td><td>{spot.district}</td><td>{spot.address}</td><td>{spot.source === 'admin' ? 'manuell' : spot.source === 'admin-import' ? 'CSV' : 'Import'}</td><td><div className="admin-row-actions"><button type="button" onClick={() => setEditingSpot(spot)}>Bearbeiten</button><button type="button" className="danger" disabled={deletingId === spot.id} onClick={() => removeSpot(spot)}>{deletingId === spot.id ? 'Löscht …' : 'Löschen'}</button></div></td></tr>)}</tbody></table></div>{!filteredSpots.length && <p className="journal-empty">Keine Hallen für diesen Filter.</p>}</section><button className="text-back" onClick={onBack}>Zurück zum Profil</button>{editingSpot && <SpotEditDialog spot={editingSpot} onSave={(input) => onUpdate(editingSpot.id, input)} onClose={() => setEditingSpot(null)} />}</main>
 }
 
-function AuthAuditSection({ events }) {
-  return <section className="admin-audit"><div className="section-heading"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierungen & Anmeldungen</h2></div><span>{events.length}</span></div><p>Erfolgreiche Registrierungen und Anmeldungen der letzten 100 Ereignisse.</p><div className="admin-table-wrap"><table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Konto</th><th>E-Mail</th></tr></thead><tbody>{events.length ? events.map((event) => <tr key={event.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</td><td><span className={`audit-event audit-event--${event.event_type}`}>{event.event_type === 'registration' ? 'Registrierung' : 'Anmeldung'}</span></td><td>{event.user_name}</td><td>{event.user_email}</td></tr>) : <tr><td colSpan="4">Noch keine Ereignisse seit der Aktivierung des Audits.</td></tr>}</tbody></table></div></section>
+function AuthAuditSection({ events, stats }) {
+  return <section className="admin-audit"><div className="section-heading"><div><span className="eyebrow">Kontosicherheit</span><h2>Registrierungen & Anmeldungen</h2></div><span>{events.length}</span></div><p>Erfolgreiche Registrierungen und Anmeldungen der letzten 100 Ereignisse.</p><div className="admin-kpis" aria-label="BoulderO Kennzahlen"><div><strong>{stats?.registered_users ?? '–'}</strong><span>Registrierte Nutzer</span></div><div><strong>{stats?.journal_entries ?? '–'}</strong><span>Beiträge</span></div><div><strong>{stats?.active_spots ?? '–'}</strong><span>Aktive Hallen</span></div></div><div className="admin-table-wrap"><table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th><th>Konto</th><th>E-Mail</th></tr></thead><tbody>{events.length ? events.map((event) => <tr key={event.id}><td>{new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</td><td><span className={`audit-event audit-event--${event.event_type}`}>{event.event_type === 'registration' ? 'Registrierung' : 'Anmeldung'}</span></td><td>{event.user_name}</td><td>{event.user_email}</td></tr>) : <tr><td colSpan="4">Noch keine Ereignisse seit der Aktivierung des Audits.</td></tr>}</tbody></table></div></section>
 }
 
-function AuditView({ events, onBack }) {
-  return <main className="view content-view compact-view admin-view"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Kontosicherheit</h1><p>Überblick über erfolgreiche Registrierungen und Anmeldungen.</p></div><AuthAuditSection events={events} /><button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+function AuditView({ events, stats, onBack }) {
+  return <main className="view content-view compact-view admin-view"><div className="admin-page-content"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Kontosicherheit</h1><p>Überblick über erfolgreiche Registrierungen und Anmeldungen.</p></div><AuthAuditSection events={events} stats={stats} /><button className="text-back" onClick={onBack}>Zurück zum Profil</button></div></main>
 }
 
 function AdminSpotsView({
@@ -746,6 +747,7 @@ function AdminSpotsView({
   onApproveSuggestion,
   onRejectSuggestion,
   onResolveCorrection,
+  onExport,
   onBack,
 }) {
   const [filter, setFilter] = useState("");
@@ -814,6 +816,14 @@ function AdminSpotsView({
       );
     } finally {
       setDeletingId(null);
+    }
+  }
+  async function exportHalls() {
+    setError("");
+    try {
+      await onExport();
+    } catch (exportError) {
+      setError(exportError.message || "Der Hallenexport konnte nicht erstellt werden.");
     }
   }
   const sortLabel = (key, label) => (
@@ -893,6 +903,14 @@ function AdminSpotsView({
           </p>
         </div>
         <div className="admin-import__actions">
+          <button
+            type="button"
+            className="text-back"
+            onClick={exportHalls}
+          >
+            <IconDownload size={16} />
+            Export herunterladen
+          </button>
           <button
             type="button"
             className="text-back"
@@ -1142,6 +1160,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
   const [results, setResults] = useState([])
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(null)
+  const [friendMenuId, setFriendMenuId] = useState(null)
   async function load() {
     try {
       const [friendsResponse, suggestionsResponse, requestsResponse, summaryResponse] = await Promise.all([fetch('/api/social/friends'), fetch('/api/social/friend-suggestions'), fetch('/api/social/friend-requests'), fetch('/api/social/friends/summary')])
@@ -1158,9 +1177,10 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
     return () => window.clearInterval(interval)
   }, [])
   useEffect(() => {
-    if (query.trim().length < 2) { setResults([]); return undefined }
+    const searchQuery = query.trim().replace(/^@+/, '')
+    if (searchQuery.length < 2) { setResults([]); return undefined }
     const timer = window.setTimeout(async () => {
-      const response = await fetch(`/api/social/discover?q=${encodeURIComponent(query.trim())}`)
+      const response = await fetch(`/api/social/discover?q=${encodeURIComponent(searchQuery)}`)
       if (response.ok) setResults((await response.json()).users)
     }, 250)
     return () => window.clearTimeout(timer)
@@ -1170,8 +1190,9 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
     const response = await fetch(path, { method })
     if (!response.ok) { setError('Die Beziehung konnte nicht aktualisiert werden.'); return }
     await load()
-    if (query.trim().length >= 2) {
-      const search = await fetch(`/api/social/discover?q=${encodeURIComponent(query.trim())}`)
+    const searchQuery = query.trim().replace(/^@+/, '')
+    if (searchQuery.length >= 2) {
+      const search = await fetch(`/api/social/discover?q=${encodeURIComponent(searchQuery)}`)
       if (search.ok) setResults((await search.json()).users)
     }
   }
@@ -1211,14 +1232,13 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
             {friends.map((user) => <article key={user.id}>
               <UserAvatar user={user} onOpenImage={onOpenImage} />
               <div><h3>{user.name}</h3><p>@{user.username}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div>
-              <button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button>
-              <button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button>
+              <div className="friend-row-actions"><button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button><button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button><div className="friend-more-menu"><button type="button" className="friend-more-button" onClick={() => setFriendMenuId((current) => current === user.id ? null : user.id)} aria-label={`Beziehungsoptionen für ${user.name}`} aria-expanded={friendMenuId === user.id} title="Beziehungsoptionen"><IconDots size={19} /></button>{friendMenuId === user.id && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setFriendMenuId(null); action(`/api/follows/${user.id}`, 'DELETE') }}>Nicht mehr folgen</button><button type="button" className="danger" onClick={() => { setFriendMenuId(null); action(`/api/social/friends/${user.id}`, 'DELETE') }}>Freundschaft beenden</button></div>}</div></div>
               {preview?.user?.id === user.id && <div className="friend-preview"><b>Letztes von {preview.user.name}</b>{preview.plans.map((plan) => <p key={plan.id}><IconCalendarEvent size={14} /> {formatPlanDate(plan.starts_at)} · {plan.spot_name}</p>)}{preview.entries.map((entry) => <p key={entry.id}>war bei <b>{entry.spot_name}</b>{entry.body ? ` · ${entry.body}` : ''}</p>)}{!preview.entries.length && !preview.plans.length && <p>Noch nichts geteilt.</p>}<button type="button" onClick={() => onOpenUserFeed(preview.user)}>Feed von {preview.user.name.split(' ')[0]} öffnen</button></div>}
             </article>)}
           </div>
         </>}
         {tab === 'requests' && <div className="request-groups"><section><div className="section-heading"><h3>Eingegangen</h3><span>{requests.incoming.length}</span></div><div className="people-list">{!requests.incoming.length && <p className="journal-empty">Keine offenen Anfragen.</p>}{requests.incoming.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username}</p></div><button className="message-button" onClick={() => action(`/api/social/friend-requests/${request.id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${request.id}/accept`)}><IconCheck size={16} />Annehmen</button></article>)}</div></section><section><div className="section-heading"><h3>Gesendet</h3><span>{requests.outgoing.length}</span></div><div className="people-list">{!requests.outgoing.length && <p className="journal-empty">Keine gesendeten Anfragen.</p>}{requests.outgoing.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username} · Anfrage gesendet</p></div></article>)}</div></section></div>}
-        {tab === 'discover' && <section className="friend-discover"><label className="search-field"><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name oder @username suchen" /></label>{query.trim().length > 0 && query.trim().length < 2 && <p className="journal-empty">Mindestens zwei Zeichen eingeben.</p>}<div className="people-list">{results.map((user) => <article key={user.id}><UserAvatar user={user} /><div><h3>{user.name}</h3><p>@{user.username}{user.follows_you ? ' · folgt dir' : ''}</p></div>{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : user.request_received ? <span className="relationship-actions"><button className="message-button" onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/accept`)}>Annehmen</button></span> : <button onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>}{!user.is_friend && <button className={user.following ? 'following' : ''} onClick={() => action(`/api/follows/${user.id}`, user.following ? 'DELETE' : 'POST')}>{user.following ? 'Folge ich' : 'Folgen'}</button>}</article>)}</div></section>}
+        {tab === 'discover' && <section className="friend-discover"><label className="search-field"><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name oder @username suchen" /></label>{query.trim().replace(/^@+/, '').length > 0 && query.trim().replace(/^@+/, '').length < 2 && <p className="journal-empty">Mindestens zwei Zeichen eingeben.</p>}<div className="people-list">{results.map((user) => <article key={user.id}><UserAvatar user={user} /><div><h3>{user.name}</h3><p>@{user.username}{user.follows_you ? ' · folgt dir' : ''}</p></div>{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : user.request_received ? <span className="relationship-actions"><button className="message-button" onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/accept`)}>Annehmen</button></span> : <button onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>}{!user.is_friend && <button className={user.following ? 'following' : ''} onClick={() => action(`/api/follows/${user.id}`, user.following ? 'DELETE' : 'POST')}>{user.following ? 'Folge ich' : 'Folgen'}</button>}</article>)}</div></section>}
       </section>
     </main>
   )
@@ -1302,6 +1322,7 @@ function App() {
   const [spotSuggestions, setSpotSuggestions] = useState([])
   const [spotCorrectionReports, setSpotCorrectionReports] = useState([])
   const [authAudit, setAuthAudit] = useState([])
+  const [adminStats, setAdminStats] = useState(null)
   const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false)
   const [planDialogSpotId, setPlanDialogSpotId] = useState(null)
   const [correctionDialogSpotId, setCorrectionDialogSpotId] = useState(null)
@@ -1398,10 +1419,25 @@ function App() {
     if (response.ok) setSpotCorrectionReports((await response.json()).reports)
   }
   async function loadAuthAudit(user = currentUser) {
-    if (user?.role !== 'superadmin') { setAuthAudit([]); return }
+    if (user?.role !== 'superadmin') { setAuthAudit([]); setAdminStats(null); return }
     const response = await fetch('/api/admin/auth-audit')
-    if (response.ok) setAuthAudit((await response.json()).events)
+    if (response.ok) {
+      const payload = await response.json()
+      setAuthAudit(payload.events)
+      setAdminStats(payload.stats)
+    }
   }
+
+  useEffect(() => {
+    const mapDialogOpen = (composerOpen && composerSurface === 'map') || Boolean(planDialogSpotId)
+    if (!mapDialogOpen) return undefined
+    document.documentElement.classList.add('map-dialog-open')
+    document.body.classList.add('map-dialog-open')
+    return () => {
+      document.documentElement.classList.remove('map-dialog-open')
+      document.body.classList.remove('map-dialog-open')
+    }
+  }, [composerOpen, composerSurface, planDialogSpotId])
 
   async function refreshSession() {
     const response = await fetch('/api/me')
@@ -1660,6 +1696,19 @@ function App() {
     showToast('Halle von der Karte entfernt')
   }
 
+  async function exportSpots() {
+    const response = await fetch('/api/admin/spots/export')
+    if (!response.ok) throw new Error('Der Hallenexport konnte nicht erstellt werden.')
+    const downloadUrl = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement('a')
+    anchor.href = downloadUrl
+    anchor.download = 'bouldero-hallen-export.zip'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(downloadUrl)
+  }
+
   async function submitSpotSuggestion(input) {
     const response = await fetch('/api/spot-suggestions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
     if (!response.ok) throw new Error('Bitte prüfe Name, Adresse und optionale Koordinaten.')
@@ -1711,8 +1760,8 @@ function App() {
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
-      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onBack={() => goBack('profile')} />}
-      {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
+      {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={() => setFeedSummary({ unread_feed: 0 })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
