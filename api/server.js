@@ -232,44 +232,44 @@ app.use((req, _res, next) => {
 })
 app.use(express.json({ limit: '1mb' }))
 
-function usernameFromName(name) {
-  return name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20) || 'boulderer'
-}
+const registrationUsernameSchema = z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,24}$/)
+
+app.get('/register/username-availability', asyncRoute(async (req, res) => {
+  const username = registrationUsernameSchema.parse(req.query.username)
+  const result = await pool.query('SELECT 1 FROM users WHERE username = $1', [username])
+  res.json({ username, available: !result.rowCount })
+}))
 
 app.post('/register', asyncRoute(async (req, res) => {
   if (!emailTransport) return res.status(503).json({ error: 'email_not_configured' })
   const input = z.object({
     name: z.string().trim().min(2).max(80),
+    username: registrationUsernameSchema,
     email: z.string().trim().email().max(320).transform((value) => value.toLowerCase()),
     password: z.string().min(10).max(200),
   }).parse(req.body)
   const existing = await pool.query('SELECT id FROM users WHERE email = $1', [input.email])
   if (existing.rowCount) return res.status(409).json({ error: 'email_taken' })
   const hash = await passwordHash(input.password)
-  const baseUsername = usernameFromName(input.name)
-  for (let suffix = 0; suffix < 100; suffix += 1) {
-    const username = suffix ? `${baseUsername}${suffix + 1}`.slice(0, 30) : baseUsername
+  try {
+    const created = await pool.query(
+      `INSERT INTO users (name, email, username, password_hash, role)
+       VALUES ($1, $2, $3, $4, 'member') RETURNING id, name, email, username, role`,
+      [input.name, input.email, input.username, hash],
+    )
+    await writeAuthAudit('registration', created.rows[0])
     try {
-      const created = await pool.query(
-        `INSERT INTO users (name, email, username, password_hash, role)
-         VALUES ($1, $2, $3, $4, 'member') RETURNING id, name, email, username, role`,
-        [input.name, input.email, username, hash],
-      )
-      await writeAuthAudit('registration', created.rows[0])
-      try {
-        await sendAccountActionEmail(req, created.rows[0], 'verify_email')
-      } catch (error) {
-        console.error('Bestätigungs-E-Mail konnte nicht versendet werden:', error)
-        return res.status(503).json({ error: 'email_delivery_failed' })
-      }
-      return res.status(201).json({ user: created.rows[0], verificationRequired: true })
+      await sendAccountActionEmail(req, created.rows[0], 'verify_email')
     } catch (error) {
-      if (error?.code === '23505' && error?.constraint?.includes('email')) return res.status(409).json({ error: 'email_taken' })
-      if (error?.code === '23505') continue
-      throw error
+      console.error('Bestätigungs-E-Mail konnte nicht versendet werden:', error)
+      return res.status(503).json({ error: 'email_delivery_failed' })
     }
+    return res.status(201).json({ user: created.rows[0], verificationRequired: true })
+  } catch (error) {
+    if (error?.code === '23505' && error?.constraint?.includes('email')) return res.status(409).json({ error: 'email_taken' })
+    if (error?.code === '23505' && error?.constraint?.includes('username')) return res.status(409).json({ error: 'username_taken' })
+    throw error
   }
-  res.status(409).json({ error: 'username_unavailable' })
 }))
 
 app.post('/account/verification/resend', asyncRoute(async (req, res) => {
@@ -541,6 +541,71 @@ function numberFromCsv(value, field, rowNumber, { optional = false, integer = fa
   const number = Number(normalized)
   if (!Number.isFinite(number) || (integer && !Number.isInteger(number))) throw new Error(`Zeile ${rowNumber}: ${field} ist ungültig.`)
   return number
+}
+
+function parseAdminSpotCsv(file) {
+  if (!file) throw new Error('csv_file_required')
+  const rows = parseCsv(file.buffer.toString('utf8'))
+  if (rows.length < 2) throw new Error('csv_rows_required')
+  if (rows.length > 501) throw new Error('csv_limit_exceeded')
+  const headers = rows[0].map((value) => value.trim().replace(/^\uFEFF/, '').toLowerCase())
+  const required = ['name', 'district', 'address', 'latitude', 'longitude']
+  const missing = required.filter((name) => !headers.includes(name))
+  if (missing.length) {
+    const error = new Error('csv_headers_invalid')
+    error.missing = missing
+    throw error
+  }
+  return rows.slice(1).map((values, index) => {
+    const record = { rowNumber: index + 2 }
+    headers.forEach((header, column) => { record[header] = values[column] ?? '' })
+    try {
+      return {
+        rowNumber: record.rowNumber,
+        input: spotInputSchema.parse({
+          name: record.name,
+          district: record.district,
+          address: record.address,
+          website: record.website || '',
+          openingHours: record.opening_hours || '',
+          areaSqm: numberFromCsv(record.area_sqm, 'area_sqm', record.rowNumber, { optional: true, integer: true }),
+          imageUrl: record.image_url || '',
+          latitude: numberFromCsv(record.latitude, 'latitude', record.rowNumber),
+          longitude: numberFromCsv(record.longitude, 'longitude', record.rowNumber),
+        }),
+        error: null,
+      }
+    } catch (error) {
+      return { rowNumber: record.rowNumber, input: null, error: error.issues?.[0]?.message ?? error.message }
+    }
+  })
+}
+
+async function findImportCandidates(inputs) {
+  if (!inputs.length) return new Map()
+  const params = []
+  const values = inputs.map((row, index) => {
+    const start = index * 4
+    params.push(row.rowNumber, row.input.name, row.input.latitude, row.input.longitude)
+    return `($${start + 1}::int, $${start + 2}::text, $${start + 3}::double precision, $${start + 4}::double precision)`
+  }).join(', ')
+  const result = await pool.query(`
+    WITH incoming(row_number, name, latitude, longitude) AS (VALUES ${values})
+    SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.status,
+           ROUND(ST_Distance(spots.coordinates, ST_SetSRID(ST_MakePoint(incoming.longitude, incoming.latitude), 4326)::geography))::int AS distance_m,
+           LOWER(TRIM(spots.name)) = LOWER(TRIM(incoming.name)) AS same_name
+      FROM incoming
+      JOIN spots ON LOWER(TRIM(spots.name)) = LOWER(TRIM(incoming.name))
+        OR ST_DWithin(spots.coordinates, ST_SetSRID(ST_MakePoint(incoming.longitude, incoming.latitude), 4326)::geography, 150)
+     ORDER BY incoming.row_number, same_name DESC, distance_m ASC, spots.name ASC
+  `, params)
+  const candidates = new Map()
+  for (const row of result.rows) {
+    const items = candidates.get(row.row_number) ?? []
+    items.push(row)
+    candidates.set(row.row_number, items)
+  }
+  return candidates
 }
 
 app.get('/health', asyncRoute(async (_req, res) => {
@@ -1379,39 +1444,66 @@ app.get('/spot-images/:spotId', asyncRoute(async (req, res) => {
   res.sendFile(absolutePath)
 }))
 
-app.post('/admin/spots/import', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'csv_file_required' })
-  const rows = parseCsv(req.file.buffer.toString('utf8'))
-  if (rows.length < 2) return res.status(400).json({ error: 'csv_rows_required' })
-  if (rows.length > 501) return res.status(400).json({ error: 'csv_limit_exceeded' })
-  const headers = rows[0].map((value) => value.trim().replace(/^\uFEFF/, '').toLowerCase())
-  const required = ['name', 'district', 'address', 'latitude', 'longitude']
-  const missing = required.filter((name) => !headers.includes(name))
-  if (missing.length) return res.status(400).json({ error: 'csv_headers_invalid', missing })
-  const inputs = rows.slice(1).map((values, index) => {
-    const record = { rowNumber: index + 2 }
-    headers.forEach((header, column) => { record[header] = values[column] ?? '' })
-    return spotInputSchema.parse({
-      name: record.name,
-      district: record.district,
-      address: record.address,
-      website: record.website || '',
-      openingHours: record.opening_hours || '',
-      areaSqm: numberFromCsv(record.area_sqm, 'area_sqm', record.rowNumber, { optional: true, integer: true }),
-      imageUrl: record.image_url || '',
-      latitude: numberFromCsv(record.latitude, 'latitude', record.rowNumber),
-      longitude: numberFromCsv(record.longitude, 'longitude', record.rowNumber),
-    })
-  })
+app.post('/admin/spots/import/preview', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
+  let rows
+  try {
+    rows = parseAdminSpotCsv(req.file)
+  } catch (error) {
+    return res.status(400).json({ error: error.message, missing: error.missing })
+  }
+  const candidates = await findImportCandidates(rows.filter((row) => row.input))
+  res.json({ rows: rows.map((row) => ({ ...row, candidates: candidates.get(row.rowNumber) ?? [] })) })
+}))
+
+app.post('/admin/spots/import/apply', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
+  let rows
+  try {
+    rows = parseAdminSpotCsv(req.file)
+  } catch (error) {
+    return res.status(400).json({ error: error.message, missing: error.missing })
+  }
+  let decisions
+  try {
+    decisions = z.array(z.object({
+      rowNumber: z.number().int().positive(),
+      action: z.enum(['create', 'update', 'skip']),
+      targetId: z.string().uuid().optional(),
+    })).max(500).parse(JSON.parse(req.body.decisions ?? '[]'))
+  } catch {
+    return res.status(400).json({ error: 'csv_decisions_invalid' })
+  }
+  const decisionsByRow = new Map(decisions.map((decision) => [decision.rowNumber, decision]))
   const client = await pool.connect()
+  let created = 0
+  let updated = 0
+  let skipped = 0
   try {
     await client.query('BEGIN')
-    for (const input of inputs) {
-      await client.query(
-        `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, image_url, coordinates, source, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, 'admin-import', 'active')`,
-        [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
-      )
+    for (const row of rows) {
+      const decision = decisionsByRow.get(row.rowNumber) ?? { action: 'skip' }
+      if (!row.input || decision.action === 'skip') { skipped += 1; continue }
+      const input = row.input
+      if (decision.action === 'create') {
+        await client.query(
+          `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, image_url, coordinates, source, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, 'admin-import', 'active')`,
+          [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
+        )
+        created += 1
+      } else {
+        if (!decision.targetId) throw new Error(`Zeile ${row.rowNumber}: Zielhalle fehlt.`)
+        const result = await client.query(
+          `UPDATE spots
+              SET name = $2, district = $3, address = $4, website = $5, opening_hours = $6,
+                  area_sqm = $7, image_url = CASE WHEN $8 = '' THEN image_url ELSE $8 END,
+                  coordinates = ST_SetSRID(ST_MakePoint($10, $9), 4326)::geography, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id`,
+          [decision.targetId, input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || '', input.latitude, input.longitude],
+        )
+        if (!result.rowCount) throw new Error(`Zeile ${row.rowNumber}: Zielhalle existiert nicht mehr.`)
+        updated += 1
+      }
     }
     await client.query('COMMIT')
   } catch (error) {
@@ -1420,7 +1512,7 @@ app.post('/admin/spots/import', ...requireSuperAdmin, csvUpload.single('file'), 
   } finally {
     client.release()
   }
-  res.status(201).json({ imported: inputs.length })
+  res.status(201).json({ created, updated, skipped })
 }))
 
 app.get('/visits', requireUser, asyncRoute(async (req, res) => {

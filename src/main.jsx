@@ -176,22 +176,29 @@ function MapActivityLayer({ spots, activities, onSelect }) {
   }, [markers.length])
   const previewId = markers.length ? markers[previewIndex % markers.length].activity.id : null
   if (zoom < 10) return null
-  return markers.map(({ activity, index, position }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: () => onSelect(activity.spot_id) }} />)
+  return markers.map(({ activity, index, position }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(activity.spot_id) } }} />)
+}
+
+function MobileMapDismiss({ onDismiss }) {
+  useMapEvents({
+    click: () => {
+      if (window.matchMedia('(max-width: 560px)').matches) onDismiss()
+    },
+  })
+  return null
 }
 
 function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, activities, onActivityBoundsChange }) {
   return (
     <div className="map-frame">
-      <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas" eventHandlers={{ click: (event) => {
-        const target = event.originalEvent?.target
-        if (window.matchMedia('(max-width: 560px)').matches && !target?.closest?.('.leaflet-marker-icon, .leaflet-marker-shadow')) onDismiss()
-      } }}>
+      <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas">
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <FocusMap spot={selectedSpot} />
         <FocusLocation location={userLocation} />
+        <MobileMapDismiss onDismiss={onDismiss} />
         <MapActivityViewport onChange={onActivityBoundsChange} />
         {userLocation && <Marker position={userLocation} icon={userLocationIcon()} interactive={false} />}
         <MapActivityLayer spots={spots} activities={activities} onSelect={onSelect} />
@@ -200,7 +207,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, ac
             key={spot.id}
             position={spot.position}
             icon={markerIcon(spot.visits > 0, selectedSpot?.id === spot.id)}
-            eventHandlers={{ click: () => onSelect(spot.id) }}
+            eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(spot.id) } }}
           />
         ))}
       </MapContainer>
@@ -853,12 +860,25 @@ function AuditView({ events, stats, onBack }) {
   return <main className="view content-view compact-view admin-view"><div className="admin-page-content"><div className="page-intro"><span className="eyebrow">BoulderO Verwaltung</span><h1>Kontosicherheit</h1><p>Überblick über erfolgreiche Registrierungen und Anmeldungen.</p></div><AuthAuditSection events={events} stats={stats} /><button className="text-back" onClick={onBack}>Zurück zum Profil</button></div></main>
 }
 
+function CsvImportReview({ preview, decisions, onDecisionChange, onBulk, onApply, onClose, applying }) {
+  const [filter, setFilter] = useState('all')
+  const rows = preview.rows.filter((row) => filter === 'all' || (filter === 'new' && row.input && !row.candidates.length) || (filter === 'matches' && row.candidates.length) || (filter === 'invalid' && row.error))
+  const counts = {
+    new: preview.rows.filter((row) => row.input && !row.candidates.length).length,
+    matches: preview.rows.filter((row) => row.candidates.length).length,
+    invalid: preview.rows.filter((row) => row.error).length,
+  }
+  const selected = Object.values(decisions).filter((decision) => decision.action !== 'skip').length
+  return <section className="import-review"><div className="section-heading"><div><span className="eyebrow">CSV-Prüfung</span><h2>{preview.rows.length} Zeilen analysiert</h2></div><button type="button" className="text-back" onClick={onClose} disabled={applying}>Verwerfen</button></div><p>Treffer werden über gleichen Namen oder einen Abstand von höchstens 150 m vorgeschlagen. Erst mit „Auswahl anwenden“ werden Daten geändert.</p><div className="import-review__summary"><span>{counts.new} neu</span><span>{counts.matches} mögliche Treffer</span><span>{counts.invalid} ungültig</span><span>{selected} ausgewählt</span></div><div className="import-review__bulk"><button type="button" onClick={() => onBulk('create-new')} disabled={applying || !counts.new}>Alle neuen anlegen</button><button type="button" onClick={() => onBulk('update-matches')} disabled={applying || !counts.matches}>Treffer aktualisieren</button><button type="button" onClick={() => onBulk('skip-all')} disabled={applying}>Alle überspringen</button></div><div className="import-review__filters" role="tablist" aria-label="CSV-Zeilen filtern">{[['all', 'Alle'], ['new', 'Neu'], ['matches', 'Treffer'], ['invalid', 'Ungültig']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="admin-table-wrap"><table className="import-review__table"><thead><tr><th>Zeile</th><th>CSV-Halle</th><th>Prüfergebnis</th><th>Aktion</th></tr></thead><tbody>{rows.map((row) => { const decision = decisions[row.rowNumber] ?? { action: 'skip' }; const value = decision.action === 'update' ? `update:${decision.targetId}` : decision.action; return <tr key={row.rowNumber} className={row.error ? 'is-invalid' : row.candidates.length ? 'has-match' : ''}><td>{row.rowNumber}</td><td>{row.input ? <><b>{row.input.name}</b><small>{row.input.address} · {row.input.district}</small></> : 'Nicht lesbar'}</td><td>{row.error ? <span className="import-review__error">{row.error}</span> : row.candidates.length ? <div className="import-review__matches">{row.candidates.map((candidate) => <span key={candidate.id}><b>{candidate.name}</b> · {candidate.distance_m} m{candidate.same_name ? ' · gleicher Name' : ''}{candidate.status !== 'active' ? ` · ${candidate.status}` : ''}</span>)}</div> : <span className="import-review__new">Keine passende Halle gefunden</span>}</td><td>{row.error ? <span>Überspringen</span> : <select value={value} onChange={(event) => onDecisionChange(row.rowNumber, event.target.value)} disabled={applying}><option value="skip">Überspringen</option><option value="create">{row.candidates.length ? 'Trotzdem neu anlegen' : 'Neu anlegen'}</option>{row.candidates.map((candidate) => <option key={candidate.id} value={`update:${candidate.id}`}>„{candidate.name}“ aktualisieren</option>)}</select>}</td></tr> })}</tbody></table></div><div className="import-review__footer"><span>{selected ? `${selected} Zeilen werden verarbeitet.` : 'Keine Zeile ausgewählt.'}</span><button type="button" className="visit-button" onClick={onApply} disabled={applying || !selected}>{applying ? 'Import wird angewendet …' : 'Auswahl anwenden'}</button></div></section>
+}
+
 function AdminSpotsView({
   spots,
   suggestions,
   correctionReports,
   onCreate,
-  onImport,
+  onPreviewImport,
+  onApplyImport,
   onUpdate,
   onDelete,
   onApproveSuggestion,
@@ -873,6 +893,10 @@ function AdminSpotsView({
   const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importFile, setImportFile] = useState(null);
+  const [importDecisions, setImportDecisions] = useState({});
+  const [applyingImport, setApplyingImport] = useState(false);
   const [reviewingSuggestion, setReviewingSuggestion] = useState(null);
   const [sort, setSort] = useState({ key: "name", direction: "asc" });
   const csvInput = useRef(null);
@@ -911,7 +935,10 @@ function AdminSpotsView({
     setImporting(true);
     setError("");
     try {
-      await onImport(file);
+      const preview = await onPreviewImport(file);
+      setImportFile(file);
+      setImportPreview(preview);
+      setImportDecisions(Object.fromEntries(preview.rows.map((row) => [row.rowNumber, { action: row.error || row.candidates.length ? 'skip' : 'create' }])));
     } catch (importError) {
       setError(
         importError.message || "Der Import konnte nicht verarbeitet werden.",
@@ -933,6 +960,38 @@ function AdminSpotsView({
       );
     } finally {
       setDeletingId(null);
+    }
+  }
+  function changeImportDecision(rowNumber, value) {
+    const [action, targetId] = value.split(':');
+    setImportDecisions((current) => ({ ...current, [rowNumber]: { action, ...(targetId ? { targetId } : {}) } }));
+  }
+  function bulkImport(action) {
+    if (!importPreview) return;
+    setImportDecisions((current) => {
+      const next = { ...current };
+      for (const row of importPreview.rows) {
+        if (row.error) { next[row.rowNumber] = { action: 'skip' }; continue; }
+        if (action === 'skip-all') next[row.rowNumber] = { action: 'skip' };
+        if (action === 'create-new' && !row.candidates.length) next[row.rowNumber] = { action: 'create' };
+        if (action === 'update-matches' && row.candidates.length) next[row.rowNumber] = { action: 'update', targetId: row.candidates[0].id };
+      }
+      return next;
+    });
+  }
+  async function applyImport() {
+    if (!importFile) return;
+    setApplyingImport(true);
+    setError('');
+    try {
+      await onApplyImport(importFile, Object.entries(importDecisions).map(([rowNumber, decision]) => ({ rowNumber: Number(rowNumber), ...decision })));
+      setImportPreview(null);
+      setImportFile(null);
+      setImportDecisions({});
+    } catch (importError) {
+      setError(importError.message || 'Der Import konnte nicht angewendet werden.');
+    } finally {
+      setApplyingImport(false);
     }
   }
   async function exportHalls() {
@@ -1050,6 +1109,7 @@ function AdminSpotsView({
         </div>
       </section>
       {error && <p className="form-error">{error}</p>}
+      {importPreview && <CsvImportReview preview={importPreview} decisions={importDecisions} onDecisionChange={changeImportDecision} onBulk={bulkImport} onApply={applyImport} onClose={() => { setImportPreview(null); setImportFile(null); setImportDecisions({}) }} applying={applyingImport} />}
       <section className="admin-list">
         <div className="section-heading">
           <h2>Aktive Hallen</h2>
@@ -1382,6 +1442,7 @@ function MessageDialog({ user, onClose, onRead }) {
 function SignInDialog({ configuration, onClose, onDemoSignIn, onMemberSignIn, onRegister, onRequestPasswordReset, onResendVerification, onResetPassword, onOpenPrivacy, onOpenImprint, resetToken }) {
   const [mode, setMode] = useState(resetToken ? 'reset' : 'signin')
   const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
@@ -1389,17 +1450,39 @@ function SignInDialog({ configuration, onClose, onDemoSignIn, onMemberSignIn, on
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   function switchMode(next) { setError(''); setNotice(''); setMode(next) }
+  const normalizedUsername = username.trim().replace(/^@+/, '').toLowerCase()
+  const [usernameStatus, setUsernameStatus] = useState('idle')
+  useEffect(() => {
+    if (mode !== 'register') return undefined
+    if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
+      setUsernameStatus(normalizedUsername ? 'invalid' : 'idle')
+      return undefined
+    }
+    let cancelled = false
+    setUsernameStatus('checking')
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/register/username-availability?username=${encodeURIComponent(normalizedUsername)}`)
+        if (cancelled) return
+        const payload = await response.json().catch(() => ({}))
+        setUsernameStatus(response.ok && payload.available ? 'available' : 'taken')
+      } catch {
+        if (!cancelled) setUsernameStatus('taken')
+      }
+    }, 300)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [mode, normalizedUsername])
   async function submit(event) {
     event.preventDefault(); setError(''); setNotice('')
     try {
       if (mode === 'signin') await onMemberSignIn(email, password)
-      if (mode === 'register') { const result = await onRegister(name, email, password); switchMode('signin'); setNotice(result?.deliveryFailed ? 'Dein Konto wurde angelegt, aber die Bestätigungs-E-Mail konnte noch nicht versendet werden. Du kannst sie hier erneut anfordern.' : 'Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.') }
+      if (mode === 'register') { if (usernameStatus !== 'available') throw new Error('Wähle einen freien @Namen.'); const result = await onRegister(name, normalizedUsername, email, password); switchMode('signin'); setNotice(result?.deliveryFailed ? 'Dein Konto wurde angelegt, aber die Bestätigungs-E-Mail konnte noch nicht versendet werden. Du kannst sie hier erneut anfordern.' : 'Fast geschafft: Bitte bestätige jetzt den Link in deiner E-Mail.') }
       if (mode === 'forgot') { await onRequestPasswordReset(email); setNotice('Falls ein Konto existiert, wurde ein Link zum Zurücksetzen versendet.') }
       if (mode === 'reset') { if (password !== passwordConfirm) throw new Error('Die Passwörter stimmen nicht überein.'); await onResetPassword(resetToken, password); setNotice('Dein Passwort wurde geändert. Du kannst dich jetzt anmelden.'); setMode('signin'); setPassword(''); setPasswordConfirm('') }
     } catch (submitError) { setError(submitError.message || 'Die Anfrage konnte nicht verarbeitet werden.') }
   }
   const title = ({ register: 'Konto erstellen', forgot: 'Passwort vergessen', reset: 'Neues Passwort', signin: 'Anmelden' })[mode]
-  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="BoulderO Konto"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>{title}</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{!resetToken && <div className="auth-tabs"><button className={mode === 'signin' ? 'is-active' : ''} onClick={() => switchMode('signin')}>Anmelden</button><button disabled={!configuration?.registrationEnabled} className={mode === 'register' ? 'is-active' : ''} onClick={() => switchMode('register')}>Registrieren</button></div>}<form className="admin-login" onSubmit={submit}>{mode === 'register' && <label className="form-field"><span>Name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>}{mode !== 'reset' && <label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}{mode !== 'forgot' && <label className="form-field"><span>{mode === 'reset' ? 'Neues Passwort' : 'Passwort'}</span><span className="password-input"><input required type={passwordVisible ? 'text' : 'password'} minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" onClick={() => setPasswordVisible((value) => !value)} aria-label={passwordVisible ? 'Passwort verbergen' : 'Passwort anzeigen'}><IconEye size={18} /></button></span></label>}{mode === 'reset' && <label className="form-field"><span>Passwort wiederholen</span><input required type="password" minLength="10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}{notice && <p className="form-notice">{notice}</p>}<button className="visit-button">{mode === 'register' ? 'Bestätigungs-E-Mail senden' : mode === 'forgot' ? 'Reset-Link senden' : mode === 'reset' ? 'Passwort speichern' : 'Anmelden'}</button></form>{mode === 'signin' && <div className="auth-links"><button type="button" className="text-back" onClick={() => switchMode('forgot')}>Passwort vergessen?</button><button type="button" className="text-back" onClick={async () => { try { await onResendVerification(email); setNotice('Falls dein Konto noch nicht bestätigt ist, wurde eine neue E-Mail gesendet.') } catch { setError('Die Bestätigungs-E-Mail konnte nicht gesendet werden.') } }}>Bestätigung erneut senden</button></div>}{mode === 'register' && !configuration?.registrationEnabled && <p className="form-error">Die E-Mail-Registrierung wird gerade eingerichtet.</p>}{mode === 'signin' && configuration?.demoEnabled && <div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div>}<p className="auth-note"><IconLock size={15} />Passwörter werden sicher gespeichert. Neue Konten werden per E-Mail bestätigt.</p><div className="legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer auth-dialog" role="dialog" aria-modal="true" aria-label="BoulderO Konto"><div className="composer-header"><div><span className="eyebrow">BoulderO Konto</span><h2>{title}</h2></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{!resetToken && <div className="auth-tabs"><button className={mode === 'signin' ? 'is-active' : ''} onClick={() => switchMode('signin')}>Anmelden</button><button disabled={!configuration?.registrationEnabled} className={mode === 'register' ? 'is-active' : ''} onClick={() => switchMode('register')}>Registrieren</button></div>}<form className="admin-login" onSubmit={submit}>{mode === 'register' && <><label className="form-field"><span>Name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label className="form-field"><span>Dein @Name</span><span className={`username-input username-input--${usernameStatus}`}><b>@</b><input required value={username} minLength="3" maxLength="24" autoCapitalize="none" autoCorrect="off" spellCheck="false" onChange={(event) => setUsername(event.target.value.replace(/^@+/, '').toLowerCase())} placeholder="kerstin" aria-describedby="username-help" />{usernameStatus === 'available' && <IconCheck size={18} aria-label="@Name ist verfügbar" />}</span><small id="username-help" className={`username-help username-help--${usernameStatus}`}>{usernameStatus === 'available' ? '@Name ist verfügbar' : usernameStatus === 'checking' ? '@Name wird geprüft …' : usernameStatus === 'taken' ? '@Name ist bereits vergeben' : usernameStatus === 'invalid' ? '3–24 Zeichen: Kleinbuchstaben, Zahlen oder _' : 'So finden dich andere in BoulderO.'}</small></label></>}{mode !== 'reset' && <label className="form-field"><span>E-Mail</span><input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}{mode !== 'forgot' && <label className="form-field"><span>{mode === 'reset' ? 'Neues Passwort' : 'Passwort'}</span><span className="password-input"><input required type={passwordVisible ? 'text' : 'password'} minLength="10" value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" onClick={() => setPasswordVisible((value) => !value)} aria-label={passwordVisible ? 'Passwort verbergen' : 'Passwort anzeigen'}><IconEye size={18} /></button></span></label>}{mode === 'reset' && <label className="form-field"><span>Passwort wiederholen</span><input required type="password" minLength="10" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}{notice && <p className="form-notice">{notice}</p>}<button className="visit-button" disabled={mode === 'register' && usernameStatus !== 'available'}>{mode === 'register' ? 'Bestätigungs-E-Mail senden' : mode === 'forgot' ? 'Reset-Link senden' : mode === 'reset' ? 'Passwort speichern' : 'Anmelden'}</button></form>{mode === 'signin' && <div className="auth-links"><button type="button" className="text-back" onClick={() => switchMode('forgot')}>Passwort vergessen?</button><button type="button" className="text-back" onClick={async () => { try { await onResendVerification(email); setNotice('Falls dein Konto noch nicht bestätigt ist, wurde eine neue E-Mail gesendet.') } catch { setError('Die Bestätigungs-E-Mail konnte nicht gesendet werden.') } }}>Bestätigung erneut senden</button></div>}{mode === 'register' && !configuration?.registrationEnabled && <p className="form-error">Die E-Mail-Registrierung wird gerade eingerichtet.</p>}{mode === 'signin' && configuration?.demoEnabled && <div className="demo-account-list">{configuration.demoProfiles.map((profile) => <button key={profile.id} onClick={() => onDemoSignIn(profile.id)}><span className="person-avatar">{profile.name.split(' ').map((part) => part[0]).join('')}</span><span><b>{profile.name}</b><small>@{profile.username}</small></span><IconChevronRight size={18} /></button>)}</div>}<p className="auth-note"><IconLock size={15} />Passwörter werden sicher gespeichert. Neue Konten werden per E-Mail bestätigt.</p><div className="legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div></section></div>
 }
 
 function PasswordDialog({ onClose, onSave }) {
@@ -1610,9 +1693,9 @@ function App() {
     const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); await loadAuthAudit(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')
   }
 
-  async function registerMember(name, email, password) {
-    const response = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) })
-    if (!response.ok) { const payload = await response.json().catch(() => ({})); if (payload.error === 'email_delivery_failed') return { deliveryFailed: true }; throw new Error(payload.error === 'email_taken' ? 'Diese E-Mail-Adresse ist bereits registriert.' : payload.error === 'email_not_configured' ? 'Die E-Mail-Registrierung wird gerade eingerichtet.' : 'Konto konnte nicht erstellt werden.') }
+  async function registerMember(name, username, email, password) {
+    const response = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, email, password }) })
+    if (!response.ok) { const payload = await response.json().catch(() => ({})); if (payload.error === 'email_delivery_failed') return { deliveryFailed: true }; throw new Error(payload.error === 'email_taken' ? 'Diese E-Mail-Adresse ist bereits registriert.' : payload.error === 'username_taken' ? 'Dieser @Name wurde gerade vergeben. Bitte wähle einen anderen.' : payload.error === 'email_not_configured' ? 'Die E-Mail-Registrierung wird gerade eingerichtet.' : 'Konto konnte nicht erstellt werden.') }
   }
 
   async function requestPasswordReset(email) {
@@ -1778,19 +1861,28 @@ function App() {
     showToast(`${spot.name} wurde angelegt`)
   }
 
-  async function importSpots(file) {
+  async function previewSpotImport(file) {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await fetch('/api/admin/spots/import', { method: 'POST', body: formData })
+    const response = await fetch('/api/admin/spots/import/preview', { method: 'POST', body: formData })
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}))
       if (payload.error === 'csv_headers_invalid') throw new Error(`Diese Spalten fehlen: ${payload.missing.join(', ')}`)
       if (payload.error === 'csv_limit_exceeded') throw new Error('Pro Import sind höchstens 500 Hallen möglich.')
-      throw new Error('Die CSV-Datei konnte nicht importiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
+      throw new Error('Die CSV-Datei konnte nicht analysiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
     }
-    const { imported } = await response.json()
+    return response.json()
+  }
+
+  async function applySpotImport(file, decisions) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('decisions', JSON.stringify(decisions))
+    const response = await fetch('/api/admin/spots/import/apply', { method: 'POST', body: formData })
+    if (!response.ok) throw new Error('Die ausgewählten Hallen konnten nicht angewendet werden. Bitte prüfe die Auswahl.')
+    const { created, updated, skipped } = await response.json()
     await loadPrivateData()
-    showToast(`${imported} Hallen wurden importiert`)
+    showToast(`${created} angelegt, ${updated} aktualisiert, ${skipped} übersprungen`)
   }
 
   async function updateSpot(id, input, imageFile = null) {
@@ -1877,7 +1969,7 @@ function App() {
       {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
-      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onImport={importSpots} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
+      {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={() => setFeedSummary({ unread_feed: 0 })} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
