@@ -19,3 +19,7 @@ assets/*.xlsx
 # Local uploads and database data
 uploads/
 postgres-data/
+
+# Lokale Codex-Skill-Installation
+.agents/
+skills-lock.json
