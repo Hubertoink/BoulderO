@@ -29,8 +29,6 @@ function escapeMarkerText(value) {
 
 const activityIconCache = new Map()
 const planIconCache = new Map()
-let activePlanningAuthorFilter = null
-
 function activityIcon(activity, index, offset, isPreview) {
   const cacheKey = [activity.id, index, offset.x, offset.y, isPreview, activity.user_name, activity.user_image, activity.body, activity.media?.[0]?.id].join('|')
   const cached = activityIconCache.get(cacheKey)

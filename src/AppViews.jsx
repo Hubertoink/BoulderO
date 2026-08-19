@@ -12,7 +12,9 @@ import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from './data/spots'
 import { MapView } from './features/map/MapView.jsx'
 import { JournalComposer, optimizePhoto, PlannedVisitDialog } from './features/journal/JournalComposer.jsx'
-import { formatFeedDate, formatPlanDate, useOutsideDismiss } from './shared/viewHelpers.js'
+import { formatFeedDate, formatJournalDate, formatPlanDate, useOutsideDismiss } from './shared/viewHelpers.js'
+
+let activePlanningAuthorFilter = null
 
 function SpotCorrectionDialog({ spot, onSave, onClose }) {
   const [category, setCategory] = useState('coordinates')

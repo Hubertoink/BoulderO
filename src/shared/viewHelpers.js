@@ -20,3 +20,11 @@ export function formatFeedDate(value) {
 export function formatPlanDate(value) {
   return new Intl.DateTimeFormat('de-DE', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
+
+export function formatJournalDate(value) {
+  const date = new Date(value)
+  return {
+    day: new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(date),
+    month: new Intl.DateTimeFormat('de-DE', { month: 'short' }).format(date).replace('.', '').toUpperCase(),
+  }
+}

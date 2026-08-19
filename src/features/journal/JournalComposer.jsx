@@ -1,14 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconAdjustmentsHorizontal, IconArrowsMaximize, IconBookmark, IconCalendarEvent, IconCheck, IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload, IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2, IconLogout, IconPhoto, IconPlus, IconSearch, IconSparkles, IconTrophy, IconTrash, IconUserCircle, IconUserCheck, IconUserPlus, IconUsers, IconWorld, IconX } from '@tabler/icons-react'
-import { formatPlanDate } from '../../shared/viewHelpers.js'
-
-function formatJournalDate(value) {
-  const date = new Date(value)
-  return {
-    day: new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(date),
-    month: new Intl.DateTimeFormat('de-DE', { month: 'short' }).format(date).replace('.', '').toUpperCase(),
-  }
-}
+import { formatJournalDate, formatPlanDate } from '../../shared/viewHelpers.js'
 
 export async function optimizePhoto(file) {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size <= 1_500_000) return file
@@ -120,4 +112,3 @@ export function PlannedVisitDialog({ spot, onSave, onClose, surface = 'dialog' }
   }
   return <div className={`composer-backdrop ${surface === 'map' ? 'composer-backdrop--map' : ''}`}><section className={`journal-composer ${surface === 'map' ? 'journal-composer--map' : ''}`} role="dialog" aria-modal="true" aria-label="Besuch planen"><div className="composer-header"><div><h2>Besuch planen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(event) => setDate(event.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(event) => setNote(event.target.value)} placeholder="Zum Beispiel: Ich möchte neue Leute zum Bouldern treffen." /></label><VisibilityPicker value={visibility} onChange={setVisibility} />{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird geplant …' : 'Besuch planen'}</button></form></section></div>
 }
-
