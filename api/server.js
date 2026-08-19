@@ -910,6 +910,7 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'private, no-store')
   const bounds = z.object({
     west: z.coerce.number().gte(-180).lte(180),
     south: z.coerce.number().gte(-90).lte(90),

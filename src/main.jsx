@@ -121,6 +121,7 @@ function FocusLocation({ location }) {
 function MapActivityViewport({ onChange }) {
   const map = useMap()
   useEffect(() => {
+    let timer = null
     function update() {
       const bounds = map.getBounds()
       const nextBounds = {
@@ -132,10 +133,18 @@ function MapActivityViewport({ onChange }) {
       }
       onChange((current) => current && Object.entries(nextBounds).every(([key, value]) => current[key] === value) ? current : nextBounds)
     }
+    function scheduleUpdate() {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(update, 180)
+    }
     update()
-    map.on('moveend', update)
-    map.on('zoomend', update)
-    return () => { map.off('moveend', update); map.off('zoomend', update) }
+    map.on('moveend', scheduleUpdate)
+    map.on('zoomend', scheduleUpdate)
+    return () => {
+      window.clearTimeout(timer)
+      map.off('moveend', scheduleUpdate)
+      map.off('zoomend', scheduleUpdate)
+    }
   }, [map, onChange])
   return null
 }
@@ -148,14 +157,12 @@ function MapViewportResize() {
       if (frame) window.cancelAnimationFrame(frame)
       frame = window.requestAnimationFrame(() => map.invalidateSize({ pan: false, debounceMoveend: true }))
     }
-    const viewport = window.visualViewport
-    viewport?.addEventListener('resize', update)
-    viewport?.addEventListener('scroll', update)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(map.getContainer())
     window.addEventListener('resize', update)
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
-      viewport?.removeEventListener('resize', update)
-      viewport?.removeEventListener('scroll', update)
+      observer?.disconnect()
       window.removeEventListener('resize', update)
     }
   }, [map])
@@ -243,7 +250,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, ac
   )
 }
 
-function SpotSheet({ spot, onVisit, onPlan, onReport }) {
+function SpotSheet({ spot, onVisit, onPlan, onReport, hideOnMobile }) {
   const visited = spot.visits > 0
   const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
   const daysSinceLastVisit = lastVisitDate ? Math.floor((Date.now() - lastVisitDate.getTime()) / 86400000) : 0
@@ -255,7 +262,7 @@ function SpotSheet({ spot, onVisit, onPlan, onReport }) {
     try { return new URL(spot.website).hostname.replace(/^www\./, '') } catch { return spot.website }
   })()
   return (
-    <aside className="spot-sheet" style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
+    <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
         <span className="eyebrow">{spot.district} · {spot.distance}</span>
         {visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}
@@ -318,8 +325,8 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     let cancelled = false
     const controller = new AbortController()
     async function loadActivities() {
-      const response = await fetch(`/api/social/map-activity?${params}`, { signal: controller.signal })
-      if (!response.ok) return
+      const response = await fetch(`/api/social/map-activity?${params}`, { signal: controller.signal, cache: 'no-store' })
+      if (!response.ok) throw new Error('Kartenaktivitäten konnten nicht geladen werden.')
       const payload = await response.json()
       if (!cancelled) setActivities((current) => {
         const existing = new Map(current.map((activity) => [activity.id, activity]))
@@ -331,8 +338,8 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
         return current.length === next.length && current.every((activity, index) => activity === next[index]) ? current : next
       })
     }
-    loadActivities().catch(() => undefined)
-    const interval = window.setInterval(() => loadActivities().catch(() => undefined), 60000)
+    loadActivities().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setActivities([]) })
+    const interval = window.setInterval(() => loadActivities().catch((error) => { if (error.name !== 'AbortError' && !cancelled) setActivities([]) }), 60000)
     return () => { cancelled = true; controller.abort(); window.clearInterval(interval) }
   }, [activityBounds, currentUser?.id])
   const visibleSpots = useMemo(() => {
@@ -382,7 +389,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
       <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={onSelectSpot} onDismiss={() => { if (!isPickingSpot) onSelectSpot(null) }} userLocation={userLocation} activities={activities} onActivityBoundsChange={setActivityBounds} />
-      {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} />}
+      {selectedSpot && <SpotSheet spot={selectedSpot} onVisit={onVisit} onPlan={onPlan} onReport={onReport} hideOnMobile={Boolean(query)} />}
     </main>
   )
 }
@@ -1570,24 +1577,6 @@ function App() {
     if (window.history.state?.boulderO && window.history.state.position > 0) window.history.back()
     else navigate(fallback, { replace: true })
   }
-
-  useEffect(() => {
-    function syncViewportHeight() {
-      const height = window.visualViewport?.height ?? window.innerHeight
-      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(height)}px`)
-    }
-    const viewport = window.visualViewport
-    syncViewportHeight()
-    viewport?.addEventListener('resize', syncViewportHeight)
-    viewport?.addEventListener('scroll', syncViewportHeight)
-    window.addEventListener('resize', syncViewportHeight)
-    return () => {
-      viewport?.removeEventListener('resize', syncViewportHeight)
-      viewport?.removeEventListener('scroll', syncViewportHeight)
-      window.removeEventListener('resize', syncViewportHeight)
-      document.documentElement.style.removeProperty('--app-viewport-height')
-    }
-  }, [])
 
   useEffect(() => {
     const initialView = viewFromLocation()
