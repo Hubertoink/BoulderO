@@ -40,6 +40,7 @@ button { cursor: pointer; }
 .header-progress i { width: 84px; height: 4px; display: block; background: rgba(40, 75, 99, .14); }
 .header-progress em { height: 100%; display: block; background: var(--yale-blue); }
 .ui-icon-button, .menu-button, .icon-button, .toolbar-filter { width: 38px; height: 38px; border: 1px solid var(--line); background: var(--paper); color: var(--deep-space-blue); display: grid; place-items: center; border-radius: var(--radius-control); }
+.app-shell button[aria-label="Schließen"], .app-shell button[aria-label="Planung schließen"], .app-shell button[aria-label="Hallenkarte schließen"] { width: 32px; height: 32px; border-radius: 5px; }
 .app-shell svg { stroke-width: 1.8; }.app-icon, .tabler-icon { display: inline-block; flex: 0 0 auto; vertical-align: middle; }.app-shell button > .app-icon, .app-shell button > .tabler-icon { align-self: center; }
 .view { min-height: calc(100vh - 146px); }
 
