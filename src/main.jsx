@@ -28,6 +28,7 @@ import {
   IconSearch,
   IconSparkles,
   IconTrophy,
+  IconTrash,
   IconUserCircle,
   IconUserCheck,
   IconUserPlus,
@@ -431,11 +432,12 @@ function VisibilityPicker({ value, onChange }) {
   return <fieldset className="visibility-picker"><legend>Teilen mit</legend><div role="radiogroup" aria-label="Sichtbarkeit des Eintrags">{visibilityOptions.map(({ value: optionValue, label, description, icon: Icon }) => <button key={optionValue} type="button" role="radio" aria-checked={value === optionValue} className={value === optionValue ? 'is-selected' : ''} onClick={() => onChange(optionValue)}><Icon size={20} /><span>{label}</span><small>{description}</small></button>)}</div></fieldset>
 }
 
-function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
-  const [visitedAt, setVisitedAt] = useState(new Date().toISOString().slice(0, 10))
+function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface, plannedVisit }) {
+  const plannedDate = plannedVisit ? new Date(plannedVisit.starts_at) : null
+  const [visitedAt, setVisitedAt] = useState(plannedDate ? plannedDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10))
   const [timesOpen, setTimesOpen] = useState(false)
-  const [startedAt, setStartedAt] = useState('')
-  const [endedAt, setEndedAt] = useState('')
+  const [startedAt, setStartedAt] = useState(plannedDate ? plannedDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '')
+  const [endedAt, setEndedAt] = useState(plannedVisit?.ends_at ? new Date(plannedVisit.ends_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '')
   const [body, setBody] = useState('')
   const [visibility, setVisibility] = useState('followers')
   const [files, setFiles] = useState([])
@@ -449,7 +451,7 @@ function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
     setError('')
     try {
       if (!spot) throw new Error('Wähle zuerst eine Halle auf der Karte aus.')
-      await onSave({ spotId: spot.id, visitedAt, startedAt, endedAt, body, files: files.map((item) => item.file), visibility })
+      await onSave({ spotId: spot.id, visitedAt, startedAt, endedAt, body, files: files.map((item) => item.file), visibility, plannedVisitId: plannedVisit?.is_owner ? plannedVisit.id : null })
       onClose()
     } catch (saveError) {
       setError(saveError.message || 'Der Eintrag konnte nicht gespeichert werden.')
@@ -475,7 +477,7 @@ function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface }) {
   return (
     <div className={`composer-backdrop ${surface === 'map' ? 'composer-backdrop--map' : ''}`} role="presentation">
       <form className={`journal-composer ${surface === 'map' ? 'journal-composer--map' : ''}`} onSubmit={submit}>
-        <div className="composer-header"><div><span className="eyebrow">Tagebucheintrag</span><h2>Besuch festhalten</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>
+        <div className="composer-header"><div><span className="eyebrow">{plannedVisit ? 'Geplanter Besuch' : 'Tagebucheintrag'}</span><h2>Besuch festhalten</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>
         <div className="form-field"><span>Halle</span>{spot ? <div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span><button type="button" onClick={onChooseOnMap}>Ändern</button></div> : <button type="button" className="choose-spot" onClick={onChooseOnMap}><IconMapPin size={18} />Halle auf Karte auswählen</button>}</div>
         <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} required /></label>
         <section className="visit-time-picker"><button type="button" className={timesOpen ? 'is-open' : ''} onClick={() => setTimesOpen((value) => !value)}><IconClock size={18} /><span>Uhrzeit hinzufügen <small>optional</small></span><IconChevronRight size={17} /></button>{timesOpen && <div className="visit-time-picker__fields"><label className="form-field"><span>Von</span><input type="time" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} /></label><label className="form-field"><span>Bis</span><input type="time" value={endedAt} onChange={(event) => setEndedAt(event.target.value)} /></label></div>}</section>
@@ -530,18 +532,27 @@ function visibilityLabel(value) {
   return ({ private: 'Privat', friends: 'Freunde', followers: 'Follower', public: 'Community' })[value] ?? 'Privat'
 }
 
-function JournalEntryDialog({ entry, onClose, onUpdate, onDeletePhoto }) {
+function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
   const [body, setBody] = useState(entry.body ?? '')
   const [visibility, setVisibility] = useState(entry.visibility ?? 'private')
+  const [visitedAt, setVisitedAt] = useState(String(entry.visited_at).slice(0, 10))
   const [media, setMedia] = useState(entry.media ?? [])
   const [removedMediaIds, setRemovedMediaIds] = useState([])
   const [newFiles, setNewFiles] = useState([])
   const [saving, setSaving] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [error, setError] = useState('')
   const fileInput = useRef(null)
 
   async function save() {
-    setSaving(true)
-    try { await onUpdate(entry.journal_entry_id, { body, visibility, removedMediaIds, files: newFiles.map((item) => item.file) }); onClose() } finally { setSaving(false) }
+    setSaving(true); setError('')
+    try { await onUpdate(entry.journal_entry_id, { body, visibility, visitedAt, removedMediaIds, files: newFiles.map((item) => item.file) }); onClose() } catch (saveError) { setError(saveError.message || 'Der Eintrag konnte nicht aktualisiert werden.') } finally { setSaving(false) }
+  }
+
+  async function removeEntry() {
+    setSaving(true); setError('')
+    try { await onDelete(entry); onClose() } catch (deleteError) { setError(deleteError.message || 'Der Eintrag konnte nicht gelöscht werden.') } finally { setSaving(false) }
   }
 
   async function addPhotos(event) {
@@ -564,22 +575,45 @@ function JournalEntryDialog({ entry, onClose, onUpdate, onDeletePhoto }) {
   }
 
   return <div className="composer-backdrop"><section className="journal-composer entry-dialog" role="dialog" aria-modal="true" aria-label="Tagebucheintrag">
-    <div className="composer-header"><div><span className="eyebrow">{formatJournalDate(entry.visited_at).day} {formatJournalDate(entry.visited_at).month} · {visibilityLabel(entry.visibility)}</span><h2>{entry.spot_name}</h2><p>{entry.district}</p></div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>
+    <div className="composer-header"><div><span className="eyebrow">{formatJournalDate(entry.visited_at).day} {formatJournalDate(entry.visited_at).month} · {visibilityLabel(entry.visibility)}</span><h2>{entry.spot_name}</h2><p>{entry.district}</p></div><div className="entry-dialog__header-actions"><div className="friend-more-menu"><button type="button" className="icon-button ui-icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Eintrag verwalten"><IconDots size={19} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" className="danger" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}><IconTrash size={16} />Eintrag löschen</button></div>}</div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div></div>
+    <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} /></label>
     <label className="form-field"><span>Dein Erfahrungsbericht</span><textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength="4000" /></label>
     {(media.length > 0 || newFiles.length > 0) && <div className="entry-photo-grid">{media.map((item) => <figure key={item.id}><img src={`/api/media/${item.id}`} alt={`Foto von ${entry.spot_name}`} /><button type="button" onClick={() => removeExistingPhoto(item.id)} aria-label="Foto im Entwurf entfernen"><IconX size={15} /></button></figure>)}{newFiles.map((item, index) => <figure key={item.preview}><img src={item.preview} alt="Neues Foto im Entwurf" /><button type="button" onClick={() => removeNewPhoto(index)} aria-label="Neues Foto entfernen"><IconX size={15} /></button></figure>)}</div>}
     {media.length + newFiles.length < 6 && <label className="add-entry-photo"><IconPlus size={17} />Foto hinzufügen<input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple onChange={addPhotos} /></label>}
     <VisibilityPicker value={visibility} onChange={setVisibility} />
-    <p className="field-help">Änderungen an Fotos werden erst mit „Änderungen speichern“ übernommen.</p><button className="visit-button" disabled={saving} onClick={save}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button>
+    {error && <p className="form-error">{error}</p>}<p className="field-help">Änderungen an Fotos werden erst mit „Änderungen speichern“ übernommen.</p><button className="visit-button" disabled={saving} onClick={save}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button>
+    {confirmDelete && <div className="entry-delete-confirm"><p><b>Eintrag wirklich löschen?</b><br />Text, Fotos und Reaktionen auf diesen Eintrag werden dauerhaft entfernt.</p><div><button type="button" className="text-back" disabled={saving} onClick={() => setConfirmDelete(false)}>Abbrechen</button><button type="button" className="danger" disabled={saving} onClick={removeEntry}>{saving ? 'Wird gelöscht …' : 'Eintrag löschen'}</button></div></div>}
   </section></div>
 }
 
-function JournalFilterDialog({ halls, filters, onApply, onClose }) {
+function JournalFilterDialog({ halls, years, months, filters, onApply, onClose }) {
   const [draft, setDraft] = useState(filters)
-  return <div className="composer-backdrop"><section className="journal-composer filter-dialog" role="dialog" aria-modal="true" aria-label="Tagebuch filtern"><div className="composer-header"><div><span className="eyebrow">Tagebuch</span><h2>Einträge filtern</h2></div><button className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div><label className="form-field"><span>Boulderhalle</span><select value={draft.hall} onChange={(event) => setDraft({ ...draft, hall: event.target.value })}><option value="all">Alle Hallen</option>{halls.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><div className="filter-date-row"><label className="form-field"><span>Von</span><input type="date" value={draft.from} onChange={(event) => setDraft({ ...draft, from: event.target.value })} /></label><label className="form-field"><span>Bis</span><input type="date" value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })} /></label></div><label className="form-field"><span>Eintragstyp</span><select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}><option value="all">Alle Einträge</option><option value="photos">Mit Fotos</option><option value="shared">Geteilt</option></select></label><div className="filter-dialog__actions"><button type="button" className="text-back" onClick={() => setDraft({ hall: 'all', from: '', to: '', type: 'all' })}>Zurücksetzen</button><button className="journal-add" onClick={() => { onApply(draft); onClose() }}>Anwenden</button></div></section></div>
+  const selectableMonths = draft.year === 'all' ? [] : months.filter((month) => month.year === draft.year)
+  return <div className="composer-backdrop"><section className="journal-composer filter-dialog" role="dialog" aria-modal="true" aria-label="Tagebuch filtern"><div className="composer-header"><div><span className="eyebrow">Tagebuch</span><h2>Einträge filtern</h2></div><button className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div><label className="form-field"><span>Boulderhalle</span><select value={draft.hall} onChange={(event) => setDraft({ ...draft, hall: event.target.value })}><option value="all">Alle Hallen</option>{halls.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><div className="filter-date-row"><label className="form-field"><span>Jahr</span><select value={draft.year} onChange={(event) => setDraft({ ...draft, year: event.target.value, month: 'all' })}><option value="all">Alle Jahre</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label><label className="form-field"><span>Monat</span><select value={draft.month} disabled={draft.year === 'all'} onChange={(event) => setDraft({ ...draft, month: event.target.value })}><option value="all">Alle Monate</option>{selectableMonths.map((month) => <option key={month.value} value={month.month}>{month.label}</option>)}</select></label></div><div className="filter-date-row"><label className="form-field"><span>Von <small>optional</small></span><input type="date" value={draft.from} onChange={(event) => setDraft({ ...draft, from: event.target.value })} /></label><label className="form-field"><span>Bis <small>optional</small></span><input type="date" value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })} /></label></div><label className="form-field"><span>Eintragstyp</span><select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}><option value="all">Alle Einträge</option><option value="photos">Mit Fotos</option><option value="shared">Geteilt</option></select></label><div className="filter-dialog__actions"><button type="button" className="text-back" onClick={() => setDraft({ hall: 'all', year: 'all', month: 'all', from: '', to: '', type: 'all' })}>Zurücksetzen</button><button className="journal-add" onClick={() => { onApply(draft); onClose() }}>Anwenden</button></div></section></div>
 }
 
-function JournalView({ currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage }) {
-  const [filters, setFilters] = useState({ hall: 'all', from: '', to: '', type: 'all' })
+function journalMonthLabel(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number)
+  const current = new Date()
+  const currentKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`
+  const previous = new Date(current.getFullYear(), current.getMonth() - 1, 1)
+  const previousKey = `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`
+  if (monthKey === currentKey) return 'Diesen Monat'
+  if (monthKey === previousKey) return 'Letzten Monat'
+  return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
+}
+
+function JournalUpcomingPlans({ onLogPlan }) {
+  const [plans, setPlans] = useState([])
+  const [mode, setMode] = useState('upcoming')
+  useEffect(() => { fetch('/api/social/planned-visits?scope=all').then((response) => response.ok ? response.json() : { plannedVisits: [] }).then((payload) => setPlans(payload.plannedVisits)).catch(() => setPlans([])) }, [])
+  const visible = plans.filter((plan) => mode === 'mine' ? plan.is_owner : mode === 'interested' ? plan.my_response === 'interested' : plan.is_owner || plan.my_response === 'going')
+  if (!plans.length) return null
+  return <section className="journal-plans"><div className="section-heading"><h2>Deine nächsten Besuche</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => setMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => setMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => setMode('mine')}>Von mir</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{plan.is_owner && new Date(plan.starts_at) <= new Date() && <button type="button" onClick={() => onLogPlan(plan)}><IconBookmark size={16} />Besuch festhalten</button>}</article>)}</div></section>
+}
+
+function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage, onLogPlan }) {
+  const [filters, setFilters] = useState({ hall: 'all', year: 'all', month: 'all', from: '', to: '', type: 'all' })
   const [filtersOpen, setFiltersOpen] = useState(false)
   if (!currentUser) {
     return (
@@ -592,8 +626,24 @@ function JournalView({ currentUser, journalVisits, onSignIn, onOpenComposer, onO
   }
   const uniqueHallCount = new Set(journalVisits.map((visit) => visit.spot_id)).size
   const visitTotal = journalVisits.length
+  const hallTotal = spots.length
+  const exploredPercentage = hallTotal ? Math.round((uniqueHallCount / hallTotal) * 100) : 0
   const halls = [...new Map(journalVisits.map((visit) => [visit.spot_id, visit.spot_name])).entries()]
-  const visibleVisits = journalVisits.filter((visit) => (filters.type !== 'photos' || visit.media?.length > 0) && (filters.type !== 'shared' || visit.visibility !== 'private') && (filters.hall === 'all' || visit.spot_id === filters.hall) && (!filters.from || visit.visited_at >= filters.from) && (!filters.to || visit.visited_at <= filters.to))
+  const years = [...new Set(journalVisits.map((visit) => String(visit.visited_at).slice(0, 4)))].sort((a, b) => b.localeCompare(a))
+  const months = [...new Map(journalVisits.map((visit) => {
+    const value = String(visit.visited_at).slice(0, 7)
+    const [year, month] = value.split('-').map(Number)
+    return [value, { value, year: String(year), month: String(month).padStart(2, '0'), label: new Intl.DateTimeFormat('de-DE', { month: 'long' }).format(new Date(year, month - 1, 1)) }]
+  })).values()].sort((a, b) => b.value.localeCompare(a.value))
+  const visibleVisits = journalVisits.filter((visit) => {
+    const date = String(visit.visited_at).slice(0, 10)
+    return (filters.type !== 'photos' || visit.media?.length > 0) && (filters.type !== 'shared' || visit.visibility !== 'private') && (filters.hall === 'all' || visit.spot_id === filters.hall) && (filters.year === 'all' || date.slice(0, 4) === filters.year) && (filters.month === 'all' || date.slice(5, 7) === filters.month) && (!filters.from || date >= filters.from) && (!filters.to || date <= filters.to)
+  }).sort((a, b) => String(b.visited_at).localeCompare(String(a.visited_at)))
+  const visitGroups = [...visibleVisits.reduce((groups, visit) => {
+    const key = String(visit.visited_at).slice(0, 7)
+    groups.set(key, [...(groups.get(key) ?? []), visit])
+    return groups
+  }, new Map()).entries()]
   return (
     <main className="view content-view journal-view">
       <div className="journal-content">
@@ -603,26 +653,27 @@ function JournalView({ currentUser, journalVisits, onSignIn, onOpenComposer, onO
         </div>
         <button className="journal-add" onClick={onOpenComposer}><IconPlus size={18} />Eintrag</button>
       </div>
+      <JournalUpcomingPlans onLogPlan={onLogPlan} />
       <section className="journal-summary">
         <div><strong>{visitTotal}</strong><span>Besuche</span></div>
-        <div><strong>{uniqueHallCount}</strong><span>Hallen</span></div>
-        <div><strong>4</strong><span>Wochen aktiv</span></div>
+        <div className="journal-summary__ratio"><strong>{uniqueHallCount}</strong><i>/</i><small>{hallTotal}</small><span>Hallen besucht</span></div>
+        <div><strong>{exploredPercentage}%</strong><span>Hallen entdeckt</span></div>
       </section>
       <section className="journal-list" aria-label="Letzte Besuche">
         <div className="section-heading"><h2>Deine Einträge</h2><div className="journal-list-actions"><span>{visibleVisits.length} von {visitTotal}</span><button className="ui-icon-button" onClick={() => setFiltersOpen(true)} aria-label="Einträge filtern"><IconAdjustmentsHorizontal size={18} /></button></div></div>
         {!journalVisits.length && <p className="journal-empty">Noch kein Eintrag. Halte deine nächste Session direkt hier fest.</p>}
         {!visibleVisits.length && journalVisits.length > 0 && <p className="journal-empty">Für diesen Filter gibt es noch keine Einträge.</p>}
-        {visibleVisits.map((visit) => {
+        {visitGroups.map(([monthKey, visits]) => <section className="journal-entry-group" key={monthKey}><div className="journal-entry-group__heading"><h3>{journalMonthLabel(monthKey)}</h3><span>{visits.length}</span></div>{visits.map((visit) => {
           const date = formatJournalDate(visit.visited_at)
           return <button type="button" className="journal-entry" key={visit.id} onClick={() => onOpenEntry(visit)}>
             <div className="journal-entry__date"><b>{date.day}</b><span>{date.month}</span></div>
             <div className="journal-entry__main"><h3>{visit.spot_name}</h3><small className="entry-meta">{visit.district} · {visibilityLabel(visit.visibility)}</small>{visit.body && <p className="journal-entry__body">{visit.body}</p>}{visit.media?.length > 0 && <div className="journal-entry__photos">{visit.media.map((media) => <img key={media.id} onClick={(event) => { event.stopPropagation(); onOpenImage(`/api/media/${media.id}`, `Foto von ${visit.spot_name}`) }} src={`/api/media/${media.id}`} alt="Tagebucheintrag" />)}</div>}</div>
             <IconChevronRight size={19} />
           </button>
-        })}
+        })}</section>)}
       </section>
       </div>
-      {filtersOpen && <JournalFilterDialog halls={halls} filters={filters} onApply={setFilters} onClose={() => setFiltersOpen(false)} />}
+      {filtersOpen && <JournalFilterDialog halls={halls} years={years} months={months} filters={filters} onApply={setFilters} onClose={() => setFiltersOpen(false)} />}
     </main>
   )
 }
@@ -639,7 +690,19 @@ function ProfileAvatar({ user, progress, onUpload }) {
   return <div className="profile-avatar-control"><button type="button" className="avatar profile-avatar" onClick={() => input.current?.click()} aria-label="Profilfoto ändern"><span className="profile-avatar__image">{user.image ? <img src={`/api/avatars/${user.id}`} alt="Dein Profil" /> : user.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button><input ref={input} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event.target.files[0])} /><span>Profilfoto ändern</span></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
+function AccountDeletionDialog({ username, onClose, onDelete }) {
+  const [confirmation, setConfirmation] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(event) {
+    event.preventDefault(); setSaving(true); setError('')
+    try { await onDelete(); onClose() } catch (deleteError) { setError(deleteError.message || 'Das Konto konnte nicht gelöscht werden.') } finally { setSaving(false) }
+  }
+  return <div className="composer-backdrop"><section className="journal-composer account-deletion-dialog" role="dialog" aria-modal="true" aria-label="Konto löschen"><div className="composer-header"><div><span className="eyebrow">Konto</span><h2>Konto endgültig löschen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Dein Profil, Besuche, Fotos, Planungen und persönlichen Daten werden dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.</p><form className="admin-login" onSubmit={submit}><label className="form-field"><span>Zur Bestätigung <b>LOESCHEN</b> eingeben</span><input required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoCapitalize="characters" /></label>{error && <p className="form-error">{error}</p>}<div className="account-deletion-dialog__actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="submit" className="danger" disabled={confirmation !== 'LOESCHEN' || saving}>{saving ? 'Wird gelöscht …' : `@${username} löschen`}</button></div></form></section></div>
+}
+
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
+  const [deleteOpen, setDeleteOpen] = useState(false)
   if (!currentUser) {
     return (
       <main className="view content-view empty-state profile-empty">
@@ -682,9 +745,11 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onOpenBadges, on
           {currentUser.role === 'superadmin' && <button onClick={onOpenAudit}><IconLock size={18} /><span><b>Registrierungen & Anmeldungen</b><small>Audit der letzten Kontoereignisse</small></span><IconChevronRight size={18} /></button>}
           {currentUser.role === 'member' && <button onClick={onChangePassword}><IconLock size={18} /><span><b>Passwort ändern</b><small>Dein Konto sicher halten</small></span><IconChevronRight size={18} /></button>}
           <button className="profile-actions__logout" onClick={onSignOut}><IconLogout size={18} />Abmelden</button>
+          {currentUser.role === 'member' && <button className="profile-actions__delete" onClick={() => setDeleteOpen(true)}><IconTrash size={18} /><span><b>Konto löschen</b><small>Profil und persönliche Daten dauerhaft entfernen</small></span><IconChevronRight size={18} /></button>}
           <div className="profile-legal-links"><button type="button" onClick={onOpenPrivacy}>Datenschutz</button><button type="button" onClick={onOpenImprint}>Impressum</button></div>
         </section>
       </div>
+      {deleteOpen && <AccountDeletionDialog username={currentUser.username} onClose={() => setDeleteOpen(false)} onDelete={onDeleteAccount} />}
     </main>
   )
 }
@@ -1285,26 +1350,80 @@ function formatPlanDate(value) {
   return new Intl.DateTimeFormat('de-DE', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
-function PlannedVisitCard({ plan, onRsvp }) {
+function PlannedVisitCard({ plan, onRsvp, onEdit, onCancel, onLogVisit }) {
   const rsvp = plan.my_response
   const [people, setPeople] = useState([])
   const [peopleOpen, setPeopleOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   async function togglePeople() { if (!peopleOpen) { const response = await fetch(`/api/planned-visits/${plan.id}/rsvps`); if (response.ok) setPeople((await response.json()).rsvps) }; setPeopleOpen((value) => !value) }
-  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">Geplant</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>plant einen Besuch</small></span></div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people"><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{!plan.is_owner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</div></article>
+  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">{plan.is_owner ? 'Deine Planung' : 'Geplant'}</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{plan.is_owner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{plan.is_owner && <div className="plan-card-menu"><button type="button" className="friend-more-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people"><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{plan.is_owner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!plan.is_owner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</div></article>
 }
 
-function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead }) {
+function planDayKey(value) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(value))
+}
+
+function planMonthKey(value) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`
+}
+
+function PlanCalendar({ month, days, selectedDay, onMonthChange, onDayChange }) {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1)
+  const startOffset = (first.getDay() + 6) % 7
+  const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  const byDay = new Map(days.map((day) => [String(day.day).slice(0, 10), day]))
+  const cells = Array.from({ length: Math.ceil((startOffset + count) / 7) * 7 }, (_, index) => index - startOffset + 1)
+  return <section className="plan-calendar"><div className="plan-calendar__header"><button type="button" className="ui-icon-button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Vorheriger Monat"><IconChevronLeft size={18} /></button><b>{new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(month)}</b><button type="button" className="ui-icon-button" onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Nächster Monat"><IconChevronRight size={18} /></button></div><div className="plan-calendar__weekdays">{['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((day) => <span key={day}>{day}</span>)}</div><div className="plan-calendar__days">{cells.map((number, index) => { if (number < 1 || number > count) return <span key={`empty-${index}`} />; const key = `${planMonthKey(month)}-${String(number).padStart(2, '0')}`; const day = byDay.get(key); return <button key={key} type="button" className={`${selectedDay === key ? 'is-selected ' : ''}${day ? 'has-plans' : ''}`} onClick={() => onDayChange(selectedDay === key ? null : key)}><span>{number}</span>{day && <i className="plan-calendar__dots">{day.own_count > 0 && <b className="is-own" />}{day.going_count > 0 && <b className="is-going" />}{day.interested_count > 0 && <b className="is-interested" />}{day.total > day.own_count + day.going_count + day.interested_count && <b className="is-other" />}</i>}</button> })}</div></section>
+}
+
+function PlanEditorDialog({ plan, spots, onSave, onClose }) {
+  const start = new Date(plan.starts_at)
+  const end = plan.ends_at ? new Date(plan.ends_at) : null
+  const [spotId, setSpotId] = useState(plan.spot_id)
+  const [date, setDate] = useState(start.toISOString().slice(0, 10))
+  const [time, setTime] = useState(start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }))
+  const [endTime, setEndTime] = useState(end ? end.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '')
+  const [note, setNote] = useState(plan.note ?? '')
+  const [visibility, setVisibility] = useState(plan.visibility)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(event) { event.preventDefault(); setSaving(true); setError(''); try { await onSave(plan.id, { spotId, startsAt: new Date(`${date}T${time}:00`).toISOString(), endsAt: endTime ? new Date(`${date}T${endTime}:00`).toISOString() : null, note, visibility }); onClose() } catch (saveError) { setError(saveError.message || 'Die Planung konnte nicht gespeichert werden.') } finally { setSaving(false) } }
+  return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Planung</span><h2>Besuch bearbeiten</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><form onSubmit={submit}><label className="form-field"><span>Halle</span><select value={spotId} onChange={(event) => setSpotId(event.target.value)}>{spots.map((spot) => <option key={spot.id} value={spot.id}>{spot.name} · {spot.district}</option>)}</select></label><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(event) => setNote(event.target.value)} /></label><VisibilityPicker value={visibility} onChange={setVisibility} />{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button></form></section></div>
+}
+
+function PlanCancelDialog({ plan, onCancel, onClose }) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  async function submit(event) { event.preventDefault(); setSaving(true); try { await onCancel(plan.id, reason); onClose() } finally { setSaving(false) } }
+  return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Planung absagen</span><h2>{plan.spot_name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Zugesagte und interessierte Personen werden benachrichtigt.</p><form onSubmit={submit}><label className="form-field"><span>Grund <small>optional</small></span><textarea value={reason} maxLength="1000" onChange={(event) => setReason(event.target.value)} /></label><div className="plan-dialog-actions"><button type="button" className="message-button" onClick={onClose}>Zurück</button><button className="danger" disabled={saving}>{saving ? 'Wird abgesagt …' : 'Planung absagen'}</button></div></form></section></div>
+}
+
+function PlanNotifications({ notifications, onRead }) {
+  if (!notifications.length) return null
+  return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const copy = notification.type === 'plan_cancelled' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} abgesagt.` : notification.type === 'plan_updated' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} geändert.` : `${notification.actor_name ?? 'Jemand'} ist ${payload.response === 'going' ? 'dabei' : 'interessiert'} bei ${payload.spotName ?? notification.spot_name}.`; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
+}
+
+function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan }) {
   const [entries, setEntries] = useState([])
   const [plannedVisits, setPlannedVisits] = useState([])
+  const [calendarDays, setCalendarDays] = useState([])
+  const [notifications, setNotifications] = useState([])
   const [error, setError] = useState('')
   const [comments, setComments] = useState({})
   const [expanded, setExpanded] = useState(null)
   const [commentDraft, setCommentDraft] = useState('')
   const [feedMode, setFeedMode] = useState('all')
+  const [section, setSection] = useState('feed')
+  const [planScope, setPlanScope] = useState('all')
+  const [planResponse, setPlanResponse] = useState('all')
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+  const [selectedDay, setSelectedDay] = useState(null)
+  const [editingPlan, setEditingPlan] = useState(null)
+  const [cancellingPlan, setCancellingPlan] = useState(null)
 
   async function load() {
     try {
-      const [feedResponse, plansResponse] = await Promise.all([fetch('/api/social/feed'), fetch('/api/social/planned-visits')])
+      const [feedResponse, plansResponse] = await Promise.all([fetch('/api/social/feed'), fetch('/api/social/planned-visits?scope=all')])
       if (!feedResponse.ok || !plansResponse.ok) throw new Error('Feed konnte nicht geladen werden.')
       setEntries((await feedResponse.json()).entries)
       setPlannedVisits((await plansResponse.json()).plannedVisits)
@@ -1312,7 +1431,13 @@ function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead }
       onFeedRead()
     } catch (loadError) { setError(loadError.message) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const interval = window.setInterval(load, 30000)
+    return () => window.clearInterval(interval)
+  }, [])
+  useEffect(() => { fetch(`/api/social/planned-visits/calendar?month=${planMonthKey(calendarMonth)}`).then((response) => response.ok ? response.json() : { days: [] }).then((payload) => setCalendarDays(payload.days)).catch(() => setCalendarDays([])) }, [calendarMonth])
+  useEffect(() => { if (section !== 'plans') return; fetch('/api/notifications?unreadOnly=true').then((response) => response.ok ? response.json() : { notifications: [] }).then((payload) => setNotifications(payload.notifications)).catch(() => setNotifications([])) }, [section])
 
   async function toggleLike(entry) {
     await fetch(`/api/social/entries/${entry.id}/like`, { method: entry.liked_by_me ? 'DELETE' : 'POST' })
@@ -1346,9 +1471,13 @@ function FeedView({ onOpenImage, authorFilter, onClearAuthorFilter, onFeedRead }
     await load()
   }
 
+  async function updatePlan(id, patch) { const response = await fetch(`/api/planned-visits/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); if (!response.ok) throw new Error('Die Planung konnte nicht aktualisiert werden.'); await load() }
+  async function cancelPlan(id, reason) { const response = await fetch(`/api/planned-visits/${id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }); if (!response.ok) throw new Error('Die Planung konnte nicht abgesagt werden.'); await load() }
+  async function readPlanNotifications() { await fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plannedOnly: true }) }); setNotifications([]); onFeedRead({ plans: true }) }
+
   const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id)
-  const visiblePlans = (feedMode === 'friends' ? plannedVisits.filter((plan) => plan.is_friend || plan.is_owner) : plannedVisits).filter((plan) => !authorFilter || plan.user_id === authorFilter.id)
-  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed'}</h2>{authorFilter && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{visiblePlans.length > 0 && <section className="planned-visit-list"><div className="section-heading"><h3>Geplante Besuche</h3><span>{visiblePlans.length}</span></div>{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} />)}</section>}{!visibleEntries.length && !visiblePlans.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></section></main>
+  const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
+  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{section === 'feed' ? (authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed') : 'Planung'}</h2>{authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button><button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button></div></div>{section === 'feed' ? <><div className="feed-toggle feed-toggle--secondary"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div>{!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></> : <><PlanNotifications notifications={notifications} onRead={readPlanNotifications} /><div className="planning-layout"><PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} /><div className="planning-list"><div className="plan-filters"><button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button><button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button><button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button></div><div className="plan-filters plan-filters--response"><button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button><button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button><button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button></div>{selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}{!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}<div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div></div></div></>}{editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}{cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}</section></main>
 }
 
 function UserAvatar({ user, onOpenImage }) {
@@ -1535,6 +1664,7 @@ function App() {
   const [journalVisits, setJournalVisits] = useState([])
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerSpotId, setComposerSpotId] = useState(null)
+  const [composerPlan, setComposerPlan] = useState(null)
   const [isPickingSpot, setIsPickingSpot] = useState(false)
   const [composerSurface, setComposerSurface] = useState('dialog')
   const [selectedEntry, setSelectedEntry] = useState(null)
@@ -1562,6 +1692,7 @@ function App() {
     if (!appViews.has(view)) return
     setComposerOpen(false)
     setComposerSpotId(null)
+    setComposerPlan(null)
     setPlanDialogSpotId(null)
     setComposerSurface('dialog')
     const current = window.history.state
@@ -1584,6 +1715,7 @@ function App() {
     function onPopState() {
       setComposerOpen(false)
       setComposerSpotId(null)
+      setComposerPlan(null)
       setPlanDialogSpotId(null)
       setComposerSurface('dialog')
       setSelectedEntry(null)
@@ -1766,6 +1898,25 @@ function App() {
     showToast('Du bist abgemeldet')
   }
 
+  async function deleteAccount() {
+    const response = await fetch('/api/me', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'LOESCHEN' }) })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.error === 'account_deletion_not_available' ? 'Dieses geschützte Konto kann nicht in der App gelöscht werden.' : 'Das Konto konnte nicht gelöscht werden.')
+    }
+    setCurrentUser(null)
+    setJournalVisits([])
+    setProgress(null)
+    setSpots(initialSpots)
+    setSpotSuggestions([])
+    setSpotCorrectionReports([])
+    setFriendSummary({ unread_messages: 0, pending_requests: 0 })
+    setFeedSummary({ unread_feed: 0, unread_plans: 0 })
+    setSelectedEntry(null)
+    setActiveView('map')
+    showToast('Dein Konto wurde gelöscht')
+  }
+
   function openComposer(spotId = null) {
     if (!currentUser) {
       navigate('profile')
@@ -1773,6 +1924,7 @@ function App() {
       return
     }
     setPlanDialogSpotId(null)
+    setComposerPlan(null)
     setComposerSpotId(spotId)
     setComposerSurface(spotId ? 'map' : 'dialog')
     setComposerOpen(true)
@@ -1814,7 +1966,18 @@ function App() {
   function closeComposer() {
     setComposerOpen(false)
     setComposerSpotId(null)
+    setComposerPlan(null)
     setComposerSurface('dialog')
+  }
+
+  function openPlannedVisitJournal(plan) {
+    const spot = spots.find((item) => item.id === plan.spot_id)
+    if (!spot) return showToast('Die zugehörige Halle ist nicht mehr verfügbar')
+    setPlanDialogSpotId(null)
+    setComposerPlan(plan)
+    setComposerSpotId(plan.spot_id)
+    setComposerSurface('dialog')
+    setComposerOpen(true)
   }
 
   async function createJournalEntry(entry) {
@@ -1832,7 +1995,7 @@ function App() {
   }
 
   async function updateJournalEntry(id, patch) {
-    const response = await fetch(`/api/journal/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: patch.body, visibility: patch.visibility }) })
+    const response = await fetch(`/api/journal/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: patch.body, visibility: patch.visibility, visitedAt: patch.visitedAt }) })
     if (!response.ok) throw new Error('Der Eintrag konnte nicht aktualisiert werden.')
     for (const mediaId of patch.removedMediaIds) {
       const removeResponse = await fetch(`/api/media/${mediaId}`, { method: 'DELETE' })
@@ -1846,6 +2009,14 @@ function App() {
     }
     await loadPrivateData()
     showToast('Tagebucheintrag aktualisiert')
+  }
+
+  async function deleteJournalEntry(entry) {
+    const response = await fetch(`/api/visits/${entry.id}`, { method: 'DELETE' })
+    if (!response.ok) throw new Error('Der Eintrag konnte nicht gelöscht werden.')
+    await loadPrivateData()
+    setSelectedEntry(null)
+    showToast('Tagebucheintrag gelöscht')
   }
 
   async function deletePhoto(id) {
@@ -1911,6 +2082,7 @@ function App() {
     const response = await fetch('/api/admin/spots/import/apply', { method: 'POST', body: formData })
     if (!response.ok) throw new Error('Die ausgewählten Hallen konnten nicht angewendet werden. Bitte prüfe die Auswahl.')
     const { created, updated, skipped } = await response.json()
+    if (entry.plannedVisitId) await fetch(`/api/planned-visits/${entry.plannedVisitId}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journalEntryId: journalEntry.id }) })
     await loadPrivateData()
     showToast(`${created} angelegt, ${updated} aktualisiert, ${skipped} übersprungen`)
   }
@@ -1996,21 +2168,21 @@ function App() {
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
-      {activeView === 'journal' && <JournalView currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} />}
-      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={() => setFeedSummary({ unread_feed: 0 })} />}
+      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
-        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; const feedNotifications = feedSummary.unread_feed; return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
+        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
-      {composerOpen && <JournalComposer spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} />}
+      {composerOpen && <JournalComposer key={composerPlan?.id ?? composerSpotId ?? 'new'} spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} plannedVisit={composerPlan} />}
       {planDialogSpotId && <PlannedVisitDialog spot={spots.find((spot) => spot.id === planDialogSpotId)} onSave={createPlannedVisit} onClose={() => setPlanDialogSpotId(null)} surface="map" />}
       {correctionDialogSpotId && <SpotCorrectionDialog spot={spots.find((spot) => spot.id === correctionDialogSpotId)} onSave={submitSpotCorrection} onClose={() => setCorrectionDialogSpotId(null)} />}
-      {selectedEntry && <JournalEntryDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} onUpdate={updateJournalEntry} />}
+      {selectedEntry && <JournalEntryDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} onUpdate={updateJournalEntry} onDelete={deleteJournalEntry} />}
       {authOpen && <SignInDialog configuration={authConfiguration} resetToken={resetToken} onClose={() => { setAuthOpen(false); setResetToken(null) }} onDemoSignIn={signInDemo} onMemberSignIn={signInMember} onRegister={registerMember} onRequestPasswordReset={requestPasswordReset} onResendVerification={resendVerification} onResetPassword={resetPassword} onOpenPrivacy={() => { setAuthOpen(false); setLegalDialog('privacy') }} onOpenImprint={() => { setAuthOpen(false); setLegalDialog('imprint') }} />}
       {passwordDialogOpen && <PasswordDialog onClose={() => setPasswordDialogOpen(false)} onSave={changePassword} />}
       {suggestionDialogOpen && <SpotSuggestionDialog onSubmit={submitSpotSuggestion} onClose={() => setSuggestionDialogOpen(false)} />}

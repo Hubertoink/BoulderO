@@ -389,6 +389,22 @@ async function areFriends(firstUserId, secondUserId) {
   return result.rows[0].friends
 }
 
+async function notifyPlanUsers(client, planId, actorId, type, payload, recipientIds) {
+  const recipients = [...new Set(recipientIds.filter((id) => id && id !== actorId))]
+  if (!recipients.length) return
+  await client.query(
+    `INSERT INTO notifications (user_id, actor_id, type, planned_visit_id, payload)
+     SELECT recipient_id, $2, $3, $4, $5::jsonb
+       FROM unnest($1::uuid[]) AS recipient_id`,
+    [recipients, actorId, type, planId, JSON.stringify(payload)],
+  )
+}
+
+async function planRsvpUsers(client, planId) {
+  const result = await client.query('SELECT user_id FROM planned_visit_rsvps WHERE planned_visit_id = $1', [planId])
+  return result.rows.map((row) => row.user_id)
+}
+
 async function currentUser(req) {
   const session = await getSession(req, authConfig)
   if (!session?.user?.email) return null
@@ -506,6 +522,18 @@ const plannedVisitInputSchema = z.object({
   if (value.endsAt && new Date(value.endsAt) <= new Date(value.startsAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Das Ende muss nach dem Beginn liegen.' })
 })
 
+const plannedVisitUpdateSchema = z.object({
+  spotId: z.string().uuid().optional(),
+  startsAt: z.string().datetime({ offset: true }).optional(),
+  endsAt: z.string().datetime({ offset: true }).nullable().optional(),
+  note: z.string().trim().max(2000).optional(),
+  visibility: z.enum(['private', 'friends', 'followers', 'public']).optional(),
+})
+
+const plannedVisitCancelSchema = z.object({
+  reason: z.string().trim().max(1000).default(''),
+})
+
 const spotCorrectionInputSchema = z.object({
   category: z.enum(['coordinates', 'address', 'opening_hours', 'website', 'other']),
   note: z.string().trim().min(3).max(2000),
@@ -614,6 +642,44 @@ app.get('/health', asyncRoute(async (_req, res) => {
 }))
 
 app.get('/me', requireUser, (req, res) => res.json({ user: req.user }))
+
+app.delete('/me', requireUser, asyncRoute(async (req, res) => {
+  const input = z.object({ confirmation: z.literal('LOESCHEN') }).parse(req.body)
+  void input
+  if (req.user.role === 'superadmin' || demoUsers.some((user) => user.id === req.user.id)) {
+    return res.status(403).json({ error: 'account_deletion_not_available' })
+  }
+
+  const client = await pool.connect()
+  let storageKeys = []
+  try {
+    await client.query('BEGIN')
+    const assets = await client.query(
+      `SELECT storage_key FROM media WHERE owner_id = $1
+       UNION
+       SELECT image AS storage_key FROM users WHERE id = $1 AND image IS NOT NULL`,
+      [req.user.id],
+    )
+    storageKeys = assets.rows.map((row) => row.storage_key).filter(Boolean)
+    const deleted = await client.query('DELETE FROM users WHERE id = $1 RETURNING id', [req.user.id])
+    if (!deleted.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'user_not_found' })
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
+  }
+
+  await Promise.all(storageKeys.map(async (storageKey) => {
+    const absolutePath = path.resolve(uploadRoot, storageKey)
+    if (absolutePath.startsWith(path.resolve(uploadRoot))) await fs.unlink(absolutePath).catch(() => undefined)
+  }))
+  res.status(204).end()
+}))
 
 app.patch('/me', requireUser, asyncRoute(async (req, res) => {
   const input = z.object({
@@ -952,7 +1018,8 @@ app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
     SELECT (
       (SELECT COUNT(*) FROM entry_likes l JOIN journal_entries j ON j.id = l.journal_entry_id, last_seen WHERE j.user_id = $1 AND l.user_id <> $1 AND l.created_at > last_seen.value)
       + (SELECT COUNT(*) FROM entry_comments c JOIN journal_entries j ON j.id = c.journal_entry_id, last_seen WHERE j.user_id = $1 AND c.user_id <> $1 AND c.created_at > last_seen.value)
-    )::int AS unread_feed
+    )::int AS unread_feed,
+    (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $1 AND n.read_at IS NULL) AS unread_plans
   `, [req.user.id])
   res.json(result.rows[0])
 }))
@@ -963,6 +1030,15 @@ app.post('/social/feed/seen', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
+  const filters = z.object({
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+    response: z.enum(['going', 'interested']).optional(),
+    scope: z.enum(['all', 'friends', 'mine']).default('all'),
+  }).parse(req.query)
+  const from = filters.from ?? new Date(Date.now() - 2 * 60 * 60 * 1000)
+  const to = filters.to ?? new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+  if (to <= from || to.getTime() - from.getTime() > 370 * 24 * 60 * 60 * 1000) return res.status(400).json({ error: 'invalid_plan_range' })
   const result = await pool.query(`
     SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id,
            s.id AS spot_id, s.name AS spot_name, s.district, s.address,
@@ -976,18 +1052,70 @@ app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
       JOIN spots s ON s.id = p.spot_id
       JOIN users u ON u.id = p.user_id
      WHERE p.status = 'scheduled'
-       AND p.starts_at >= NOW() - INTERVAL '2 hours'
+       AND p.starts_at >= $2
+       AND p.starts_at < $3
        AND (
          p.user_id = $1
          OR p.visibility = 'public'
          OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted'))
          OR (p.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = p.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
        )
+       AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1 AND r.response = $4))
+       AND ($5 <> 'friends' OR p.user_id = $1 OR (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = p.user_id AND f.followed_id = $1 AND f.status = 'accepted')))
+       AND ($5 <> 'mine' OR p.user_id = $1 OR EXISTS (SELECT 1 FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1 AND r.response = 'going'))
        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id) OR (b.blocker_id = p.user_id AND b.blocked_id = $1))
      ORDER BY p.starts_at ASC
-     LIMIT 20
-  `, [req.user.id])
+     LIMIT 120
+  `, [req.user.id, from, to, filters.response ?? null, filters.scope])
   res.json({ plannedVisits: result.rows })
+}))
+
+app.get('/notifications', requireUser, asyncRoute(async (req, res) => {
+  const { unreadOnly } = z.object({ unreadOnly: z.coerce.boolean().optional() }).parse(req.query)
+  const result = await pool.query(`
+    SELECT n.id, n.type, n.payload, n.created_at, n.read_at, n.planned_visit_id,
+           u.name AS actor_name, u.image AS actor_image,
+           p.status AS plan_status, p.starts_at, s.name AS spot_name
+      FROM notifications n
+      LEFT JOIN users u ON u.id = n.actor_id
+      LEFT JOIN planned_visits p ON p.id = n.planned_visit_id
+      LEFT JOIN spots s ON s.id = p.spot_id
+     WHERE n.user_id = $1 AND ($2::boolean IS NOT TRUE OR n.read_at IS NULL)
+     ORDER BY n.created_at DESC
+     LIMIT 40
+  `, [req.user.id, unreadOnly ?? false])
+  res.json({ notifications: result.rows })
+}))
+
+app.post('/notifications/read', requireUser, asyncRoute(async (req, res) => {
+  const { plannedOnly } = z.object({ plannedOnly: z.boolean().optional() }).parse(req.body ?? {})
+  await pool.query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL${plannedOnly ? " AND type IN ('plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder')" : ''}`, [req.user.id])
+  res.status(204).end()
+}))
+
+app.post('/notifications/:notificationId/read', requireUser, asyncRoute(async (req, res) => {
+  const id = z.string().uuid().parse(req.params.notificationId)
+  await pool.query('UPDATE notifications SET read_at = NOW() WHERE id = $1 AND user_id = $2 AND read_at IS NULL', [id, req.user.id])
+  res.status(204).end()
+}))
+
+app.get('/social/planned-visits/calendar', requireUser, asyncRoute(async (req, res) => {
+  const { month } = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).parse(req.query)
+  const from = new Date(`${month}-01T00:00:00.000Z`)
+  const to = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 1))
+  const result = await pool.query(`
+    SELECT (p.starts_at AT TIME ZONE 'Europe/Berlin')::date AS day,
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE p.user_id = $1)::int AS own_count,
+           COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1 AND r.response = 'going'))::int AS going_count,
+           COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1 AND r.response = 'interested'))::int AS interested_count
+      FROM planned_visits p
+     WHERE p.status = 'scheduled' AND p.starts_at >= $2 AND p.starts_at < $3
+       AND (p.user_id = $1 OR p.visibility = 'public' OR (p.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted')) OR (p.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = p.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = p.user_id AND f.followed_id = $1 AND f.status = 'accepted')))
+       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id) OR (b.blocker_id = p.user_id AND b.blocked_id = $1))
+     GROUP BY day ORDER BY day
+  `, [req.user.id, from, to])
+  res.json({ days: result.rows })
 }))
 
 app.get('/planned-visits/mine', requireUser, asyncRoute(async (req, res) => {
@@ -1014,6 +1142,90 @@ app.post('/planned-visits', requireUser, asyncRoute(async (req, res) => {
   res.status(201).json({ plannedVisit: result.rows[0] })
 }))
 
+app.patch('/planned-visits/:planId', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  const input = plannedVisitUpdateSchema.parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const existing = await client.query(`
+      SELECT p.*, s.name AS spot_name
+        FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+       WHERE p.id = $1 AND p.user_id = $2 AND p.status = 'scheduled'
+       FOR UPDATE
+    `, [planId, req.user.id])
+    const plan = existing.rows[0]
+    if (!plan) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'planned_visit_not_found' }) }
+    const next = plannedVisitInputSchema.parse({
+      spotId: input.spotId ?? plan.spot_id,
+      startsAt: input.startsAt ?? new Date(plan.starts_at).toISOString(),
+      endsAt: input.endsAt === undefined ? (plan.ends_at ? new Date(plan.ends_at).toISOString() : null) : input.endsAt,
+      note: input.note ?? plan.note,
+      visibility: input.visibility ?? plan.visibility,
+    })
+    const spot = await client.query('SELECT id, name FROM spots WHERE id = $1 AND status = \'active\'', [next.spotId])
+    if (!spot.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'spot_not_found' }) }
+    const result = await client.query(`
+      UPDATE planned_visits
+         SET spot_id = $3, starts_at = $4, ends_at = $5, note = $6, visibility = $7, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING id, spot_id, starts_at, ends_at, note, visibility, status, updated_at
+    `, [planId, req.user.id, next.spotId, next.startsAt, next.endsAt, next.note, next.visibility])
+    const changed = plan.spot_id !== next.spotId || new Date(plan.starts_at).getTime() !== new Date(next.startsAt).getTime() || (plan.ends_at ? new Date(plan.ends_at).getTime() : null) !== (next.endsAt ? new Date(next.endsAt).getTime() : null) || plan.note !== next.note
+    if (changed) {
+      await notifyPlanUsers(client, planId, req.user.id, 'plan_updated', {
+        spotName: spot.rows[0].name,
+        startsAt: next.startsAt,
+        previousSpotName: plan.spot_name,
+        previousStartsAt: plan.starts_at,
+      }, await planRsvpUsers(client, planId))
+    }
+    await client.query('COMMIT')
+    res.json({ plannedVisit: result.rows[0] })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally { client.release() }
+}))
+
+app.post('/planned-visits/:planId/cancel', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  const { reason } = plannedVisitCancelSchema.parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const plan = await client.query(`
+      SELECT p.id, p.starts_at, s.name AS spot_name
+        FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+       WHERE p.id = $1 AND p.user_id = $2 AND p.status = 'scheduled'
+       FOR UPDATE
+    `, [planId, req.user.id])
+    if (!plan.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'planned_visit_not_found' }) }
+    await client.query(`UPDATE planned_visits SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = $3, updated_at = NOW() WHERE id = $1 AND user_id = $2`, [planId, req.user.id, reason])
+    const item = plan.rows[0]
+    await notifyPlanUsers(client, planId, req.user.id, 'plan_cancelled', { spotName: item.spot_name, startsAt: item.starts_at, reason }, await planRsvpUsers(client, planId))
+    await client.query('COMMIT')
+    res.status(204).end()
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally { client.release() }
+}))
+
+app.post('/planned-visits/:planId/complete', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  const { journalEntryId } = z.object({ journalEntryId: z.string().uuid().optional() }).parse(req.body)
+  const result = await pool.query(`
+    UPDATE planned_visits p
+       SET status = 'completed', completed_at = NOW(), journal_entry_id = $3, updated_at = NOW()
+     WHERE p.id = $1 AND p.user_id = $2 AND p.status = 'scheduled'
+       AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM journal_entries j WHERE j.id = $3 AND j.user_id = $2))
+     RETURNING id, status, completed_at
+  `, [planId, req.user.id, journalEntryId ?? null])
+  if (!result.rowCount) return res.status(404).json({ error: 'planned_visit_not_found' })
+  res.json({ plannedVisit: result.rows[0] })
+}))
+
 app.post('/planned-visits/:planId/rsvp', requireUser, asyncRoute(async (req, res) => {
   const planId = z.string().uuid().parse(req.params.planId)
   const input = z.object({ response: z.enum(['going', 'interested']) }).parse(req.body)
@@ -1029,6 +1241,12 @@ app.post('/planned-visits/:planId/rsvp', requireUser, asyncRoute(async (req, res
      RETURNING response`,
     [planId, req.user.id, input.response],
   )
+  await pool.query(`
+    INSERT INTO notifications (user_id, actor_id, type, planned_visit_id, payload)
+    SELECT p.user_id, $2, 'plan_rsvp', p.id, jsonb_build_object('response', $3::text, 'spotName', s.name, 'startsAt', p.starts_at)
+      FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+     WHERE p.id = $1 AND p.user_id <> $2
+  `, [planId, req.user.id, input.response])
   res.json({ rsvp: result.rows[0] })
 }))
 
@@ -1564,16 +1782,73 @@ app.patch('/journal/:entryId', requireUser, asyncRoute(async (req, res) => {
   const input = z.object({
     body: z.string().trim().max(4000).optional(),
     visibility: z.enum(['private', 'friends', 'followers', 'public']).optional(),
+    visitedAt: z.string().date().optional(),
   }).parse(req.body)
-  const result = await pool.query(
-    `UPDATE journal_entries
-        SET body = COALESCE($3, body), visibility = COALESCE($4, visibility), updated_at = NOW()
-      WHERE id = $1 AND user_id = $2
-      RETURNING id, body, visibility, updated_at`,
-    [req.params.entryId, req.user.id, input.body ?? null, input.visibility ?? null],
-  )
-  if (!result.rowCount) return res.status(404).json({ error: 'journal_entry_not_found' })
-  res.json({ journalEntry: result.rows[0] })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const entry = await client.query(
+      `SELECT j.id, v.id AS visit_id
+         FROM journal_entries j
+         JOIN visits v ON v.id = j.visit_id
+        WHERE j.id = $1 AND j.user_id = $2
+        FOR UPDATE`,
+      [req.params.entryId, req.user.id],
+    )
+    if (!entry.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'journal_entry_not_found' })
+    }
+    if (input.visitedAt) {
+      await client.query('UPDATE visits SET visited_at = $2::date WHERE id = $1', [entry.rows[0].visit_id, input.visitedAt])
+    }
+    const result = await client.query(
+      `UPDATE journal_entries
+          SET body = COALESCE($3, body), visibility = COALESCE($4, visibility), updated_at = NOW()
+        WHERE id = $1 AND user_id = $2
+        RETURNING id, body, visibility, updated_at`,
+      [req.params.entryId, req.user.id, input.body ?? null, input.visibility ?? null],
+    )
+    await client.query('COMMIT')
+    res.json({ journalEntry: { ...result.rows[0], visited_at: input.visitedAt ?? null } })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
+  }
+}))
+
+app.delete('/visits/:visitId', requireUser, asyncRoute(async (req, res) => {
+  const client = await pool.connect()
+  let storageKeys = []
+  try {
+    await client.query('BEGIN')
+    const visit = await client.query('SELECT id FROM visits WHERE id = $1 AND user_id = $2 FOR UPDATE', [req.params.visitId, req.user.id])
+    if (!visit.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'visit_not_found' })
+    }
+    const media = await client.query(
+      `DELETE FROM media
+        WHERE journal_entry_id IN (SELECT id FROM journal_entries WHERE visit_id = $1)
+        RETURNING storage_key`,
+      [req.params.visitId],
+    )
+    storageKeys = media.rows.map((row) => row.storage_key)
+    await client.query('DELETE FROM visits WHERE id = $1 AND user_id = $2', [req.params.visitId, req.user.id])
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
+  }
+  await Promise.all(storageKeys.map(async (storageKey) => {
+    const absolutePath = path.resolve(uploadRoot, storageKey)
+    if (absolutePath.startsWith(path.resolve(uploadRoot))) await fs.unlink(absolutePath).catch(() => undefined)
+  }))
+  res.status(204).end()
 }))
 
 app.post('/journal/:entryId/photos', requireUser, imageUpload.array('photos', 6), asyncRoute(async (req, res) => {
