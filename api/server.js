@@ -919,7 +919,7 @@ app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
     SELECT j.id, j.body, j.created_at, v.visited_at, v.spot_id,
            u.id AS user_id, u.name AS user_name, u.image AS user_image,
-           s.name AS spot_name,
+           s.name AS spot_name, ST_Y(s.coordinates::geometry) AS latitude, ST_X(s.coordinates::geometry) AS longitude,
            COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type))
              FILTER (WHERE m.id IS NOT NULL), '[]') AS media
       FROM journal_entries j

@@ -134,12 +134,35 @@ function MapActivityViewport({ onChange }) {
     }
     update()
     map.on('moveend', update)
-    return () => map.off('moveend', update)
+    map.on('zoomend', update)
+    return () => { map.off('moveend', update); map.off('zoomend', update) }
   }, [map, onChange])
   return null
 }
 
-function MapActivityLayer({ spots, activities, onSelect }) {
+function MapViewportResize() {
+  const map = useMap()
+  useEffect(() => {
+    let frame = null
+    function update() {
+      if (frame) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => map.invalidateSize({ pan: false, debounceMoveend: true }))
+    }
+    const viewport = window.visualViewport
+    viewport?.addEventListener('resize', update)
+    viewport?.addEventListener('scroll', update)
+    window.addEventListener('resize', update)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      viewport?.removeEventListener('resize', update)
+      viewport?.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [map])
+  return null
+}
+
+function MapActivityLayer({ activities, onSelect }) {
   const map = useMap()
   const [zoom, setZoom] = useState(() => map.getZoom())
   const [previewIndex, setPreviewIndex] = useState(0)
@@ -149,13 +172,11 @@ function MapActivityLayer({ spots, activities, onSelect }) {
     return () => map.off('zoomend', updateZoom)
   }, [map])
   const markers = useMemo(() => {
-    const spotById = new Map(spots.map((spot) => [spot.id, spot]))
-    const visible = activities.filter((activity) => spotById.has(activity.spot_id))
+    const visible = activities.filter((activity) => Number.isFinite(Number(activity.latitude)) && Number.isFinite(Number(activity.longitude)))
     const totals = new Map()
     visible.forEach((activity) => totals.set(activity.spot_id, (totals.get(activity.spot_id) ?? 0) + 1))
     const counts = new Map()
     return visible.map((activity) => {
-      const spot = spotById.get(activity.spot_id)
       const index = counts.get(activity.spot_id) ?? 0
       counts.set(activity.spot_id, index + 1)
       const ringIndex = Math.floor(index / 6)
@@ -163,11 +184,11 @@ function MapActivityLayer({ spots, activities, onSelect }) {
       const countOnRing = Math.min(6, totals.get(activity.spot_id) - ringIndex * 6)
       const angle = (Math.PI * 2 * indexOnRing) / Math.max(countOnRing, 1) - Math.PI / 2 + ringIndex * .38
       const radius = 38 + ringIndex * 24
-      const basePoint = map.project(spot.position, zoom)
+      const basePoint = map.project([Number(activity.latitude), Number(activity.longitude)], zoom)
       const position = map.unproject(basePoint.add([Math.cos(angle) * radius, Math.sin(angle) * radius]), zoom)
       return { activity, index, position }
     })
-  }, [activities, map, spots, zoom])
+  }, [activities, map, zoom])
   useEffect(() => {
     setPreviewIndex(0)
     if (markers.length < 2) return undefined
@@ -198,10 +219,11 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, ac
         />
         <FocusMap spot={selectedSpot} />
         <FocusLocation location={userLocation} />
+        <MapViewportResize />
         <MobileMapDismiss onDismiss={onDismiss} />
         <MapActivityViewport onChange={onActivityBoundsChange} />
         {userLocation && <Marker position={userLocation} icon={userLocationIcon()} interactive={false} />}
-        <MapActivityLayer spots={spots} activities={activities} onSelect={onSelect} />
+        <MapActivityLayer activities={activities} onSelect={onSelect} />
         {spots.map((spot) => (
           <Marker
             key={spot.id}
@@ -294,8 +316,9 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     }
     const params = new URLSearchParams(['west', 'south', 'east', 'north'].map((key) => [key, String(activityBounds[key])]))
     let cancelled = false
+    const controller = new AbortController()
     async function loadActivities() {
-      const response = await fetch(`/api/social/map-activity?${params}`)
+      const response = await fetch(`/api/social/map-activity?${params}`, { signal: controller.signal })
       if (!response.ok) return
       const payload = await response.json()
       if (!cancelled) setActivities((current) => {
@@ -310,7 +333,7 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
     }
     loadActivities().catch(() => undefined)
     const interval = window.setInterval(() => loadActivities().catch(() => undefined), 60000)
-    return () => { cancelled = true; window.clearInterval(interval) }
+    return () => { cancelled = true; controller.abort(); window.clearInterval(interval) }
   }, [activityBounds, currentUser?.id])
   const visibleSpots = useMemo(() => {
     return spots.filter((spot) => {
@@ -1547,6 +1570,24 @@ function App() {
     if (window.history.state?.boulderO && window.history.state.position > 0) window.history.back()
     else navigate(fallback, { replace: true })
   }
+
+  useEffect(() => {
+    function syncViewportHeight() {
+      const height = window.visualViewport?.height ?? window.innerHeight
+      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(height)}px`)
+    }
+    const viewport = window.visualViewport
+    syncViewportHeight()
+    viewport?.addEventListener('resize', syncViewportHeight)
+    viewport?.addEventListener('scroll', syncViewportHeight)
+    window.addEventListener('resize', syncViewportHeight)
+    return () => {
+      viewport?.removeEventListener('resize', syncViewportHeight)
+      viewport?.removeEventListener('scroll', syncViewportHeight)
+      window.removeEventListener('resize', syncViewportHeight)
+      document.documentElement.style.removeProperty('--app-viewport-height')
+    }
+  }, [])
 
   useEffect(() => {
     const initialView = viewFromLocation()
