@@ -302,7 +302,6 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
         <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
       </MapContainer>
       <div className="map-key" aria-label="Kartenlegende">
-        <span><i className="key-dot key-dot--open" />Noch offen</span>
         <span><i className="key-dot key-dot--visited">✓</i>Besucht</span>
         {activities.length > 0 && <span><i className="key-dot key-dot--activity" />Aktuelle Feed-Besuche</span>}
         {plans.length > 0 && <span><i className="key-dot key-dot--plan" />Geplante Besuche</span>}
@@ -478,7 +477,6 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
       const area = Number(spot.area_sqm ?? String(spot.size ?? '').replace(/[^0-9]/g, ''))
       const matchesFilter = hallFilter === 'all'
         || (hallFilter === 'visited' && spot.visits > 0)
-        || (hallFilter === 'open' && spot.visits === 0)
         || (hallFilter === 'large' && area >= 1000)
         || (hallFilter === 'small' && area < 750)
         || (hallFilter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
@@ -506,14 +504,13 @@ function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onSelectSp
         <button type="button" className="toolbar-filter ui-icon-button" aria-label="Filter öffnen" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><IconAdjustmentsHorizontal size={19} /></button>
         <button type="button" className="toolbar-location ui-icon-button" aria-label="Meinen Standort anzeigen" onClick={requestUserLocation}><IconCurrentLocation size={19} /></button>
         {filtersOpen && <div className="filter-menu" aria-label="Kartenfilter"><span className="eyebrow">Hallen filtern</span>{[
-          ['all', 'Alle Hallen'], ['visited', 'Besucht'], ['open', 'Noch offen'], ['large', 'Große Hallen'], ['small', 'Kompakt'], ['late', 'Bis spät geöffnet'],
+          ['all', 'Alle Hallen'], ['visited', 'Besucht'], ['large', 'Große Hallen'], ['small', 'Kompakt'], ['late', 'Bis spät geöffnet'],
         ].map(([id, label]) => <button type="button" key={id} className={hallFilter === id ? 'is-active' : ''} onClick={() => { setFilter(id); setFiltersOpen(false) }}>{label}{hallFilter === id && <IconCheck size={15} />}</button>)}<span className="eyebrow">Auf Karte zeigen</span><button type="button" className={showPlanned ? 'is-active' : ''} onClick={() => setShowPlanned((value) => !value)}>Geplante Besuche{showPlanned && <IconCheck size={15} />}</button><button type="button" className={showVisitMarkers ? 'is-active' : ''} onClick={() => setShowVisitMarkers((value) => !value)}>Besuchsmarker{showVisitMarkers && <IconCheck size={15} />}</button></div>}
       </div>
       <div className="filter-row">
         {[
           ['all', 'Alle Hallen'],
           ['visited', 'Besucht'],
-          ['open', 'Noch offen'],
         ].map(([id, label]) => (
           <button key={id} className={`filter-chip ${hallFilter === id ? 'is-active' : ''}`} onClick={() => setFilter(id)}>{label}</button>
         ))}
