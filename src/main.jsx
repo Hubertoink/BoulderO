@@ -2025,6 +2025,18 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const className = 'map-view-open'
+    const mapIsOpen = activeView === 'map'
+    document.documentElement.classList.toggle(className, mapIsOpen)
+    document.body.classList.toggle(className, mapIsOpen)
+    if (mapIsOpen) window.scrollTo(0, 0)
+    return () => {
+      document.documentElement.classList.remove(className)
+      document.body.classList.remove(className)
+    }
+  }, [activeView])
+
+  useEffect(() => {
     const parameters = new URLSearchParams(window.location.search)
     const verificationToken = parameters.get('verifyEmail')
     const passwordToken = parameters.get('resetPassword')
@@ -2471,7 +2483,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${activeView === 'map' ? ' app-shell--map' : ''}`}>
       <header className="app-header">
         <button className="brand" onClick={() => navigate('map')} aria-label="Zur Karte"><img className="brand-logo" src="/BoulderO_Logo.ico" alt="" /><span>Boulder<span>O</span></span></button>
         <div className="header-progress"><span><b>{uniqueVisited}</b>/10 Hallen</span><i><em style={{ width: `${uniqueVisited * 10}%` }} /></i></div>
