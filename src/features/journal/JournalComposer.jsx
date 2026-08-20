@@ -83,8 +83,8 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
   }
 
   function revealExperienceField(event) {
-    if (surface !== 'map') return
     clearViewportReveal()
+    if (surface !== 'map') return
     const field = event.currentTarget
     const scrollField = () => {
       if (field.isConnected) field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
