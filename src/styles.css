@@ -299,6 +299,14 @@ body.map-dialog-open {
 }
 
 @media (max-width: 560px) {
+  .composer-backdrop {
+    height: var(--app-viewport-height);
+  }
+
+  .journal-composer {
+    max-height: calc(var(--app-viewport-height) - 18px);
+  }
+
   .composer-backdrop--map {
     height: var(--app-viewport-height);
     padding: 0;
