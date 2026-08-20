@@ -77,8 +77,8 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
     if (surface !== 'map') return
     const field = event.currentTarget
     const reveal = () => field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    window.visualViewport?.addEventListener('resize', reveal, { once: true })
     window.requestAnimationFrame(reveal)
-    window.setTimeout(reveal, 250)
   }
 
   return (
