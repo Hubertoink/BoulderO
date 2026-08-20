@@ -41,8 +41,17 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
   const [visibility, setVisibility] = useState('followers')
   const [files, setFiles] = useState([])
   const fileInput = useRef(null)
+  const viewportReveal = useRef(null)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
+
+  function clearViewportReveal() {
+    if (!viewportReveal.current) return
+    window.visualViewport?.removeEventListener('resize', viewportReveal.current)
+    viewportReveal.current = null
+  }
+
+  useEffect(() => clearViewportReveal, [])
 
   async function submit(event) {
     event.preventDefault()
@@ -75,10 +84,18 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
 
   function revealExperienceField(event) {
     if (surface !== 'map') return
+    clearViewportReveal()
     const field = event.currentTarget
-    const reveal = () => field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
-    window.visualViewport?.addEventListener('resize', reveal, { once: true })
-    window.requestAnimationFrame(reveal)
+    const scrollField = () => {
+      if (field.isConnected) field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    }
+    const revealAfterKeyboardResize = () => {
+      viewportReveal.current = null
+      scrollField()
+    }
+    viewportReveal.current = revealAfterKeyboardResize
+    window.visualViewport?.addEventListener('resize', revealAfterKeyboardResize, { once: true })
+    window.requestAnimationFrame(scrollField)
   }
 
   return (
@@ -88,7 +105,7 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
         <div className="form-field"><span>Halle</span>{spot ? <div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span><button type="button" onClick={onChooseOnMap}>Ändern</button></div> : <button type="button" className="choose-spot" onClick={onChooseOnMap}><IconMapPin size={18} />Halle auf Karte auswählen</button>}</div>
         <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} required /></label>
         <section className="visit-time-picker"><button type="button" className={timesOpen ? 'is-open' : ''} onClick={() => setTimesOpen((value) => !value)}><IconClock size={18} /><span>Uhrzeit hinzufügen <small>optional</small></span><IconChevronRight size={17} /></button>{timesOpen && <div className="visit-time-picker__fields"><label className="form-field"><span>Von</span><input type="time" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} /></label><label className="form-field"><span>Bis</span><input type="time" value={endedAt} onChange={(event) => setEndedAt(event.target.value)} /></label></div>}</section>
-        <label className="form-field"><span>Erfahrungsbericht</span><textarea value={body} onChange={(event) => setBody(event.target.value)} onFocus={revealExperienceField} maxLength="4000" placeholder="Wie war deine Session? Was möchtest du später noch wissen?" /></label>
+        <label className="form-field"><span>Erfahrungsbericht</span><textarea value={body} onChange={(event) => setBody(event.target.value)} onFocus={revealExperienceField} onBlur={clearViewportReveal} maxLength="4000" placeholder="Wie war deine Session? Was möchtest du später noch wissen?" /></label>
         <div className="photo-field"><div className="photo-selection">{files.map((item, index) => <figure key={item.preview}><img src={item.preview} alt={`Ausgewähltes Foto ${index + 1}`} /><button type="button" onClick={() => removePhoto(index)} aria-label={`Foto ${index + 1} entfernen`}><IconX size={15} /></button></figure>)}</div><label className="photo-picker"><IconPhoto size={19} /><span>{files.length ? `${files.length} Foto${files.length > 1 ? 's' : ''} ausgewählt` : 'Fotos hinzufügen'}</span><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple onChange={addPhotos} /></label>{files.length > 0 && files.length < 6 && <button type="button" className="add-photo" onClick={() => fileInput.current?.click()}><IconPlus size={16} />Weiteres Foto</button>}</div>
         <VisibilityPicker value={visibility} onChange={setVisibility} />
         {error && <p className="form-error">{error}</p>}
