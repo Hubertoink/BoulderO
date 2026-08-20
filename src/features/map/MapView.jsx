@@ -462,7 +462,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Hallen in Mannheim suchen" aria-expanded={Boolean(query)} aria-controls="search-results" />
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}
           </label>
-          {query && <div className="search-results" id="search-results" role="listbox">
+          {query && <div className={`search-results${matchingSpots.length >= 4 ? ' search-results--scrollable' : ''}`} id="search-results" role="listbox">
             {matchingSpots.length ? matchingSpots.slice(0, 6).map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spot.district} · {spot.distance}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
           </div>}
         </div>
