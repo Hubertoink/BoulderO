@@ -162,6 +162,20 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const viewport = window.visualViewport
+    function updateViewportHeight() {
+      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`)
+    }
+    updateViewportHeight()
+    viewport?.addEventListener('resize', updateViewportHeight)
+    window.addEventListener('resize', updateViewportHeight)
+    return () => {
+      viewport?.removeEventListener('resize', updateViewportHeight)
+      window.removeEventListener('resize', updateViewportHeight)
+    }
+  }, [])
+
+  useEffect(() => {
     const className = 'map-view-open'
     const mapIsOpen = activeView === 'map'
     document.documentElement.classList.toggle(className, mapIsOpen)
