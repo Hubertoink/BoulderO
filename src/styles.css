@@ -383,4 +383,27 @@ body.map-dialog-open {
     font-size: 9px;
     line-height: 1.2;
   }
+
+  /* The hall-suggestion form is long enough that its own scroll area can be
+     scrolled while a mobile browser expands its URL bar. Keep the dismiss
+     control visible in that case and reserve it when a focused field moves. */
+  .spot-suggestion-dialog {
+    max-height: calc(100dvh - 12px);
+    padding-top: 16px;
+    scroll-padding: 64px 0 24px;
+    overscroll-behavior: contain;
+  }
+
+  .spot-suggestion-dialog .composer-header {
+    position: sticky;
+    top: -16px;
+    z-index: 2;
+    padding-top: 16px;
+    background: var(--paper);
+  }
+
+  .spot-suggestion-dialog .form-field input,
+  .spot-suggestion-dialog .form-field textarea {
+    font-size: 16px;
+  }
 }
