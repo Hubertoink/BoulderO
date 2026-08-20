@@ -93,8 +93,10 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
       viewportReveal.current = null
       scrollField()
     }
-    viewportReveal.current = revealAfterKeyboardResize
-    window.visualViewport?.addEventListener('resize', revealAfterKeyboardResize, { once: true })
+    if (window.visualViewport) {
+      viewportReveal.current = revealAfterKeyboardResize
+      window.visualViewport.addEventListener('resize', revealAfterKeyboardResize, { once: true })
+    }
     window.requestAnimationFrame(scrollField)
   }
 
