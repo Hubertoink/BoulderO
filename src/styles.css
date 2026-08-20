@@ -299,18 +299,11 @@ body.map-dialog-open {
 }
 
 @media (max-width: 560px) {
-  .composer-backdrop {
-    height: var(--app-viewport-height);
-  }
-
-  .journal-composer {
-    max-height: calc(var(--app-viewport-height) - 18px);
-  }
-
   .composer-backdrop--map {
-    height: var(--app-viewport-height);
     padding: 0;
     align-items: end;
+    background: transparent;
+    pointer-events: none;
     overscroll-behavior: contain;
     touch-action: none;
   }
@@ -318,11 +311,12 @@ body.map-dialog-open {
   .composer-backdrop--map .journal-composer--map {
     width: 100%;
     height: auto;
-    max-height: calc(var(--app-viewport-height) - 18px);
+    max-height: calc(100% - 18px);
     margin-bottom: 0;
     padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
     border-radius: 12px 12px 0 0;
     overflow-y: auto;
+    pointer-events: auto;
     touch-action: pan-y;
     overscroll-behavior: contain;
   }
