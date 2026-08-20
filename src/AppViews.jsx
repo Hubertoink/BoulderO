@@ -10,8 +10,8 @@ import {
 } from '@tabler/icons-react'
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from './data/spots'
-import { MapView } from './features/map/MapView.jsx'
-import { JournalComposer, optimizePhoto, PlannedVisitDialog } from './features/journal/JournalComposer.jsx'
+import { MapView, markerIcon } from './features/map/MapView.jsx'
+import { JournalComposer, optimizePhoto, PlannedVisitDialog, VisibilityPicker } from './features/journal/JournalComposer.jsx'
 import { formatFeedDate, formatJournalDate, formatPlanDate, useOutsideDismiss } from './shared/viewHelpers.js'
 
 let activePlanningAuthorFilter = null

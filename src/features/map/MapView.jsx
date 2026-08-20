@@ -19,7 +19,7 @@ function savedMapView() {
   }
   return null
 }
-function markerIcon(visited, selected) {
+export function markerIcon(visited, selected) {
   return L.divIcon({
     className: 'spot-marker-wrapper',
     html: `<span class="spot-marker ${visited ? 'is-visited' : ''} ${selected ? 'is-selected' : ''}">${visited ? '<span>✓</span>' : ''}</span>`,

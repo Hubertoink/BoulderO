@@ -27,7 +27,7 @@ const visibilityOptions = [
   { value: 'public', label: 'Community', description: 'Alle in BoulderO', icon: IconWorld },
 ]
 
-function VisibilityPicker({ value, onChange }) {
+export function VisibilityPicker({ value, onChange }) {
   return <fieldset className="visibility-picker"><legend>Teilen mit</legend><div role="radiogroup" aria-label="Sichtbarkeit des Eintrags">{visibilityOptions.map(({ value: optionValue, label, description, icon: Icon }) => <button key={optionValue} type="button" role="radio" aria-checked={value === optionValue} className={value === optionValue ? 'is-selected' : ''} onClick={() => onChange(optionValue)}><Icon size={20} /><span>{label}</span><small>{description}</small></button>)}</div></fieldset>
 }
 
