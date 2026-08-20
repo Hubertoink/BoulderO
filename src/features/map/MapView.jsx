@@ -5,7 +5,7 @@ import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronRig
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
-import { matchesSpotSearch, spotSearchMeta } from '../../shared/spotSearch.js'
+import { matchesSpotSearch, spotSearchMeta, spotSearchRank } from '../../shared/spotSearch.js'
 
 const mapViewStorageKey = 'bouldero.map-view'
 
@@ -288,7 +288,6 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
         {activities.length > 0 && <span><i className="key-dot key-dot--activity" />Aktuelle Feed-Besuche</span>}
         {plans.length > 0 && <span><i className="key-dot key-dot--plan" />Geplante Besuche</span>}
       </div>
-      <div className="map-credits">Testdaten · Mannheim</div>
     </div>
   )
 }
@@ -484,7 +483,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
         || (hallFilter === 'small' && area < 750)
         || (hallFilter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
       return matchesSearch && matchesFilter
-    })
+    }).sort((first, second) => spotSearchRank(first, query) - spotSearchRank(second, query) || first.name.localeCompare(second.name, 'de-DE'))
   }, [spots, query, hallFilter])
 
   const visibleSpots = matchingSpots
@@ -501,7 +500,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}
           </label>
           {query && <div className={`search-results${matchingSpots.length >= 4 ? ' search-results--scrollable' : ''}`} id="search-results" role="listbox">
-            {matchingSpots.length ? matchingSpots.slice(0, 6).map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spotSearchMeta(spot)}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
+            {matchingSpots.length ? matchingSpots.map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spotSearchMeta(spot)}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
           </div>}
         </div>
         <button type="button" className="toolbar-filter ui-icon-button" aria-label="Filter öffnen" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><IconAdjustmentsHorizontal size={19} /></button>
