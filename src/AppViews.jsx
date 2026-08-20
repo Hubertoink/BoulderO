@@ -914,6 +914,14 @@ function planMonthKey(value) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`
 }
 
+function planListRange(selectedDay) {
+  const from = selectedDay ? new Date(`${selectedDay}T00:00:00`) : new Date()
+  if (!selectedDay) from.setHours(0, 0, 0, 0)
+  const to = new Date(from)
+  to.setDate(to.getDate() + (selectedDay ? 1 : 90))
+  return new URLSearchParams({ scope: 'all', from: from.toISOString(), to: to.toISOString() })
+}
+
 function PlanCalendar({ month, days, selectedDay, onMonthChange, onDayChange }) {
   const first = new Date(month.getFullYear(), month.getMonth(), 1)
   const startOffset = (first.getDay() + 6) % 7
@@ -969,22 +977,25 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   const [selectedDay, setSelectedDay] = useState(null)
   const [editingPlan, setEditingPlan] = useState(null)
   const [cancellingPlan, setCancellingPlan] = useState(null)
+  const loadRequest = useRef(0)
 
   async function load() {
+    const requestId = ++loadRequest.current
     try {
-      const [feedResponse, plansResponse] = await Promise.all([fetch('/api/social/feed'), fetch('/api/social/planned-visits?scope=all')])
+      const [feedResponse, plansResponse] = await Promise.all([fetch('/api/social/feed'), fetch(`/api/social/planned-visits?${planListRange(selectedDay)}`)])
       if (!feedResponse.ok || !plansResponse.ok) throw new Error('Feed konnte nicht geladen werden.')
+      if (requestId !== loadRequest.current) return
       setEntries((await feedResponse.json()).entries)
       setPlannedVisits((await plansResponse.json()).plannedVisits)
       await fetch('/api/social/feed/seen', { method: 'POST' })
       onFeedRead()
-    } catch (loadError) { setError(loadError.message) }
+    } catch (loadError) { if (requestId === loadRequest.current) setError(loadError.message) }
   }
   useEffect(() => {
     load()
     const interval = window.setInterval(load, 30000)
     return () => window.clearInterval(interval)
-  }, [])
+  }, [selectedDay])
   useEffect(() => { fetch(`/api/social/planned-visits/calendar?month=${planMonthKey(calendarMonth)}`).then((response) => response.ok ? response.json() : { days: [] }).then((payload) => setCalendarDays(payload.days)).catch(() => setCalendarDays([])) }, [calendarMonth])
   useEffect(() => { if (section !== 'plans') return; fetch('/api/notifications?unreadOnly=true').then((response) => response.ok ? response.json() : { notifications: [] }).then((payload) => setNotifications(payload.notifications)).catch(() => setNotifications([])) }, [section])
   useEffect(() => {

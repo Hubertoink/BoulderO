@@ -1156,7 +1156,7 @@ app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
       JOIN spots s ON s.id = p.spot_id
       JOIN users u ON u.id = p.user_id
      WHERE p.status = 'scheduled'
-       AND p.starts_at >= CURRENT_DATE
+       AND p.starts_at > NOW()
        AND p.starts_at < NOW() + INTERVAL '90 days'
        AND ($2::boolean OR s.coordinates && ST_MakeEnvelope($3, $5, $4, $6, 4326)::geography)
        AND (

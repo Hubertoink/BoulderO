@@ -5,6 +5,7 @@ import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronRig
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
+import { matchesSpotSearch, spotSearchMeta } from '../../shared/spotSearch.js'
 
 const mapViewStorageKey = 'bouldero.map-view'
 
@@ -475,7 +476,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
   const hallFilter = filter === 'planned' ? 'all' : filter
   const matchingSpots = useMemo(() => {
     return spots.filter((spot) => {
-      const matchesSearch = `${spot.name} ${spot.district}`.toLowerCase().includes(query.toLowerCase())
+      const matchesSearch = matchesSpotSearch(spot, query)
       const area = Number(spot.area_sqm ?? String(spot.size ?? '').replace(/[^0-9]/g, ''))
       const matchesFilter = hallFilter === 'all'
         || (hallFilter === 'visited' && spot.visits > 0)
@@ -500,7 +501,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}
           </label>
           {query && <div className={`search-results${matchingSpots.length >= 4 ? ' search-results--scrollable' : ''}`} id="search-results" role="listbox">
-            {matchingSpots.length ? matchingSpots.slice(0, 6).map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spot.district} · {spot.distance}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
+            {matchingSpots.length ? matchingSpots.slice(0, 6).map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spotSearchMeta(spot)}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
           </div>}
         </div>
         <button type="button" className="toolbar-filter ui-icon-button" aria-label="Filter öffnen" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><IconAdjustmentsHorizontal size={19} /></button>
