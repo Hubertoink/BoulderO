@@ -75,7 +75,8 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
 
   function revealExperienceField(event) {
     if (surface !== 'map') return
-    const reveal = () => event.currentTarget.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+    const field = event.currentTarget
+    const reveal = () => field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
     window.requestAnimationFrame(reveal)
     window.setTimeout(reveal, 250)
   }
