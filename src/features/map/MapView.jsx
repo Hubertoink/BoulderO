@@ -5,6 +5,20 @@ import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronRig
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
+
+const mapViewStorageKey = 'bouldero.map-view'
+
+function savedMapView() {
+  try {
+    const view = JSON.parse(window.localStorage.getItem(mapViewStorageKey))
+    if (Number.isFinite(view?.latitude) && Number.isFinite(view?.longitude) && Number.isFinite(view?.zoom)
+      && view.latitude >= -90 && view.latitude <= 90 && view.longitude >= -180 && view.longitude <= 180
+      && view.zoom >= 1 && view.zoom <= 22) return view
+  } catch {
+    // Ignore unavailable or malformed local storage.
+  }
+  return null
+}
 function markerIcon(visited, selected) {
   return L.divIcon({
     className: 'spot-marker-wrapper',
@@ -127,6 +141,27 @@ function MapActivityViewport({ onChange }) {
   return null
 }
 
+function MapViewportPersistence() {
+  const map = useMap()
+  useEffect(() => {
+    function save() {
+      const center = map.getCenter()
+      try {
+        window.localStorage.setItem(mapViewStorageKey, JSON.stringify({
+          latitude: Number(center.lat.toFixed(6)),
+          longitude: Number(center.lng.toFixed(6)),
+          zoom: map.getZoom(),
+        }))
+      } catch {
+        // The map remains usable if storage is unavailable.
+      }
+    }
+    map.on('moveend', save)
+    return () => map.off('moveend', save)
+  }, [map])
+  return null
+}
+
 function MapViewportResize() {
   const map = useMap()
   useEffect(() => {
@@ -221,9 +256,10 @@ function MobileMapDismiss({ onDismiss }) {
 }
 
 function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, onSelectPlan, onActivityBoundsChange }) {
+  const [initialView] = useState(savedMapView)
   return (
     <div className="map-frame">
-      <MapContainer center={mannheimCenter} zoom={13} zoomControl={false} scrollWheelZoom className="map-canvas">
+      <MapContainer center={initialView ? [initialView.latitude, initialView.longitude] : mannheimCenter} zoom={initialView?.zoom ?? 13} zoomControl={false} scrollWheelZoom className="map-canvas">
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -231,6 +267,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
         <FocusMap spot={selectedSpot} />
         <FocusLocation location={userLocation} request={locationFocusRequest} />
         <MapViewportResize />
+        <MapViewportPersistence />
         <MobileMapDismiss onDismiss={onDismiss} />
         <MapActivityViewport onChange={onActivityBoundsChange} />
         {userLocation && <Marker position={userLocation} icon={userLocationIcon()} interactive={false} />}

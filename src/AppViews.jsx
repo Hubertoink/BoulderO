@@ -308,6 +308,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
   const currentRank = [...badges].reverse().find((badge) => badge.unlocked)
   const nextRank = badges.find((badge) => !badge.unlocked)
   const uniqueSpots = progress?.unique_spots ?? visited
+  const discoveryProgress = spots.length ? Math.min(100, uniqueSpots / spots.length * 100) : 0
   return (
     <main className="view content-view profile-view">
       <div className="profile-content">
@@ -316,7 +317,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
           <div className="profile-hero__content">
             <ProfileAvatar user={currentUser} progress={progress} onChooseFile={setAvatarFile} />
             <h1>{currentUser.name}</h1>
-            <p>@{currentUser.username ?? 'boulderfan'} · Mannheim</p>
+            <p>@{currentUser.username ?? 'boulderfan'}</p>
           </div>
         </section>
         <section className="rank-card">
@@ -324,9 +325,9 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
           <div><span className="eyebrow">Dein Rang</span><h2>{currentRank?.name ?? 'Boulder-Neuling'}</h2><p>{nextRank ? `Noch ${Math.max(0, nextRank.threshold - uniqueSpots)} neue Hallen bis zum ${nextRank.name}.` : 'Alle Ränge freigeschaltet.'}</p></div>
         </section>
         <section className="progress-section">
-          <div className="section-heading"><h2>Fortschritt in Mannheim</h2><span>{visited} / 10</span></div>
-          <div className="progress-bar"><span style={{ width: `${visited * 10}%` }} /></div>
-          <div className="profile-stats"><div><strong>{visited}</strong><span>Hallen entdeckt</span></div><div><strong>{total}</strong><span>Besuche</span></div><div><strong>{progress?.follower_count ?? 0}</strong><span>Follower</span></div></div>
+          <div className="section-heading"><h2>Dein Fortschritt</h2><span>{uniqueSpots} Hallen</span></div>
+          <div className="progress-bar"><span style={{ width: `${discoveryProgress}%` }} /></div>
+          <div className="profile-stats"><div><strong>{uniqueSpots}</strong><span>Hallen entdeckt</span></div><div><strong>{total}</strong><span>Besuche</span></div><div><strong>{progress?.follower_count ?? 0}</strong><span>Follower</span></div></div>
         </section>
         <section className="profile-actions">
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
