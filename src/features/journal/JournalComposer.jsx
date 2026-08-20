@@ -102,7 +102,7 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
 
   return (
     <div className={`composer-backdrop ${surface === 'map' ? 'composer-backdrop--map' : ''}`} role="presentation">
-      <form className={`journal-composer ${surface === 'map' ? 'journal-composer--map' : ''}`} onSubmit={submit}>
+      <form className={`journal-composer journal-composer--entry ${surface === 'map' ? 'journal-composer--map' : ''}`} onSubmit={submit}>
         <div className="composer-header"><div><span className="eyebrow">{plannedVisit ? 'Geplanter Besuch' : 'Tagebucheintrag'}</span><h2>Besuch festhalten</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>
         <div className="form-field"><span>Halle</span>{spot ? <div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span><button type="button" onClick={onChooseOnMap}>Ändern</button></div> : <button type="button" className="choose-spot" onClick={onChooseOnMap}><IconMapPin size={18} />Halle auf Karte auswählen</button>}</div>
         <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} required /></label>

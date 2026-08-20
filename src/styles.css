@@ -333,4 +333,55 @@ body.map-dialog-open {
     touch-action: pan-y;
     overscroll-behavior: contain;
   }
+
+  /* The visit form is the only map sheet with enough fields to otherwise need
+     a tiny, unhelpful initial scroll. Keep its mobile spacing compact while
+     leaving the planning sheet unchanged. */
+  .journal-composer--map.journal-composer--entry {
+    padding-top: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .journal-composer--map.journal-composer--entry .composer-header {
+    padding-bottom: 14px;
+  }
+
+  .journal-composer--map.journal-composer--entry .form-field,
+  .journal-composer--map.journal-composer--entry .visibility-picker {
+    margin-top: 12px;
+  }
+
+  .journal-composer--map.journal-composer--entry .visit-time-picker,
+  .journal-composer--map.journal-composer--entry .photo-field {
+    margin-top: 10px;
+  }
+
+  .journal-composer--map.journal-composer--entry .visit-button {
+    margin-top: 12px;
+  }
+
+  /* Feed previews are useful on the map, but the full card dominates a phone.
+     This applies only to photo previews; the marker remains easy to spot. */
+  .map-activity-preview.has-photo {
+    width: 142px;
+    border-radius: 6px;
+  }
+
+  .map-activity-preview.has-photo img {
+    height: 88px;
+  }
+
+  .map-activity-preview.has-photo > span {
+    gap: 2px;
+    padding: 7px 8px 8px;
+  }
+
+  .map-activity-preview.has-photo b {
+    font-size: 10px;
+  }
+
+  .map-activity-preview.has-photo small {
+    font-size: 9px;
+    line-height: 1.2;
+  }
 }
