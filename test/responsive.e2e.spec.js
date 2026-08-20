@@ -36,3 +36,12 @@ for (const viewport of viewports) {
     await expect(signInButton).toBeFocused()
   })
 }
+
+test('extends the desktop map to the viewport bottom', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Karte entdecken' }).click()
+
+  await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(768)
+  await expect.poll(() => page.locator('.map-view').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(768)
+})
