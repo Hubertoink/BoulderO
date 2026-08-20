@@ -164,7 +164,7 @@ function App() {
   useEffect(() => {
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height ?? window.innerHeight)}px`)
+      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`)
     }
     updateViewportHeight()
     viewport?.addEventListener('resize', updateViewportHeight)
