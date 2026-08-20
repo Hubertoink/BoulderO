@@ -9,7 +9,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "api": "node api/server.js",
     "import:spots": "node scripts/import-spots.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:responsive": "playwright test"
   },
   "dependencies": {
     "@auth/express": "^0.12.3",
@@ -33,6 +34,7 @@
     "uuid": "^11.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@vitejs/plugin-react": "^4.3.4",
     "vite": "^5.4.11"
   }

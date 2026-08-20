@@ -13,6 +13,13 @@ docker compose up --build -d
 
 Danach ist die App unter [http://localhost:8090](http://localhost:8090) erreichbar.
 
+Die Responsive-Regressionen pruefen die Docker-Auslieferung in den Viewports 320x568, 375x667, 390x844, 844x390, 412x915 und 768x1024:
+
+```bash
+npx playwright install chromium
+npm run test:responsive
+```
+
 Nützliche Befehle:
 
 ```bash

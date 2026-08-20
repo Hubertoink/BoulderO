@@ -162,9 +162,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (window.CSS?.supports?.('height: 100dvh')) return undefined
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`)
+      const height = `${Math.round(viewport?.height || window.innerHeight)}px`
+      document.documentElement.style.setProperty('--app-viewport-height', height)
+      document.documentElement.style.setProperty('--dialog-viewport-height', height)
     }
     updateViewportHeight()
     viewport?.addEventListener('resize', updateViewportHeight)
@@ -277,6 +280,67 @@ function App() {
       document.body.classList.remove('map-dialog-open')
     }
   }, [composerOpen, composerSurface, planDialogSpotId])
+
+  useEffect(() => {
+    let activeDialog = null
+    let returnFocus = null
+
+    function getActiveDialog() {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+      return dialogs[dialogs.length - 1] ?? null
+    }
+
+    function syncDialogState() {
+      const nextDialog = getActiveDialog()
+      const dialogChanged = nextDialog !== activeDialog
+      document.documentElement.classList.toggle('modal-open', Boolean(nextDialog))
+      document.body.classList.toggle('modal-open', Boolean(nextDialog))
+
+      if (dialogChanged && nextDialog) {
+        returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const closeButton = nextDialog.querySelector('button[aria-label*="schließen" i]')
+        closeButton?.focus({ preventScroll: true })
+      } else if (dialogChanged && !nextDialog) {
+        returnFocus?.focus({ preventScroll: true })
+        returnFocus = null
+      }
+
+      activeDialog = nextDialog
+    }
+
+    function handleKeyDown(event) {
+      const dialog = getActiveDialog()
+      if (!dialog) return
+      if (event.key === 'Escape') {
+        dialog.querySelector('button[aria-label*="schließen" i]')?.click()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = [...dialog.querySelectorAll('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hasAttribute('hidden'))
+      if (!focusable.length) return
+      const currentIndex = focusable.indexOf(document.activeElement)
+      if (event.shiftKey && (currentIndex <= 0 || !dialog.contains(document.activeElement))) {
+        event.preventDefault()
+        focusable[focusable.length - 1].focus()
+      } else if (!event.shiftKey && currentIndex === focusable.length - 1) {
+        event.preventDefault()
+        focusable[0].focus()
+      }
+    }
+
+    const observer = new MutationObserver(syncDialogState)
+    observer.observe(document.getElementById('root'), { childList: true, subtree: true })
+    document.addEventListener('keydown', handleKeyDown)
+    syncDialogState()
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('keydown', handleKeyDown)
+      document.documentElement.classList.remove('modal-open')
+      document.body.classList.remove('modal-open')
+    }
+  }, [])
 
   async function refreshSession() {
     const response = await fetch('/api/me')
