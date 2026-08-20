@@ -13,7 +13,7 @@ function savedMapView() {
     const view = JSON.parse(window.localStorage.getItem(mapViewStorageKey))
     if (Number.isFinite(view?.latitude) && Number.isFinite(view?.longitude) && Number.isFinite(view?.zoom)
       && view.latitude >= -90 && view.latitude <= 90 && view.longitude >= -180 && view.longitude <= 180
-      && view.zoom >= 1 && view.zoom <= 20) return view
+      && view.zoom >= 1 && view.zoom <= 22) return view
   } catch {
     // Ignore unavailable or malformed local storage.
   }
@@ -256,7 +256,7 @@ function MobileMapDismiss({ onDismiss }) {
 }
 
 function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, onSelectPlan, onActivityBoundsChange }) {
-  const initialView = useMemo(savedMapView, [])
+  const [initialView] = useState(savedMapView)
   return (
     <div className="map-frame">
       <MapContainer center={initialView ? [initialView.latitude, initialView.longitude] : mannheimCenter} zoom={initialView?.zoom ?? 13} zoomControl={false} scrollWheelZoom className="map-canvas">
