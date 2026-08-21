@@ -5,6 +5,7 @@ import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronRig
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
+import { formatOpeningHours } from '../../shared/openingHours.js'
 import { matchesSpotSearch, spotSearchMeta, spotSearchRank } from '../../shared/spotSearch.js'
 
 const mapViewStorageKey = 'bouldero.map-view'
@@ -340,7 +341,7 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
         </div>
       </div>
       <div className="spot-meta">
-        <span><b>Heute</b>{spot.open}</span>
+        <span><b>Öffnungszeiten</b>{formatOpeningHours(spot.opening_hours ?? spot.open)}</span>
         <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
         <span><b>Deine Besuche</b>{spot.visits}</span>
       </div>
