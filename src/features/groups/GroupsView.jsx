@@ -90,9 +90,12 @@ function GroupSpotMapPicker({ spots, selectedIds, maxSelection = 5, title = 'Auf
   const selectedSpots = spots.filter((spot) => draftIds.includes(spot.id))
   const initialCenter = groupSpotPosition(selectedSpots[0] ?? {}) ?? mannheimCenter
   function toggleSpot(id) {
-    setDraftIds((current) => current.includes(id)
-      ? current.filter((item) => item !== id)
-      : current.length < maxSelection ? [...current, id] : current)
+    setDraftIds((current) => {
+      if (maxSelection === 1) return current[0] === id ? current : [id]
+      return current.includes(id)
+        ? current.filter((item) => item !== id)
+        : current.length < maxSelection ? [...current, id] : current
+    })
   }
   return <div className="composer-backdrop group-spot-map-backdrop" role="presentation">
     <section className="group-spot-map-dialog" role="dialog" aria-modal="true" aria-label="Hallen auf der Karte auswählen">
