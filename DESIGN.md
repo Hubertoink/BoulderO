@@ -50,6 +50,12 @@ Alle Produkt-Icons stammen aus [Tabler Icons](https://tablericons.com/) über `@
 - Reine Icon-Aktionen verwenden `.ui-icon-button`: ein quadratischer Outline-Button mit zugänglichem `aria-label` und einem `title`.
 - Neue Oberflächen ordnen jede Aktion einer dieser Varianten zu; eigenständige Button-Varianten, abweichende Rahmen oder individuell gesetzte Buttonmaße werden nicht eingeführt.
 
+## Bewegung und aufklappbare Inhalte
+
+- Auf- und zuklappbare Bereiche verwenden die gemeinsame Klasse `.ui-collapse`: eine kurze, zurückhaltende Höhen- und Transparenzanimation (etwa 260 ms) statt eines abrupten Ein- oder Ausblendens.
+- Das Auslösen erfolgt über einen Button mit `aria-expanded`; ein Chevron dreht sich synchron zur Änderung.
+- Die Animation wird bei `prefers-reduced-motion: reduce` deaktiviert. Die Hallen-Informationen auf der Karte und Terminserien folgen diesem Muster.
+
 ## Wiederverwendbare Bausteine
 
 Gestaltungswerte liegen als CSS-Variablen vor (`--space-*`, `--radius-*`, Farb-Tokens). Neue Oberflächen verwenden diese Tokens statt direkter Pixel- und Farbwerte. Wiederkehrende Elemente werden über gemeinsame Klassen gebaut:

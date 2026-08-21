@@ -1972,6 +1972,40 @@ app.post('/community/groups/:groupId/events/:eventId/cancel', requireUser, async
   } finally { client.release() }
 }))
 
+app.post('/community/groups/:groupId/event-series/:seriesId/cancel', requireUser, asyncRoute(async (req, res) => {
+  const groupId = z.string().uuid().parse(req.params.groupId)
+  const seriesId = z.string().uuid().parse(req.params.seriesId)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const membership = await groupMembership(client, groupId, req.user.id)
+    if (!isGroupManager(membership)) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'group_manager_required' }) }
+    const series = await client.query('SELECT id FROM community_group_event_series WHERE id = $1 AND group_id = $2 FOR UPDATE', [seriesId, groupId])
+    if (!series.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'group_event_series_not_found' }) }
+    const spot = await client.query(`
+      SELECT s.name
+        FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+       WHERE p.group_id = $1 AND p.group_event_series_id = $2
+       ORDER BY p.starts_at ASC
+       LIMIT 1`, [groupId, seriesId])
+    await client.query(`
+      UPDATE planned_visits
+         SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'Terminserie abgesagt', updated_at = NOW()
+       WHERE group_id = $1 AND group_event_series_id = $2 AND status = 'scheduled' AND starts_at >= NOW()`, [groupId, seriesId])
+    await client.query('DELETE FROM community_group_event_series WHERE id = $1 AND group_id = $2', [seriesId, groupId])
+    await notifyGroupMembers(client, {
+      groupId, actorId: req.user.id, type: 'group_event_cancelled', title: 'Terminserie abgesagt',
+      body: `Die Terminserie bei ${spot.rows[0]?.name ?? 'der Boulderhalle'} wurde abgesagt.`, targetTab: 'events',
+    })
+    await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+    res.status(204).end()
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally { client.release() }
+}))
+
 app.post('/community/groups/:groupId/events/:eventId/rsvp', requireUser, asyncRoute(async (req, res) => {
   const groupId = z.string().uuid().parse(req.params.groupId)
   const eventId = z.string().uuid().parse(req.params.eventId)
