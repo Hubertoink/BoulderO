@@ -460,8 +460,22 @@ function SpotCreateDialog({ onCreate, onClose }) {
 function SpotSuggestionDialog({ onSubmit, onClose }) {
   const [form, setForm] = useState({ name: '', district: '', address: '', website: '', latitude: '', longitude: '', notes: '' })
   const [saving, setSaving] = useState(false)
+  const [locatingAddress, setLocatingAddress] = useState(false)
   const [error, setError] = useState('')
   function update(field, value) { setForm((current) => ({ ...current, [field]: value })) }
+  async function positionAddress() {
+    const query = [form.address, form.district].map((value) => value.trim()).filter(Boolean).join(', ')
+    if (query.length < 3) { setError('Bitte gib zuerst eine vollständige Adresse ein.'); return }
+    setLocatingAddress(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/geocoding/search?q=${encodeURIComponent(query)}`)
+      if (!response.ok) throw new Error('Die Adresssuche ist gerade nicht verfügbar.')
+      const result = (await response.json()).results?.[0]
+      if (!result) { setError('Zu dieser Adresse wurde kein Standort gefunden.'); return }
+      setForm((current) => ({ ...current, latitude: result.latitude, longitude: result.longitude }))
+    } catch (lookupError) { setError(lookupError.message || 'Die Adresse konnte nicht auf der Karte positioniert werden.') } finally { setLocatingAddress(false) }
+  }
   async function submit(event) {
     event.preventDefault()
     setSaving(true)
@@ -471,7 +485,21 @@ function SpotSuggestionDialog({ onSubmit, onClose }) {
       onClose()
     } catch (submitError) { setError(submitError.message || 'Der Hallenvorschlag konnte nicht gesendet werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog spot-suggestion-dialog" role="dialog" aria-modal="true" aria-label="Halle melden"><div className="composer-header"><div><h2>Halle melden</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Dein Vorschlag wird vor der Veröffentlichung durch die Verwaltung geprüft.</p><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil</span><input value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad</span><input type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad</span><input type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><SuggestionCoordinatePicker latitude={form.latitude} longitude={form.longitude} onChange={(latitude, longitude) => setForm((current) => ({ ...current, latitude, longitude }))} /><label className="form-field"><span>Hinweis für die Verwaltung</span><textarea value={form.notes} maxLength="2000" onChange={(event) => update('notes', event.target.value)} placeholder="Zum Beispiel Öffnungszeiten oder ein Hinweis zur Lage" /></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gesendet …' : 'Hallenvorschlag senden'}</button></form></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog spot-suggestion-dialog" role="dialog" aria-modal="true" aria-label="Halle melden">
+    <div className="composer-header"><div><h2>Halle melden</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>
+    <p className="auth-copy">Dein Vorschlag wird vor der Veröffentlichung durch die Verwaltung geprüft.</p>
+    <form onSubmit={submit}>
+      <div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil</span><input value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div>
+      <label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label>
+      <div className="address-position-action"><button type="button" onClick={positionAddress} disabled={locatingAddress || form.address.trim().length < 3}><IconMapPin size={16} />{locatingAddress ? 'Adresse wird gesucht …' : 'Adresse auf Karte positionieren'}</button><small>Der Pin kann danach weiterhin verschoben werden.</small></div>
+      <label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} placeholder="https://…" /></label>
+      <div className="admin-form-grid"><label className="form-field"><span>Breitengrad</span><input type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad</span><input type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div>
+      <SuggestionCoordinatePicker latitude={form.latitude} longitude={form.longitude} onChange={(latitude, longitude) => setForm((current) => ({ ...current, latitude, longitude }))} />
+      <label className="form-field"><span>Hinweis für die Verwaltung</span><textarea value={form.notes} maxLength="2000" onChange={(event) => update('notes', event.target.value)} placeholder="Zum Beispiel Öffnungszeiten oder ein Hinweis zur Lage" /></label>
+      {error && <p className="form-error">{error}</p>}
+      <button className="visit-button" disabled={saving}>{saving ? 'Wird gesendet …' : 'Hallenvorschlag senden'}</button>
+    </form>
+  </section></div>
 }
 
 function SpotSuggestionReviewDialog({ suggestion, onApprove, onReject, onClose }) {
