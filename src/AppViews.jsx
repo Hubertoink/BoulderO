@@ -1387,9 +1387,12 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
   return (
     <main className="view content-view compact-view social-view">
       <section className="social-section friends-section">
-        <div className="section-heading">
-          <div><h2>Community</h2><div className="friends-tabs community-switch"><button className="is-active">Freunde</button><button type="button" onClick={onOpenGroups}>Gruppen{summary.unread_groups > 0 && <b>{summary.unread_groups > 9 ? '9+' : summary.unread_groups}</b>}</button></div></div>
-          <div className="friends-tabs friends-tabs--sub">
+        <div className="section-heading community-heading">
+          <h2>Community</h2>
+          <div className="friends-tabs community-switch"><button className="is-active">Freunde</button><button type="button" onClick={onOpenGroups}>Gruppen{summary.unread_groups > 0 && <b>{summary.unread_groups > 9 ? '9+' : summary.unread_groups}</b>}</button></div>
+        </div>
+        <div className="community-subnav">
+          <div className="friends-tabs">
             <button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>Freunde</button>
             <button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => setTab('requests')}>Anfragen{requests.incoming.length > 0 && <b>{requests.incoming.length}</b>}</button>
             <button className={tab === 'discover' ? 'is-active' : ''} onClick={() => setTab('discover')}>Entdecken</button>
