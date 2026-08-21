@@ -109,6 +109,17 @@ function FocusMap({ spot, request }) {
   return null
 }
 
+function CenterMap({ spot, request }) {
+  const map = useMap()
+  const handledRequest = useRef(request)
+  useEffect(() => {
+    if (!spot || request <= handledRequest.current) return
+    handledRequest.current = request
+    map.panTo(spot.position, { animate: true, duration: .45 })
+  }, [spot, request, map])
+  return null
+}
+
 function FocusLocation({ location, request }) {
   const map = useMap()
   useEffect(() => {
@@ -262,7 +273,7 @@ function MobileMapDismiss({ onDismiss }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, showVisitMarkers, onSelectPlan, onActivityBoundsChange }) {
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, spotCenterRequest, activities, plans, showVisitMarkers, onSelectPlan, onActivityBoundsChange }) {
   const [initialView] = useState(savedMapView)
   const [spotFocusRequest, setSpotFocusRequest] = useState(0)
   return (
@@ -273,6 +284,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <FocusMap spot={selectedSpot} request={spotFocusRequest} />
+        <CenterMap spot={selectedSpot} request={spotCenterRequest} />
         <FocusLocation location={userLocation} request={locationFocusRequest} />
         <MapViewportResize />
         <MapViewportPersistence />
@@ -327,7 +339,7 @@ function SpotPlans({ plans, onOpenPlanFeed }) {
   return <div className="spot-plans" ref={ref}><button type="button" className="spot-plans__toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={`${plans.length} geplante Besuche anzeigen`} title="Geplante Besuche"><IconCalendarEvent size={17} /><b>{plans.length}</b></button>{open && <div className="spot-plans__popover">{plans.map((plan) => <button type="button" key={plan.id} onClick={() => { setOpen(false); onOpenPlanFeed?.(plan) }}><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{formatPlanDate(plan.starts_at)}</small></span><IconChevronRight size={16} /></button>)}</div>}</div>
 }
 
-function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed, onOpenPlanFeed }) {
+function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, onCenter, hideOnMobile, onOpenUserFeed, onOpenPlanFeed }) {
   const [detailsOpen, setDetailsOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 560px)').matches)
   const visited = spot.visits > 0
   const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
@@ -350,7 +362,7 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
       <div className="spot-sheet__title-row">
         <div>
           <h2>{spot.name}</h2>
-          <p>{spot.address}</p>
+          <button type="button" className="spot-sheet__address" onClick={onCenter} title="Marker auf der Karte anzeigen">{spot.address}</button>
         </div>
       </div>
       <button type="button" className="spot-details-toggle" onClick={() => setDetailsOpen((value) => !value)} aria-expanded={detailsOpen} aria-controls={`spot-details-${spot.id}`}>
@@ -401,6 +413,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
   const [locationFocusRequest, setLocationFocusRequest] = useState(0)
+  const [spotCenterRequest, setSpotCenterRequest] = useState(0)
   const [activityBounds, setActivityBounds] = useState(null)
   const [activities, setActivities] = useState([])
   const [mapPlans, setMapPlans] = useState([])
@@ -543,8 +556,8 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
         <span className="result-count">{visibleSpots.length} Orte{showPlanned ? ` · ${mapPlans.length} Planungen` : ''}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={showVisitMarkers ? activities.filter((activity) => !showPlanned || !plannedSpotIds.has(String(activity.spot_id))) : []} plans={showPlanned ? mapPlans : []} showVisitMarkers={showVisitMarkers} onActivityBoundsChange={setActivityBounds} />
-      {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onClose={() => onSelectSpot(null)} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} spotCenterRequest={spotCenterRequest} activities={showVisitMarkers ? activities.filter((activity) => !showPlanned || !plannedSpotIds.has(String(activity.spot_id))) : []} plans={showPlanned ? mapPlans : []} showVisitMarkers={showVisitMarkers} onActivityBoundsChange={setActivityBounds} />
+      {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onClose={() => onSelectSpot(null)} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onCenter={() => setSpotCenterRequest((value) => value + 1)} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
       {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} onOpenPlanFeed={onOpenPlanFeed} onOpenMessage={onOpenMessage} onOpenUserFeed={onOpenUserFeed} />}
     </main>
   )
