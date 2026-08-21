@@ -39,7 +39,7 @@ import {
 import 'leaflet/dist/leaflet.css'
 import './styles.css'
 import { initialSpots, mannheimCenter } from './data/spots'
-import { AuditView, RegisteredUsersDialog } from './features/admin/AuthAudit.jsx'
+import { AuditView, RegisteredUsersDialog } from './features/admin/AuthAudit.tsx'
 import {
   AdminSpotsView,
   BadgesView,

@@ -1,4 +1,6 @@
-function normalizedText(value) {
+import type { SpotSearchRecord } from './domain.ts'
+
+function normalizedText(value: unknown): string {
   return String(value ?? '')
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
@@ -7,17 +9,17 @@ function normalizedText(value) {
     .trim()
 }
 
-export function matchesSpotSearch(spot, query) {
+export function matchesSpotSearch(spot: SpotSearchRecord, query: unknown): boolean {
   const terms = normalizedText(query).split(' ').filter(Boolean)
   if (!terms.length) return true
   const searchable = normalizedText([spot.name, spot.district, spot.address].join(' '))
   return terms.every((term) => searchable.includes(term))
 }
 
-export function spotSearchRank(spot, query) {
+export function spotSearchRank(spot: SpotSearchRecord, query: unknown): number {
   const terms = normalizedText(query).split(' ').filter(Boolean)
   if (!terms.length) return 0
-  const matchesAll = (value) => {
+  const matchesAll = (value: unknown): boolean => {
     const searchable = normalizedText(value)
     return terms.every((term) => searchable.includes(term))
   }
@@ -26,10 +28,10 @@ export function spotSearchRank(spot, query) {
   return 2
 }
 
-export function spotSearchLocation(spot) {
+export function spotSearchLocation(spot: SpotSearchRecord): string {
   return String(spot.district ?? '').replace(/^\s*\d{5}\s+/, '').trim()
 }
 
-export function spotSearchMeta(spot) {
+export function spotSearchMeta(spot: SpotSearchRecord): string {
   return [spotSearchLocation(spot), spot.distance].filter(Boolean).join(' · ')
 }

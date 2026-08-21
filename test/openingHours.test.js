@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatOpeningHours, formatOpeningHoursLines } from '../src/shared/openingHours.js'
+import { formatOpeningHours, formatOpeningHoursLines } from '../src/shared/openingHours.ts'
 
 test('groups consecutive weekdays with identical opening hours', () => {
   assert.equal(
