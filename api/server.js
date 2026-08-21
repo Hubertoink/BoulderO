@@ -751,7 +751,41 @@ function candidateFromSpot(spot, input, matchType) {
     match_type: matchType,
     same_name: normalizedImportKey(spot.name) === normalizedImportKey(input.name),
     distance_m: Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))),
+    changes: importChanges(input, spot),
   }
+}
+
+function sameImportValue(first, second) {
+  return String(first ?? '').trim() === String(second ?? '').trim()
+}
+
+function importChanges(input, spot) {
+  const changes = []
+  const fields = [
+    ['Name', 'name'],
+    ['Ort', 'district'],
+    ['Adresse', 'address'],
+    ['Website', 'website'],
+    ['Öffnungszeiten', 'openingHours', 'opening_hours'],
+    ['Area', 'areaSqm', 'area_sqm'],
+  ]
+  for (const [label, inputKey, spotKey = inputKey] of fields) {
+    // Leere optionale Importfelder lassen vorhandene Daten bewusst unverändert.
+    if (['website', 'openingHours', 'areaSqm'].includes(inputKey) && input[inputKey] === undefined) continue
+    if (!sameImportValue(input[inputKey], spot[spotKey])) {
+      changes.push({ field: label, before: spot[spotKey] ?? null, after: input[inputKey] ?? null })
+    }
+  }
+  const latitudeChanged = Math.abs(Number(input.latitude) - Number(spot.latitude)) > 0.0000001
+  const longitudeChanged = Math.abs(Number(input.longitude) - Number(spot.longitude)) > 0.0000001
+  if (latitudeChanged || longitudeChanged) {
+    changes.push({
+      field: 'Position',
+      before: `${Number(spot.latitude).toFixed(6)}, ${Number(spot.longitude).toFixed(6)}`,
+      after: `${Number(input.latitude).toFixed(6)}, ${Number(input.longitude).toFixed(6)}`,
+    })
+  }
+  return changes
 }
 
 async function findImportCandidates(rows) {
@@ -762,7 +796,7 @@ async function findImportCandidates(rows) {
   const withId = validRows.filter((row) => row.id)
   if (withId.length) {
     const result = await pool.query(`
-      SELECT id, name, district, address, status,
+      SELECT id, name, district, address, website, opening_hours, area_sqm, status,
              ST_Y(coordinates::geometry) AS latitude, ST_X(coordinates::geometry) AS longitude
         FROM spots
        WHERE id = ANY($1::uuid[])
@@ -785,7 +819,7 @@ async function findImportCandidates(rows) {
     }).join(', ')
     const result = await pool.query(`
       WITH incoming(row_number, source, source_external_id) AS (VALUES ${values})
-      SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.status,
+      SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.website, spots.opening_hours, spots.area_sqm, spots.status,
              ST_Y(spots.coordinates::geometry) AS latitude, ST_X(spots.coordinates::geometry) AS longitude
         FROM incoming
         JOIN spots ON spots.source = incoming.source AND spots.source_external_id = incoming.source_external_id
@@ -806,7 +840,7 @@ async function findImportCandidates(rows) {
   }).join(', ')
   const result = await pool.query(`
     WITH incoming(row_number, name, latitude, longitude) AS (VALUES ${values})
-    SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.status,
+    SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.website, spots.opening_hours, spots.area_sqm, spots.status,
            ROUND(ST_Distance(spots.coordinates, ST_SetSRID(ST_MakePoint(incoming.longitude, incoming.latitude), 4326)::geography))::int AS distance_m,
            LOWER(TRIM(spots.name)) = LOWER(TRIM(incoming.name)) AS same_name
       FROM incoming
@@ -816,7 +850,8 @@ async function findImportCandidates(rows) {
   `, params)
   for (const row of result.rows) {
     const items = candidates.get(row.row_number) ?? []
-    items.push({ ...row, match_type: row.same_name ? 'name' : 'nearby' })
+    const input = fuzzyRows.find((item) => item.rowNumber === row.row_number)?.input
+    items.push({ ...row, match_type: row.same_name ? 'name' : 'nearby', changes: input ? importChanges(input, row) : [] })
     candidates.set(row.row_number, items)
   }
   return candidates

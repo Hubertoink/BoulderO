@@ -661,3 +661,10 @@ body.modal-open {
 .avatar-crop-stage {
   -webkit-user-select: none;
 }
+
+.import-review__table { min-width: 1120px !important; }
+.import-review__changes { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; color: var(--ink-soft); font-size: 11px; line-height: 1.35; }
+.import-review__changes b { color: var(--deep-space-blue); }
+.import-review__changes s { color: #8b6660; text-decoration-thickness: 1px; }
+.import-review__changes span { padding: 0 2px; color: var(--ink-soft); }
+.import-review__unchanged { color: var(--ink-soft); font-size: 11px; }
