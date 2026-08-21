@@ -99,8 +99,11 @@ function planMapIcon(plan, offset) {
 
 function FocusMap({ spot, request }) {
   const map = useMap()
+  const handledRequest = useRef(request)
   useEffect(() => {
-    if (spot && request > 0) map.flyTo(spot.position, 14, { duration: 0.45 })
+    if (!spot || request <= handledRequest.current) return
+    handledRequest.current = request
+    map.flyTo(spot.position, 14, { duration: 0.45 })
   }, [spot, request, map])
   return null
 }
