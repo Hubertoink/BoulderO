@@ -668,3 +668,4 @@ body.modal-open {
 .import-review__changes s { color: #8b6660; text-decoration-thickness: 1px; }
 .import-review__changes span { padding: 0 2px; color: var(--ink-soft); }
 .import-review__unchanged { color: var(--ink-soft); font-size: 11px; }
+.map-plan-attendee-count .spot-visitors__popover { right: 0; left: auto; }
