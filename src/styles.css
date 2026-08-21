@@ -674,5 +674,7 @@ body.modal-open {
   .spot-details-toggle { width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding: 0 11px; border: 1px solid var(--line); background: rgba(251,252,249,.88); color: var(--deep-space-blue); font-size: 12px; font-weight: 750; text-align: left; }
   .spot-details-toggle svg { transition: transform .18s ease; }
   .spot-details-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
-  .spot-details { min-width: 0; }
+  .spot-details { min-width: 0; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows .26s ease, opacity .18s ease, visibility 0s linear .26s; }
+  .spot-details.is-open { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
+  .spot-details__content { min-height: 0; overflow: hidden; }
 }

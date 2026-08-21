@@ -356,14 +356,16 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
       <button type="button" className="spot-details-toggle" onClick={() => setDetailsOpen((value) => !value)} aria-expanded={detailsOpen} aria-controls={`spot-details-${spot.id}`}>
         Infos <IconChevronDown size={18} />
       </button>
-      <div className="spot-details" id={`spot-details-${spot.id}`} hidden={!detailsOpen}>
-        <div className="spot-meta">
-          <span className="spot-meta__opening"><b>Öffnungszeiten</b>{formatOpeningHoursLines(spot.opening_hours ?? spot.open).map((line) => <small key={line}>{line}</small>)}</span>
-          <span><b>Area</b>{formatSpotArea(spot.area_sqm ?? spot.size)}</span>
-          <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
-          <span><b>Deine Besuche</b>{spot.visits}</span>
+      <div className={`spot-details${detailsOpen ? ' is-open' : ''}`} id={`spot-details-${spot.id}`} aria-hidden={!detailsOpen}>
+        <div className="spot-details__content">
+          <div className="spot-meta">
+            <span className="spot-meta__opening"><b>Öffnungszeiten</b>{formatOpeningHoursLines(spot.opening_hours ?? spot.open).map((line) => <small key={line}>{line}</small>)}</span>
+            <span><b>Area</b>{formatSpotArea(spot.area_sqm ?? spot.size)}</span>
+            <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
+            <span><b>Deine Besuche</b>{spot.visits}</span>
+          </div>
+          <SpotVisitors spotId={spot.id} onOpenUserFeed={onOpenUserFeed} />
         </div>
-        <SpotVisitors spotId={spot.id} onOpenUserFeed={onOpenUserFeed} />
       </div>
       <button className={`visit-button ${visited ? 'is-visited' : ''}`} onClick={() => onVisit(spot.id)}>
         <IconCheck size={19} />
