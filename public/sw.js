@@ -32,10 +32,15 @@ self.addEventListener('notificationclick', (event) => {
   const targetUrl = new URL(event.notification.data?.targetUrl || '/notifications', self.location.origin).href
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    const client = windows[0]
+    const client = windows.find((windowClient) => new URL(windowClient.url).origin === self.location.origin)
     if (client) {
-      await client.navigate(targetUrl)
-      return client.focus()
+      try {
+        const navigatedClient = await client.navigate(targetUrl)
+        if (navigatedClient) return navigatedClient.focus()
+        await client.focus()
+      } catch {
+        // Some mobile browsers cannot navigate an existing background tab from a push event.
+      }
     }
     return self.clients.openWindow(targetUrl)
   })())
