@@ -1437,6 +1437,14 @@ app.get('/community/groups', requireUser, asyncRoute(async (req, res) => {
              WHERE message.group_id = g.id AND message.deleted_at IS NULL AND message.user_id <> $1
                AND message.created_at > COALESCE(reads.last_read_at, TIMESTAMPTZ 'epoch')) AS unread_messages,
            (SELECT COUNT(*)::int
+              FROM notifications notification
+             WHERE notification.user_id = $1
+               AND notification.category = 'groups'
+               AND notification.in_app_visible
+               AND notification.read_at IS NULL
+               AND notification.type <> 'group_join_request'
+               AND notification.payload->>'groupId' = g.id::text) AS unread_notifications,
+           (SELECT COUNT(*)::int
               FROM community_group_members pending
              WHERE pending.group_id = g.id AND pending.status = 'requested') AS pending_requests
       FROM community_group_members m
@@ -1783,6 +1791,23 @@ app.patch('/community/groups/:groupId/notifications', requireUser, asyncRoute(as
   const result = await pool.query("UPDATE community_group_members SET notification_level = $3, updated_at = NOW() WHERE group_id = $1 AND user_id = $2 AND status = 'active' RETURNING notification_level", [groupId, req.user.id, level])
   if (!result.rowCount) return res.status(404).json({ error: 'group_membership_not_found' })
   res.json({ notificationLevel: result.rows[0].notification_level })
+}))
+
+app.post('/community/groups/:groupId/notifications/read', requireUser, asyncRoute(async (req, res) => {
+  const groupId = z.string().uuid().parse(req.params.groupId)
+  const membership = await groupMembership(pool, groupId, req.user.id)
+  if (!membership || membership.status !== 'active') return res.status(403).json({ error: 'group_membership_required' })
+  await pool.query(
+    `UPDATE notifications
+        SET read_at = NOW()
+      WHERE user_id = $1
+        AND category = 'groups'
+        AND in_app_visible
+        AND read_at IS NULL
+        AND payload->>'groupId' = $2`,
+    [req.user.id, groupId],
+  )
+  res.status(204).end()
 }))
 
 app.get('/community/groups/:groupId/messages', requireUser, asyncRoute(async (req, res) => {
