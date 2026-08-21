@@ -612,8 +612,9 @@ function numberFromCsv(value, field, rowNumber, { optional = false, integer = fa
 function importCellText(value) {
   if (value === null || value === undefined) return ''
   if (typeof value === 'object') {
+    if (value.hyperlink !== undefined) return String(value.hyperlink)
     if (Array.isArray(value.richText)) return value.richText.map((part) => part.text ?? '').join('')
-    if (value.text !== undefined) return String(value.text)
+    if (value.text !== undefined) return importCellText(value.text)
     if (value.result !== undefined) return importCellText(value.result)
   }
   return String(value)
@@ -644,6 +645,19 @@ function optionalImportNumber(value, field, rowNumber) {
   const normalized = importCellText(value).trim()
   if (!normalized || normalized === '0') return undefined
   return numberFromCsv(normalized, field, rowNumber, { integer: true })
+}
+
+function coordinateFromImport(value, field, rowNumber, maximum) {
+  const text = importCellText(value).trim()
+  let coordinate = numberFromCsv(text, field, rowNumber)
+  // German Excel can interpret dots in copied coordinates as thousands
+  // separators (48.8161875 becomes 488161875). Reinsert the decimal point
+  // only when an integer is clearly outside the valid coordinate range.
+  if (Math.abs(coordinate) > maximum && /^-?\d+$/.test(text)) {
+    while (Math.abs(coordinate) > maximum) coordinate /= 10
+  }
+  if (coordinate < -maximum || coordinate > maximum) throw new Error(`Zeile ${rowNumber}: ${field} ist ungültig.`)
+  return coordinate
 }
 
 function importText(value) {
@@ -709,8 +723,8 @@ async function parseAdminSpotImport(file) {
           website: importText(record.website) || undefined,
           openingHours: importText(record.opening_hours) || undefined,
           areaSqm: optionalImportNumber(record.area_sqm, 'area_sqm', record.rowNumber),
-          latitude: numberFromCsv(record.latitude, 'latitude', record.rowNumber),
-          longitude: numberFromCsv(record.longitude, 'longitude', record.rowNumber),
+          latitude: coordinateFromImport(record.latitude, 'latitude', record.rowNumber, 90),
+          longitude: coordinateFromImport(record.longitude, 'longitude', record.rowNumber, 180),
         }),
         id: id ? z.string().uuid().parse(id) : null,
         source: source || null,
