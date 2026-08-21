@@ -66,18 +66,19 @@ function activityIcon(activity, index, offset, isPreview) {
   return icon
 }
 
-function planMapIcon(plan, offset) {
+function planMapIcon(plan, offset, showAttendees) {
   const cacheKey = [
     plan.id,
     plan.starts_at,
     offset.x,
     offset.y,
+    showAttendees,
     ...(plan.attendees ?? []).map((person) => [person.user_id, person.user_name, person.user_image, person.response].join(':')),
   ].join('|')
   const cached = planIconCache.get(cacheKey)
   if (cached) return cached
   const day = new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(new Date(plan.starts_at))
-  const attendees = (plan.attendees ?? []).slice(0, 6)
+  const attendees = showAttendees ? (plan.attendees ?? []).slice(0, 6) : []
   const attendeeIcons = attendees.map((person, index) => {
     const angle = ((Math.PI * 2 * index) / attendees.length) - Math.PI / 2
     const initials = person.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
@@ -85,7 +86,7 @@ function planMapIcon(plan, offset) {
     const responseClass = person.response === 'going' ? 'is-going' : 'is-interested'
     return `<span class="map-plan-attendee ${responseClass}" style="--plan-attendee-x:${(Math.cos(angle) * 26).toFixed(1)}px;--plan-attendee-y:${(Math.sin(angle) * 26).toFixed(1)}px;--plan-attendee-delay:${(index * -.42).toFixed(2)}s"><span class="map-plan-attendee__float">${escapeMarkerText(initials)}${avatar}</span></span>`
   }).join('')
-  const overflow = (plan.attendees?.length ?? 0) > attendees.length ? `<span class="map-plan-attendee map-plan-attendee--more">+${plan.attendees.length - attendees.length}</span>` : ''
+  const overflow = showAttendees && (plan.attendees?.length ?? 0) > attendees.length ? `<span class="map-plan-attendee map-plan-attendee--more">+${plan.attendees.length - attendees.length}</span>` : ''
   return L.divIcon({
     className: 'map-plan-wrapper',
     html: `<span class="map-plan-stage"><span class="map-plan-offset" style="--plan-offset-x:${offset.x}px;--plan-offset-y:${offset.y}px"><span class="map-plan-marker"><small>${day}</small>${attendeeIcons}${overflow}</span></span></span>`,
@@ -224,7 +225,7 @@ function MapActivityLayer({ activities }) {
   return markers.map(({ activity, index, position, offset }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, offset, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} interactive={false} />)
 }
 
-function MapPlanLayer({ plans, onSelect }) {
+function MapPlanLayer({ plans, onSelect, showAttendees }) {
   const map = useMap()
   const [zoom, setZoom] = useState(() => map.getZoom())
   useEffect(() => {
@@ -248,8 +249,8 @@ function MapPlanLayer({ plans, onSelect }) {
       return { plan, position: [Number(plan.latitude), Number(plan.longitude)], offset: { x: Number((Math.cos(angle) * radius).toFixed(1)), y: Number((Math.sin(angle) * radius).toFixed(1)) } }
     })
   }, [plans])
-  if (zoom < 10) return null
-  return markers.map(({ plan, position, offset }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan, offset)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
+  const showPlanAttendees = showAttendees && zoom >= 10
+  return markers.map(({ plan, position, offset }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan, offset, showPlanAttendees)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
 }
 
 function MobileMapDismiss({ onDismiss }) {
@@ -291,7 +292,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
             } }}
           />
         ))}
-        <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
+        <MapPlanLayer plans={plans} onSelect={onSelectPlan} showAttendees={showVisitMarkers} />
       </MapContainer>
       <div className="map-key" aria-label="Kartenlegende">
         <span><i className="key-dot key-dot--visited">✓</i>Besucht</span>
