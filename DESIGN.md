@@ -38,6 +38,18 @@ Alle Produkt-Icons stammen aus [Tabler Icons](https://tablericons.com/) über `@
 - Keine Pillen als Standardcontainer; Pillen ausschließlich für kleine Filter oder Status
 - Dünne Linien: `rgba(21, 50, 67, 0.12)`
 
+## Desktop-Layout
+
+- Inhaltsansichten mit begrenzter Breite werden auf Desktop immer horizontal zentriert: `margin-inline: auto` gehört zur Breitenbegrenzung.
+- Eine linksbündige Fläche ist nur zulässig, wenn sie bewusst Teil einer Karten-, Tabellen- oder Seitenleistenansicht ist. Neue Detail-, Formular- und Community-Ansichten werden nicht davon ausgenommen.
+
+## Buttons
+
+- Primäre, kompakte Aktionen verwenden `.journal-add`: dunkel gefüllt, mit heller Beschriftung. Volle Formular-Abschlussaktionen verwenden ausschließlich `.visit-button`.
+- Sekundäre Textaktionen verwenden `.message-button`: ein kleiner, rechteckiger Outline-Button in Yale Blue, wie „Profil“ und „Nachricht“ in der Freundesliste. Höhe, Rahmen, Typografie und Innenabstand werden nicht lokal überschrieben.
+- Reine Icon-Aktionen verwenden `.ui-icon-button`: ein quadratischer Outline-Button mit zugänglichem `aria-label` und einem `title`.
+- Neue Oberflächen ordnen jede Aktion einer dieser Varianten zu; eigenständige Button-Varianten, abweichende Rahmen oder individuell gesetzte Buttonmaße werden nicht eingeführt.
+
 ## Wiederverwendbare Bausteine
 
 Gestaltungswerte liegen als CSS-Variablen vor (`--space-*`, `--radius-*`, Farb-Tokens). Neue Oberflächen verwenden diese Tokens statt direkter Pixel- und Farbwerte. Wiederkehrende Elemente werden über gemeinsame Klassen gebaut:

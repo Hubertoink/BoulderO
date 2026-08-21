@@ -539,6 +539,13 @@ function App() {
     }
   }
 
+  function openSpotOnMap(id) {
+    setSelectedId(id)
+    setFilter('all')
+    setQuery('')
+    navigate('map')
+  }
+
   function chooseSpotOnMap() {
     setComposerOpen(false)
     setIsPickingSpot(true)
@@ -770,7 +777,7 @@ function App() {
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} onOpenUsers={openRegisteredUsers} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} />}
       {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onSummaryChange={setFriendSummary} />}
+      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onOpenSpot={openSpotOnMap} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
         {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests + (friendSummary.unread_groups ?? 0); const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); const active = id === 'friends' ? ['friends', 'groups', 'connections'].includes(activeView) : activeView === id; return <button key={id} className={active ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>

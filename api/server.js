@@ -1435,7 +1435,10 @@ app.get('/community/groups', requireUser, asyncRoute(async (req, res) => {
               FROM community_group_messages message
               LEFT JOIN community_group_message_reads reads ON reads.group_id = message.group_id AND reads.user_id = $1
              WHERE message.group_id = g.id AND message.deleted_at IS NULL AND message.user_id <> $1
-               AND message.created_at > COALESCE(reads.last_read_at, TIMESTAMPTZ 'epoch')) AS unread_messages
+               AND message.created_at > COALESCE(reads.last_read_at, TIMESTAMPTZ 'epoch')) AS unread_messages,
+           (SELECT COUNT(*)::int
+              FROM community_group_members pending
+             WHERE pending.group_id = g.id AND pending.status = 'requested') AS pending_requests
       FROM community_group_members m
       JOIN community_groups g ON g.id = m.group_id
      WHERE m.user_id = $1 AND m.status = 'active' AND NOT g.is_archived
@@ -1513,12 +1516,14 @@ app.get('/community/groups/:groupId', requireUser, asyncRoute(async (req, res) =
   const groupId = z.string().uuid().parse(req.params.groupId)
   const result = await pool.query(`
     SELECT g.id, g.owner_id, g.name, g.description, g.city, g.access_mode, g.is_archived, g.created_at, g.updated_at,
+           owner_user.name AS owner_name, owner_user.username AS owner_username, owner_user.image AS owner_image,
            CASE WHEN g.image IS NULL THEN NULL ELSE '/api/group-images/' || g.id END AS image_url,
            membership.role AS my_role, membership.status AS membership_status, membership.notification_level,
            (SELECT COUNT(*)::int FROM community_group_members members WHERE members.group_id = g.id AND members.status = 'active') AS member_count,
            COALESCE((SELECT json_agg(json_build_object('id', s.id, 'name', s.name, 'district', s.district) ORDER BY mapping.position, s.name)
               FROM community_group_spots mapping JOIN spots s ON s.id = mapping.spot_id WHERE mapping.group_id = g.id), '[]'::json) AS spots
       FROM community_groups g
+      JOIN users owner_user ON owner_user.id = g.owner_id
       LEFT JOIN community_group_members membership ON membership.group_id = g.id AND membership.user_id = $2
      WHERE g.id = $1 AND NOT g.is_archived`, [groupId, req.user.id])
   const group = result.rows[0]
@@ -1646,8 +1651,22 @@ app.get('/community/groups/:groupId/members', requireUser, asyncRoute(async (req
   const groupId = z.string().uuid().parse(req.params.groupId)
   const membership = await groupMembership(pool, groupId, req.user.id)
   if (!membership || membership.status !== 'active') return res.status(403).json({ error: 'group_membership_required' })
+  if (isGroupManager(membership)) {
+    await pool.query(
+      `UPDATE notifications
+          SET read_at = NOW()
+        WHERE user_id = $1
+          AND category = 'groups'
+          AND type = 'group_join_request'
+          AND in_app_visible
+          AND read_at IS NULL
+          AND payload->>'groupId' = $2`,
+      [req.user.id, groupId],
+    )
+  }
   const members = await pool.query(`
-    SELECT m.user_id, m.role, m.status, m.request_note, m.joined_at, m.created_at, u.name, u.username, u.image
+    SELECT m.user_id, m.role, m.status, m.request_note, m.joined_at, m.created_at, u.name, u.username, u.image,
+           (SELECT COUNT(DISTINCT v.spot_id)::int FROM visits v WHERE v.user_id = m.user_id) AS unique_spots
       FROM community_group_members m JOIN users u ON u.id = m.user_id
      WHERE m.group_id = $1 AND (m.status = 'active' OR ($2::boolean AND m.status IN ('requested', 'invited')))
      ORDER BY CASE m.status WHEN 'requested' THEN 0 WHEN 'invited' THEN 1 ELSE 2 END, CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.name`, [groupId, isGroupManager(membership)])
@@ -1695,6 +1714,17 @@ app.post('/community/groups/:groupId/members/:userId/approve', requireUser, asyn
     const group = await client.query('SELECT name FROM community_groups WHERE id = $1 AND NOT is_archived', [groupId])
     const target = await client.query("UPDATE community_group_members SET status = 'active', joined_at = NOW(), updated_at = NOW() WHERE group_id = $1 AND user_id = $2 AND status IN ('requested', 'invited') RETURNING user_id", [groupId, userId])
     if (!target.rowCount || !group.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'group_request_not_found' }) }
+    await client.query(
+      `UPDATE notifications
+          SET read_at = NOW()
+        WHERE user_id = $1
+          AND category = 'groups'
+          AND type = 'group_join_request'
+          AND in_app_visible
+          AND read_at IS NULL
+          AND payload->>'groupId' = $2`,
+      [req.user.id, groupId],
+    )
     await notifyGroupMembers(client, { groupId, actorId: req.user.id, type: 'group_joined', title: 'Beitritt bestätigt', body: `Dein Beitritt zu ${group.rows[0].name} wurde bestätigt.`, targetTab: 'overview', recipientIds: [userId] })
     await client.query('COMMIT')
     void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
@@ -1712,6 +1742,17 @@ app.post('/community/groups/:groupId/members/:userId/decline', requireUser, asyn
   if (!isGroupManager(manager)) return res.status(403).json({ error: 'group_manager_required' })
   const result = await pool.query("UPDATE community_group_members SET status = 'left', updated_at = NOW() WHERE group_id = $1 AND user_id = $2 AND status IN ('requested', 'invited') RETURNING user_id", [groupId, userId])
   if (!result.rowCount) return res.status(404).json({ error: 'group_request_not_found' })
+  await pool.query(
+    `UPDATE notifications
+        SET read_at = NOW()
+      WHERE user_id = $1
+        AND category = 'groups'
+        AND type = 'group_join_request'
+        AND in_app_visible
+        AND read_at IS NULL
+        AND payload->>'groupId' = $2`,
+    [req.user.id, groupId],
+  )
   res.status(204).end()
 }))
 

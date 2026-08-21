@@ -1336,6 +1336,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] })
   const [query, setQuery] = useState(initialDiscoverUsername ? `@${initialDiscoverUsername}` : '')
   const [results, setResults] = useState([])
+  const [summary, setSummary] = useState({ unread_groups: 0 })
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(null)
   const [friendMenuId, setFriendMenuId] = useState(null)
@@ -1347,7 +1348,9 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
       setFriends((await friendsResponse.json()).friends)
       setFriendSuggestions((await suggestionsResponse.json()).suggestions)
       setRequests(await requestsResponse.json())
-      onSummaryChange(await summaryResponse.json())
+      const summaryPayload = await summaryResponse.json()
+      setSummary(summaryPayload)
+      onSummaryChange(summaryPayload)
     } catch (loadError) { setError(loadError.message) }
   }
   useEffect(() => {
@@ -1385,7 +1388,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
     <main className="view content-view compact-view social-view">
       <section className="social-section friends-section">
         <div className="section-heading">
-          <div><h2>Community</h2><div className="friends-tabs community-switch"><button className="is-active">Freunde</button><button type="button" onClick={onOpenGroups}>Gruppen</button></div></div>
+          <div><h2>Community</h2><div className="friends-tabs community-switch"><button className="is-active">Freunde</button><button type="button" onClick={onOpenGroups}>Gruppen{summary.unread_groups > 0 && <b>{summary.unread_groups > 9 ? '9+' : summary.unread_groups}</b>}</button></div></div>
           <div className="friends-tabs friends-tabs--sub">
             <button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>Freunde</button>
             <button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => setTab('requests')}>Anfragen{requests.incoming.length > 0 && <b>{requests.incoming.length}</b>}</button>
