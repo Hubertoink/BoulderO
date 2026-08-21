@@ -1206,28 +1206,34 @@ app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
     north: z.coerce.number().gte(-90).lte(90),
   }).refine((value) => value.west < value.east && value.south < value.north, { message: 'Ungültiger Kartenausschnitt.' }).parse(req.query)
   const result = await pool.query(`
-    SELECT j.id, j.body, j.created_at, v.visited_at, v.spot_id,
-           u.id AS user_id, u.name AS user_name, u.image AS user_image,
-           s.name AS spot_name, ST_Y(s.coordinates::geometry) AS latitude, ST_X(s.coordinates::geometry) AS longitude,
-           COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type))
-             FILTER (WHERE m.id IS NOT NULL), '[]') AS media
-      FROM journal_entries j
-      JOIN visits v ON v.id = j.visit_id
-      JOIN spots s ON s.id = v.spot_id
-      JOIN users u ON u.id = j.user_id
-      LEFT JOIN media m ON m.journal_entry_id = j.id
-     WHERE s.status = 'active'
-       AND s.coordinates && ST_MakeEnvelope($2, $3, $4, $5, 4326)::geography
-       AND v.visited_at >= CURRENT_DATE - INTERVAL '6 days'
-       AND (
-         j.user_id = $1
-         OR j.visibility = 'public'
-         OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
-         OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
-       )
-       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = j.user_id) OR (b.blocker_id = j.user_id AND b.blocked_id = $1))
-     GROUP BY j.id, v.id, s.id, u.id
-     ORDER BY v.visited_at DESC, j.created_at DESC, j.id DESC
+    WITH visible_activities AS (
+      SELECT j.id, j.body, j.created_at, v.visited_at, v.spot_id,
+             u.id AS user_id, u.name AS user_name, u.image AS user_image,
+             s.name AS spot_name, ST_Y(s.coordinates::geometry) AS latitude, ST_X(s.coordinates::geometry) AS longitude
+        FROM journal_entries j
+        JOIN visits v ON v.id = j.visit_id
+        JOIN spots s ON s.id = v.spot_id
+        JOIN users u ON u.id = j.user_id
+       WHERE s.status = 'active'
+         AND s.coordinates && ST_MakeEnvelope($2, $3, $4, $5, 4326)::geography
+         AND v.visited_at >= CURRENT_DATE - INTERVAL '6 days'
+         AND (
+           j.user_id = $1
+           OR j.visibility = 'public'
+           OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
+           OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
+         )
+         AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = j.user_id) OR (b.blocker_id = j.user_id AND b.blocked_id = $1))
+    ), latest_activities AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id, spot_id ORDER BY visited_at DESC, created_at DESC, id DESC) AS visit_rank
+        FROM visible_activities
+    )
+    SELECT activity.id, activity.body, activity.created_at, activity.visited_at, activity.spot_id,
+           activity.user_id, activity.user_name, activity.user_image, activity.spot_name, activity.latitude, activity.longitude,
+           COALESCE((SELECT json_agg(json_build_object('id', m.id, 'contentType', m.content_type)) FROM media m WHERE m.journal_entry_id = activity.id), '[]') AS media
+      FROM latest_activities activity
+     WHERE activity.visit_rank = 1
+     ORDER BY activity.visited_at DESC, activity.created_at DESC, activity.id DESC
      LIMIT 24
   `, [req.user.id, bounds.west, bounds.south, bounds.east, bounds.north])
   res.json({ activities: result.rows })
