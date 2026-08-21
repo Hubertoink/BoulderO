@@ -38,6 +38,24 @@ Alle Produkt-Icons stammen aus [Tabler Icons](https://tablericons.com/) über `@
 - Keine Pillen als Standardcontainer; Pillen ausschließlich für kleine Filter oder Status
 - Dünne Linien: `rgba(21, 50, 67, 0.12)`
 
+## Desktop-Layout
+
+- Inhaltsansichten mit begrenzter Breite werden auf Desktop immer horizontal zentriert: `margin-inline: auto` gehört zur Breitenbegrenzung.
+- Eine linksbündige Fläche ist nur zulässig, wenn sie bewusst Teil einer Karten-, Tabellen- oder Seitenleistenansicht ist. Neue Detail-, Formular- und Community-Ansichten werden nicht davon ausgenommen.
+
+## Buttons
+
+- Primäre, kompakte Aktionen verwenden `.journal-add`: dunkel gefüllt, mit heller Beschriftung. Volle Formular-Abschlussaktionen verwenden ausschließlich `.visit-button`.
+- Sekundäre Textaktionen verwenden `.message-button`: ein kleiner, rechteckiger Outline-Button in Yale Blue, wie „Profil“ und „Nachricht“ in der Freundesliste. Höhe, Rahmen, Typografie und Innenabstand werden nicht lokal überschrieben.
+- Reine Icon-Aktionen verwenden `.ui-icon-button`: ein quadratischer Outline-Button mit zugänglichem `aria-label` und einem `title`.
+- Neue Oberflächen ordnen jede Aktion einer dieser Varianten zu; eigenständige Button-Varianten, abweichende Rahmen oder individuell gesetzte Buttonmaße werden nicht eingeführt.
+
+## Bewegung und aufklappbare Inhalte
+
+- Auf- und zuklappbare Bereiche verwenden die gemeinsame Klasse `.ui-collapse`: eine kurze, zurückhaltende Höhen- und Transparenzanimation (etwa 260 ms) statt eines abrupten Ein- oder Ausblendens.
+- Das Auslösen erfolgt über einen Button mit `aria-expanded`; ein Chevron dreht sich synchron zur Änderung.
+- Die Animation wird bei `prefers-reduced-motion: reduce` deaktiviert. Die Hallen-Informationen auf der Karte und Terminserien folgen diesem Muster.
+
 ## Wiederverwendbare Bausteine
 
 Gestaltungswerte liegen als CSS-Variablen vor (`--space-*`, `--radius-*`, Farb-Tokens). Neue Oberflächen verwenden diese Tokens statt direkter Pixel- und Farbwerte. Wiederkehrende Elemente werden über gemeinsame Klassen gebaut:

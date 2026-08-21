@@ -25,6 +25,11 @@ services:
       DEMO_MODE: ${DEMO_MODE:-true}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
+      APP_ORIGIN: ${APP_ORIGIN:-https://bouldero.de}
+      PUSH_NOTIFICATIONS_ENABLED: ${PUSH_NOTIFICATIONS_ENABLED:-false}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       UPLOAD_DIR: /app/uploads
     volumes:
       - bouldero_uploads:/app/uploads

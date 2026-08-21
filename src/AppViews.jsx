@@ -4,7 +4,7 @@ import L from 'leaflet'
 import {
   IconAdjustmentsHorizontal, IconArrowsMaximize, IconBookmark, IconCalendarEvent, IconCheck,
   IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload,
-  IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2,
+  IconBell, IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2,
   IconLogout, IconPhoto, IconPlus, IconSearch, IconSparkles, IconTrophy, IconTrash, IconUserCircle,
   IconUserCheck, IconUserPlus, IconUsers, IconWorld, IconX,
 } from '@tabler/icons-react'
@@ -13,6 +13,7 @@ import { mannheimCenter } from './data/spots'
 import { MapView, markerIcon } from './features/map/MapView.jsx'
 import { JournalComposer, optimizePhoto, PlannedVisitDialog, VisibilityPicker } from './features/journal/JournalComposer.jsx'
 import { formatFeedDate, formatJournalDate, formatPlanDate, useOutsideDismiss } from './shared/viewHelpers.ts'
+import { disablePushNotifications, enablePushNotifications, supportsPushNotifications, updatePushDeviceSettings } from './shared/pushNotifications.js'
 
 let activePlanningAuthorFilter = null
 
@@ -290,7 +291,7 @@ function AccountDeletionDialog({ username, onClose, onDelete }) {
   return <div className="composer-backdrop"><section className="journal-composer account-deletion-dialog" role="dialog" aria-modal="true" aria-label="Konto löschen"><div className="composer-header"><div><span className="eyebrow">Konto</span><h2>Konto endgültig löschen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Dein Profil, Besuche, Fotos, Planungen und persönlichen Daten werden dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.</p><form className="admin-login" onSubmit={submit}><label className="form-field"><span>Zur Bestätigung <b>LOESCHEN</b> eingeben</span><input required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoCapitalize="characters" /></label>{error && <p className="form-error">{error}</p>}<div className="account-deletion-dialog__actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="submit" className="danger" disabled={confirmation !== 'LOESCHEN' || saving}>{saving ? 'Wird gelöscht …' : `@${username} löschen`}</button></div></form></section></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenNotifications, notificationCount, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [avatarFile, setAvatarFile] = useState(null)
   if (!currentUser) {
@@ -331,6 +332,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
         </section>
         <section className="profile-actions">
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
+          <button onClick={onOpenNotifications}><IconBell size={18} /><span><b>Benachrichtigungen</b><small>Hinweise und Push-Einstellungen</small></span>{notificationCount > 0 && <b className="admin-count-badge">{notificationCount > 99 ? '99+' : notificationCount}</b>}<IconChevronRight size={18} /></button>
           <button onClick={onSuggestSpot}><IconMapPin size={18} /><span><b>Halle melden</b><small>Schlage eine Boulderhalle zur Prüfung vor</small></span><IconChevronRight size={18} /></button>
           {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>{spots.length} Hallen · {pendingSuggestionCount + pendingCorrectionCount} Hinweis{pendingSuggestionCount + pendingCorrectionCount === 1 ? '' : 'e'} offen</small></span>{pendingSuggestionCount + pendingCorrectionCount > 0 && <b className="admin-count-badge">{pendingSuggestionCount + pendingCorrectionCount > 99 ? '99+' : pendingSuggestionCount + pendingCorrectionCount}</b>}<IconChevronRight size={18} /></button>}
           {currentUser.role === 'superadmin' && <button onClick={onOpenAudit}><IconLock size={18} /><span><b>Registrierungen & Anmeldungen</b><small>Audit der letzten Kontoereignisse</small></span><IconChevronRight size={18} /></button>}
@@ -346,9 +348,129 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
   )
 }
 
+const notificationCategoryCopy = {
+  messages: ['Nachrichten', 'Direkte Nachrichten von Freund:innen'],
+  friendships: ['Freundschaften', 'Anfragen und bestätigte Freundschaften'],
+  comments: ['Kommentare', 'Kommentare zu deinen Beiträgen'],
+  reactions: ['Reaktionen', 'Likes auf deine Beiträge'],
+  plans: ['Planungen', 'Zusagen, Änderungen und Absagen'],
+  reminders: ['Erinnerungen', 'Bevorstehende Boulderplanungen'],
+  groups: ['Gruppen', 'Einladungen, Termine, Abstimmungen und Gruppenchat'],
+}
+
+function NotificationSettingsView({ currentUser, onBack, onUnreadChange, onOpenTarget, onMessage }) {
+  const [preferences, setPreferences] = useState([])
+  const [push, setPush] = useState({ configured: false, publicKey: null })
+  const [notifications, setNotifications] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [pushEnabled, setPushEnabled] = useState(() => Boolean(window.localStorage.getItem(`bouldero-push-subscription:${currentUser?.id}`)))
+  const [contentPreviewEnabled, setContentPreviewEnabled] = useState(false)
+  const [badgeEnabled, setBadgeEnabled] = useState(() => window.localStorage.getItem(`bouldero-app-badge-enabled:${currentUser?.id}`) !== 'false')
+
+  async function load() {
+    setLoading(true); setError('')
+    try {
+      const [preferenceResponse, notificationResponse] = await Promise.all([
+        fetch('/api/notification-preferences'),
+        fetch('/api/notifications'),
+      ])
+      if (!preferenceResponse.ok || !notificationResponse.ok) throw new Error('Die Benachrichtigungseinstellungen konnten nicht geladen werden.')
+      const preferencePayload = await preferenceResponse.json()
+      const notificationPayload = await notificationResponse.json()
+      setPreferences(preferencePayload.preferences)
+      setPush(preferencePayload.push)
+      setNotifications(notificationPayload.notifications)
+      onUnreadChange(notificationPayload.notifications.filter((item) => !item.read_at).length)
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function savePreferences(next) {
+    setPreferences(next); setSaving(true); setError('')
+    try {
+      const response = await fetch('/api/notification-preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preferences: next }) })
+      if (!response.ok) throw new Error('Deine Einstellungen konnten nicht gespeichert werden.')
+      const payload = await response.json()
+      setPreferences(payload.preferences)
+    } catch (saveError) {
+      setError(saveError.message)
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function togglePreference(category, field) {
+    const next = preferences.map((preference) => preference.category === category ? { ...preference, [field]: !preference[field] } : preference)
+    void savePreferences(next)
+  }
+
+  async function setPushState(enabled) {
+    setSaving(true); setError('')
+    try {
+      if (enabled) {
+        if (!push.configured) throw new Error('Push-Benachrichtigungen werden auf dem Server noch eingerichtet.')
+        await enablePushNotifications({ userId: currentUser.id, publicKey: push.publicKey, contentPreviewEnabled, badgeEnabled })
+        setPushEnabled(true)
+        onMessage('Push-Benachrichtigungen sind auf diesem Gerät aktiv.')
+      } else {
+        await disablePushNotifications(currentUser.id)
+        setPushEnabled(false)
+        onMessage('Push-Benachrichtigungen wurden auf diesem Gerät deaktiviert.')
+      }
+    } catch (pushError) {
+      setError(pushError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function setDeviceSetting(field, value) {
+    if (field === 'badgeEnabled') {
+      window.localStorage.setItem(`bouldero-app-badge-enabled:${currentUser.id}`, String(value))
+      setBadgeEnabled(value)
+    } else {
+      setContentPreviewEnabled(value)
+    }
+    if (!pushEnabled) return
+    try {
+      await updatePushDeviceSettings(currentUser.id, { [field]: value })
+    } catch (deviceError) {
+      setError(deviceError.message)
+    }
+  }
+
+  async function markAllRead() {
+    const response = await fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+    if (!response.ok) return setError('Benachrichtigungen konnten nicht als gelesen markiert werden.')
+    setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })))
+    onUnreadChange(0)
+  }
+
+  async function openNotification(notification) {
+    if (!notification.read_at) {
+      await fetch(`/api/notifications/${notification.id}/read`, { method: 'POST' })
+      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read_at: new Date().toISOString() } : item))
+      onUnreadChange(notifications.filter((item) => item.id !== notification.id && !item.read_at).length)
+    }
+    void onOpenTarget(notification.target_url)
+  }
+
+  const unreadCount = notifications.filter((item) => !item.read_at).length
+  const pushAvailable = supportsPushNotifications() && push.configured
+  return <main className="view content-view compact-view notification-settings-view"><div className="page-intro"><div><span className="eyebrow">Profil</span><h1>Benachrichtigungen</h1><p>Lege fest, welche Hinweise du in BoulderO und auf diesem Gerät erhältst.</p></div></div>{error && <p className="form-error">{error}</p>}{loading ? <p className="journal-empty">Wird geladen …</p> : <><section className="notification-inbox"><div className="section-heading"><div><h2>Neu für dich</h2><span>{unreadCount} ungelesen</span></div>{unreadCount > 0 && <button type="button" onClick={markAllRead}>Alle gelesen</button>}</div>{!notifications.length && <p className="journal-empty">Keine Benachrichtigungen vorhanden.</p>}{notifications.slice(0, 5).map((notification) => <button type="button" className={`notification-item${notification.read_at ? '' : ' is-unread'}`} key={notification.id} onClick={() => void openNotification(notification)}><IconBell size={18} /><span><b>{notification.title}</b><small>{notification.body}</small><time>{formatFeedDate(notification.created_at)}</time></span><IconChevronRight size={17} /></button>)}</section><section className="notification-settings"><div className="section-heading"><div><h2>Dieses Gerät</h2><span>{pushEnabled ? 'Push aktiv' : 'Push aus'}</span></div></div><p className="notification-settings__copy">Die Freigabe erfolgt über die Systemeinstellung deines Geräts. Sie wird erst nach deinem Klick angefragt.</p><label className="notification-switch"><span><b>Push-Benachrichtigungen</b><small>{!push.configured ? 'Der Push-Dienst wird noch eingerichtet.' : !supportsPushNotifications() ? 'Dieses Gerät unterstützt Web Push nicht.' : pushEnabled ? 'Auf diesem Gerät aktiv' : 'Auf diesem Gerät deaktiviert'}</small></span><input type="checkbox" checked={pushEnabled} disabled={saving || !pushAvailable && !pushEnabled} onChange={(event) => void setPushState(event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Inhalte in der Vorschau</b><small>Namen und Hinweise in Systembenachrichtigungen anzeigen</small></span><input type="checkbox" checked={contentPreviewEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('contentPreviewEnabled', event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Badge am App-Icon</b><small>Ungelesene Hinweise am installierten App-Symbol zeigen</small></span><input type="checkbox" checked={badgeEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('badgeEnabled', event.target.checked)} /><i /></label></section><section className="notification-settings"><div className="section-heading"><div><h2>Welche Hinweise möchtest du erhalten?</h2><span>{saving ? 'Wird gespeichert …' : 'Kontoweite Einstellung'}</span></div></div><div className="notification-preference-list">{preferences.map((preference) => { const copy = notificationCategoryCopy[preference.category] ?? [preference.category, '']; return <article key={preference.category}><div><b>{copy[0]}</b><small>{copy[1]}</small></div><label><span>In App</span><input type="checkbox" checked={preference.inAppEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'inAppEnabled')} /></label><label><span>Push</span><input type="checkbox" checked={preference.pushEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'pushEnabled')} /></label></article> })}</div></section></>}<button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+}
+
 function LegalDialog({ kind, onClose }) {
   const privacy = kind === 'privacy'
-  return <div className="composer-backdrop legal-backdrop"><section className="journal-composer legal-dialog" role="dialog" aria-modal="true" aria-label={privacy ? 'Datenschutzerklärung' : 'Impressum'}><div className="composer-header"><div><span className="eyebrow">BoulderO</span><h2>{privacy ? 'Datenschutzerklärung' : 'Impressum'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{privacy ? <div className="legal-content"><p>Stand: 18. August 2026</p><h3>Verantwortlicher</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim<br /><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Welche Daten wir verarbeiten</h3><p>Bei der Registrierung verarbeiten wir Name, Benutzername, E-Mail-Adresse und ein nur gehasht gespeichertes Passwort. Wenn du BoulderO nutzt, kommen je nach Funktion Profilbild, Besuche, Tagebucheinträge, Fotos, soziale Verbindungen, Nachrichten und Hallenvorschläge hinzu.</p><h3>Zweck und Rechtsgrundlage</h3><p>Wir verarbeiten diese Daten, um dein Konto bereitzustellen, die von dir gewählten Funktionen auszuführen und BoulderO sicher zu betreiben. Rechtsgrundlage ist in der Regel die Vertragserfüllung nach Art. 6 Abs. 1 lit. b DSGVO sowie unser berechtigtes Interesse an Sicherheit und Missbrauchsschutz nach Art. 6 Abs. 1 lit. f DSGVO.</p><h3>Hosting, E-Mail und Karte</h3><p>BoulderO wird bei Mittwald gehostet. Bestätigungs- und Passwort-E-Mails werden über das BoulderO-Postfach versendet. Für die Karte werden Kacheln von OpenStreetMap geladen; dabei erhält OpenStreetMap technisch bedingt deine IP-Adresse und die angeforderten Kartendaten. Die optionale Straßensuche übermittelt deinen Suchbegriff an den Geocoding-Dienst Nominatim von OpenStreetMap.</p><h3>Speicherdauer</h3><p>Kontodaten und von dir erstellte Inhalte speichern wir grundsätzlich für die Dauer deines Kontos. Danach löschen oder anonymisieren wir sie, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p><h3>Deine Rechte</h3><p>Du kannst Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch verlangen. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren. Für Anliegen genügt eine E-Mail an die oben genannte Adresse.</p></div> : <div className="legal-content"><p><strong>Angaben gemäß § 5 DDG</strong></p><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p><h3>Kontakt</h3><p><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Verantwortlich für den Inhalt</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p></div>}</section></div>
+  return <div className="composer-backdrop legal-backdrop"><section className="journal-composer legal-dialog" role="dialog" aria-modal="true" aria-label={privacy ? 'Datenschutzerklärung' : 'Impressum'}><div className="composer-header"><div><span className="eyebrow">BoulderO</span><h2>{privacy ? 'Datenschutzerklärung' : 'Impressum'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{privacy ? <div className="legal-content"><p>Stand: 21. August 2026</p><h3>Verantwortlicher</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim<br /><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Welche Daten wir verarbeiten</h3><p>Bei der Registrierung verarbeiten wir Name, Benutzername, E-Mail-Adresse und ein nur gehasht gespeichertes Passwort. Wenn du BoulderO nutzt, kommen je nach Funktion Profilbild, Besuche, Tagebucheinträge, Fotos, soziale Verbindungen, Nachrichten und Hallenvorschläge hinzu.</p><h3>Push-Benachrichtigungen</h3><p>Wenn du Push-Benachrichtigungen aktivierst, speichern wir die technische Push-Adresse und die zugehörigen kryptografischen Schlüssel deines Geräts. Wir verwenden sie ausschließlich, um die von dir gewählten Hinweise zuzustellen. Du kannst Push jederzeit in deinem Profil oder in den Geräteeinstellungen deaktivieren; beim Abmelden wird die Zuordnung dieses Geräts entfernt.</p><h3>Zweck und Rechtsgrundlage</h3><p>Wir verarbeiten diese Daten, um dein Konto bereitzustellen, die von dir gewählten Funktionen auszuführen und BoulderO sicher zu betreiben. Rechtsgrundlage ist in der Regel die Vertragserfüllung nach Art. 6 Abs. 1 lit. b DSGVO sowie unser berechtigtes Interesse an Sicherheit und Missbrauchsschutz nach Art. 6 Abs. 1 lit. f DSGVO.</p><h3>Hosting, E-Mail und Karte</h3><p>BoulderO wird bei Mittwald gehostet. Bestätigungs- und Passwort-E-Mails werden über das BoulderO-Postfach versendet. Für die Karte werden Kacheln von OpenStreetMap geladen; dabei erhält OpenStreetMap technisch bedingt deine IP-Adresse und die angeforderten Kartendaten. Die optionale Straßensuche übermittelt deinen Suchbegriff an den Geocoding-Dienst Nominatim von OpenStreetMap.</p><h3>Speicherdauer</h3><p>Kontodaten und von dir erstellte Inhalte speichern wir grundsätzlich für die Dauer deines Kontos. Danach löschen oder anonymisieren wir sie, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p><h3>Deine Rechte</h3><p>Du kannst Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch verlangen. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren. Für Anliegen genügt eine E-Mail an die oben genannte Adresse.</p></div> : <div className="legal-content"><p><strong>Angaben gemäß § 5 DDG</strong></p><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p><h3>Kontakt</h3><p><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Verantwortlich für den Inhalt</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p></div>}</section></div>
 }
 
 function BadgesView({ progress, onBack }) {
@@ -975,13 +1097,15 @@ function Lightbox({ image, onClose }) {
 
 function PlannedVisitCard({ plan, onRsvp, onEdit, onCancel, onLogVisit }) {
   const rsvp = plan.my_response
+  const groupEvent = Boolean(plan.group_id)
+  const isPersonalOwner = plan.is_owner && !groupEvent
   const [people, setPeople] = useState([])
   const [peopleOpen, setPeopleOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const peopleRef = useOutsideDismiss(peopleOpen, () => setPeopleOpen(false))
   const menuRef = useOutsideDismiss(menuOpen, () => setMenuOpen(false))
-  async function togglePeople() { if (!peopleOpen) { const response = await fetch(`/api/planned-visits/${plan.id}/rsvps`); if (response.ok) setPeople((await response.json()).rsvps) }; setMenuOpen(false); setPeopleOpen((value) => !value) }
-  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">{plan.is_owner ? 'Deine Planung' : 'Geplant'}</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.user_name}</b><small>{plan.is_owner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{plan.is_owner && <div className="plan-card-menu" ref={menuRef}><button type="button" className="friend-more-button" onClick={() => { setPeopleOpen(false); setMenuOpen((value) => !value) }} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people" ref={peopleRef}><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{plan.is_owner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!plan.is_owner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : 'Zusagen'}</button></div>}</div></article>
+  async function togglePeople() { if (!peopleOpen) { const url = groupEvent ? `/api/community/groups/${plan.group_id}/events/${plan.id}/rsvps` : `/api/planned-visits/${plan.id}/rsvps`; const response = await fetch(url); if (response.ok) setPeople((await response.json()).rsvps) }; setMenuOpen(false); setPeopleOpen((value) => !value) }
+  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">{groupEvent ? 'Gruppentermin' : isPersonalOwner ? 'Deine Planung' : 'Geplant'}</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{groupEvent ? plan.group_name : plan.user_name}</b><small>{groupEvent ? `organisiert von ${plan.user_name}` : isPersonalOwner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{isPersonalOwner && <div className="plan-card-menu" ref={menuRef}><button type="button" className="friend-more-button" onClick={() => { setPeopleOpen(false); setMenuOpen((value) => !value) }} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${groupEvent ? plan.group_name : plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people" ref={peopleRef}><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}{plan.waitlisted_count > 0 ? ` · ${plan.waitlisted_count} Warteliste` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : person.response === 'waitlisted' ? 'Warteliste' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{isPersonalOwner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!isPersonalOwner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' || rsvp === 'waitlisted' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' || rsvp === 'waitlisted' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : rsvp === 'waitlisted' ? 'Warteliste' : 'Zusagen'}</button></div>}</div></article>
 }
 
 function planDayKey(value) {
@@ -1034,7 +1158,7 @@ function PlanCancelDialog({ plan, onCancel, onClose }) {
 
 function PlanNotifications({ notifications, onRead }) {
   if (!notifications.length) return null
-  return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const copy = notification.type === 'plan_cancelled' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} abgesagt.` : notification.type === 'plan_updated' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} geändert.` : `${notification.actor_name ?? 'Jemand'} ist ${payload.response === 'going' ? 'dabei' : 'interessiert'} bei ${payload.spotName ?? notification.spot_name}.`; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
+  return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const spotName = payload.spotName || notification.spot_name || 'dieser Planung'; const actorName = notification.actor_name ?? 'Jemand'; const copy = notification.type === 'plan_cancelled' ? `${actorName} hat ${spotName} abgesagt.` : notification.type === 'plan_updated' ? `${actorName} hat ${spotName} geändert.` : notification.type === 'plan_reminder' ? `Deine Planung bei ${spotName} beginnt bald.` : notification.type === 'plan_rsvp' && payload.response === 'going' ? `${actorName} ist bei ${spotName} dabei.` : notification.type === 'plan_rsvp' && payload.response === 'interested' ? `${actorName} ist an ${spotName} interessiert.` : notification.body || 'Es gibt eine neue Rückmeldung zu einer Planung.'; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
 }
 
 function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan, planFocus, onPlanFocusConsumed }) {
@@ -1048,7 +1172,7 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   const [expanded, setExpanded] = useState(null)
   const [commentDraft, setCommentDraft] = useState('')
   const [feedMode, setFeedMode] = useState('all')
-  const [section, setSection] = useState('feed')
+  const [section, setSection] = useState(() => new URLSearchParams(window.location.search).get('section') === 'plans' ? 'plans' : 'feed')
   const [planScope, setPlanScope] = useState('all')
   const [planResponse, setPlanResponse] = useState('all')
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
@@ -1128,7 +1252,8 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   }
 
   async function rsvp(plan, response) {
-    const result = await fetch(`/api/planned-visits/${plan.id}/rsvp`, response ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response }) } : { method: 'DELETE' })
+    const base = plan.group_id ? `/api/community/groups/${plan.group_id}/events/${plan.id}/rsvp` : `/api/planned-visits/${plan.id}/rsvp`
+    const result = await fetch(base, response ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response }) } : { method: 'DELETE' })
     if (!result.ok) return setError('Deine Zusage konnte nicht aktualisiert werden.')
     await load()
   }
@@ -1138,9 +1263,60 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   async function readPlanNotifications() { await fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plannedOnly: true }) }); setNotifications([]); onFeedRead({ plans: true }) }
 
   const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id || entry.id === entryFocusId)
-  const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
+  const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'groups' || plan.group_id) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
   activePlanningAuthorFilter = section === 'plans' && authorFilter ? { author: authorFilter, onClear: onClearAuthorFilter } : null
-  return <main className="view content-view compact-view social-view">{error && <p className="form-error">{error}</p>}<section className="social-section feed-section"><div className="section-heading"><div><h2>{section === 'feed' ? (authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed') : 'Planung'}</h2>{authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}</div><div className="feed-toggle"><button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button><button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button></div></div>{section === 'feed' ? <><div className="feed-filter-row"><div className="feed-toggle feed-toggle--secondary"><button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button><button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button></div></div>{!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}<div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}><FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}<div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>{expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}</article>)}</div></> : <><PlanNotifications notifications={notifications} onRead={readPlanNotifications} /><div className="planning-layout"><PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} /><div className="planning-list"><div className="plan-filters"><button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button><button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button><button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button></div><div className="plan-filters plan-filters--response"><button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button><button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button><button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button></div>{selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}{!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}<div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div></div></div></>}{editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}{cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}</section></main>
+  return <main className="view content-view compact-view social-view">
+    {error && <p className="form-error">{error}</p>}
+    <section className="social-section feed-section">
+      <div className="section-heading">
+        <div>
+          <h2>{section === 'feed' ? (authorFilter ? `Feed von ${authorFilter.name}` : 'Aktuell im Feed') : 'Planung'}</h2>
+          {authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}
+        </div>
+        <div className="feed-toggle">
+          <button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button>
+          <button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button>
+        </div>
+      </div>
+      {section === 'feed' ? <>
+        <div className="feed-filter-row"><div className="feed-toggle feed-toggle--secondary">
+          <button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button>
+          <button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button>
+        </div></div>
+        {!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}
+        <div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}>
+          <FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>
+          {entry.body && <p className="feed-body">{entry.body}</p>}
+          {entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}
+          <div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>
+          {expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}
+        </article>)}</div>
+      </> : <>
+        <PlanNotifications notifications={notifications} onRead={readPlanNotifications} />
+        <div className="planning-layout">
+          <PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} />
+          <div className="planning-list">
+            <div className="plan-filters">
+              <button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button>
+              <button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button>
+              <button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button>
+              <button className={planScope === 'groups' ? 'is-active' : ''} onClick={() => setPlanScope('groups')}>Gruppen</button>
+            </div>
+            <div className="plan-filters plan-filters--response">
+              <button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button>
+              <button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button>
+              <button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button>
+            </div>
+            {selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}
+            {!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}
+            <div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div>
+          </div>
+        </div>
+      </>}
+      {editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}
+      {cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}
+    </section>
+  </main>
 }
 
 
@@ -1151,14 +1327,16 @@ function UserAvatar({ user, onOpenImage }) {
   return <span className="person-avatar social-avatar social-avatar--ranked">{avatar}</span>
 }
 
-function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenImage }) {
+function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUserFeed, onOpenImage }) {
   const initialDiscoverUsername = new URLSearchParams(window.location.search).get('discover')?.replace(/^@+/, '') ?? ''
-  const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : 'friends')
+  const initialRequests = new URLSearchParams(window.location.search).get('tab') === 'requests'
+  const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : initialRequests ? 'requests' : 'friends')
   const [friends, setFriends] = useState([])
   const [friendSuggestions, setFriendSuggestions] = useState([])
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] })
   const [query, setQuery] = useState(initialDiscoverUsername ? `@${initialDiscoverUsername}` : '')
   const [results, setResults] = useState([])
+  const [summary, setSummary] = useState({ unread_groups: 0 })
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(null)
   const [friendMenuId, setFriendMenuId] = useState(null)
@@ -1170,7 +1348,9 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
       setFriends((await friendsResponse.json()).friends)
       setFriendSuggestions((await suggestionsResponse.json()).suggestions)
       setRequests(await requestsResponse.json())
-      onSummaryChange(await summaryResponse.json())
+      const summaryPayload = await summaryResponse.json()
+      setSummary(summaryPayload)
+      onSummaryChange(summaryPayload)
     } catch (loadError) { setError(loadError.message) }
   }
   useEffect(() => {
@@ -1208,8 +1388,8 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenIm
     <main className="view content-view compact-view social-view">
       <section className="social-section friends-section">
         <div className="section-heading">
-          <h2>Freunde</h2>
-          <div className="friends-tabs">
+          <div><h2>Community</h2><div className="friends-tabs community-switch"><button className="is-active">Freunde</button><button type="button" onClick={onOpenGroups}>Gruppen{summary.unread_groups > 0 && <b>{summary.unread_groups > 9 ? '9+' : summary.unread_groups}</b>}</button></div></div>
+          <div className="friends-tabs friends-tabs--sub">
             <button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>Freunde</button>
             <button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => setTab('requests')}>Anfragen{requests.incoming.length > 0 && <b>{requests.incoming.length}</b>}</button>
             <button className={tab === 'discover' ? 'is-active' : ''} onClick={() => setTab('discover')}>Entdecken</button>
@@ -1325,5 +1505,5 @@ function PasswordDialog({ onClose, onSave }) {
 export {
   AdminSpotsView, BadgesView, FeedView, FriendsView, JournalComposer, JournalEntryDialog,
   JournalView, LegalDialog, Lightbox, MapView, MessageDialog, PasswordDialog, PlannedVisitDialog,
-  ProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
+  NotificationSettingsView, ProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
 }

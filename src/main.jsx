@@ -40,6 +40,7 @@ import 'leaflet/dist/leaflet.css'
 import './styles.css'
 import { initialSpots, mannheimCenter } from './data/spots'
 import { AuditView, RegisteredUsersDialog } from './features/admin/AuthAudit.tsx'
+import { GroupsView } from './features/groups/GroupsView.jsx'
 import {
   AdminSpotsView,
   BadgesView,
@@ -52,6 +53,7 @@ import {
   Lightbox,
   MapView,
   MessageDialog,
+  NotificationSettingsView,
   PasswordDialog,
   PlannedVisitDialog,
   ProfileView,
@@ -61,16 +63,17 @@ import {
   SpotSuggestionDialog,
   optimizePhoto,
 } from './AppViews.jsx'
+import { disablePushNotifications, registerServiceWorker, updateAppBadge } from './shared/pushNotifications.js'
 
 const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
   { id: 'journal', label: 'Tagebuch', icon: IconBookmark },
   { id: 'social', label: 'Feed', icon: IconMessageCircle },
-  { id: 'friends', label: 'Freunde', icon: IconUsers },
+  { id: 'friends', label: 'Community', icon: IconUsers },
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
 
-const appViews = new Set(['map', 'journal', 'social', 'friends', 'profile', 'badges', 'connections', 'admin', 'audit'])
+const appViews = new Set(['map', 'journal', 'social', 'friends', 'groups', 'profile', 'notifications', 'badges', 'connections', 'admin', 'audit'])
 
 function viewFromLocation() {
   const segment = window.location.pathname.split('/').filter(Boolean)[0]
@@ -106,6 +109,7 @@ function App() {
   const [lightboxImage, setLightboxImage] = useState(null)
   const [friendSummary, setFriendSummary] = useState({ unread_messages: 0, pending_requests: 0 })
   const [feedSummary, setFeedSummary] = useState({ unread_feed: 0 })
+  const [notificationSummary, setNotificationSummary] = useState({ unread_count: 0 })
   const [feedAuthorFilter, setFeedAuthorFilter] = useState(null)
   const [feedPlanFocus, setFeedPlanFocus] = useState(null)
   const [spotSuggestions, setSpotSuggestions] = useState([])
@@ -140,6 +144,21 @@ function App() {
   function goBack(fallback = 'profile') {
     if (window.history.state?.boulderO && window.history.state.position > 0) window.history.back()
     else navigate(fallback, { replace: true })
+  }
+
+  async function openNotificationTarget(targetUrl) {
+    const target = new URL(targetUrl, window.location.origin)
+    const view = target.pathname.split('/').filter(Boolean)[0] || 'map'
+    navigate(appViews.has(view) ? view : 'map')
+    window.history.replaceState(window.history.state, '', `${target.pathname}${target.search}`)
+    const messageUserId = target.searchParams.get('message')
+    if (view === 'friends' && messageUserId) {
+      const response = await fetch('/api/social/friends')
+      if (!response.ok) return
+      const payload = await response.json()
+      const friend = payload.friends.find((user) => user.id === messageUserId)
+      if (friend) setMessageUser(friend)
+    }
   }
 
   useEffect(() => {
@@ -237,6 +256,10 @@ function App() {
   async function loadFeedSummary() {
     const response = await fetch('/api/social/feed/summary')
     if (response.ok) setFeedSummary(await response.json())
+  }
+  async function loadNotificationSummary() {
+    const response = await fetch('/api/notifications/summary')
+    if (response.ok) setNotificationSummary(await response.json())
   }
   async function loadSpotCorrectionReports(user = currentUser) {
     if (user?.role !== 'superadmin') { setSpotCorrectionReports([]); return }
@@ -353,7 +376,7 @@ function App() {
     await loadAuthAudit(user)
     const summaryResponse = await fetch('/api/social/friends/summary')
     if (summaryResponse.ok) setFriendSummary(await summaryResponse.json())
-    await loadFeedSummary()
+    await Promise.all([loadFeedSummary(), loadNotificationSummary()])
   }
 
   useEffect(() => {
@@ -364,7 +387,7 @@ function App() {
   useEffect(() => {
     if (!currentUser) return undefined
     async function refreshFriendSummary() {
-      const [response] = await Promise.all([fetch('/api/social/friends/summary'), loadFeedSummary()])
+      const [response] = await Promise.all([fetch('/api/social/friends/summary'), loadFeedSummary(), loadNotificationSummary()])
       if (response.ok) setFriendSummary(await response.json())
     }
     refreshFriendSummary()
@@ -372,6 +395,16 @@ function App() {
     window.addEventListener('focus', refreshFriendSummary)
     return () => { window.clearInterval(interval); window.removeEventListener('focus', refreshFriendSummary) }
   }, [currentUser?.id])
+
+  useEffect(() => {
+    void registerServiceWorker().catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (!currentUser) return
+    const badgeEnabled = window.localStorage.getItem(`bouldero-app-badge-enabled:${currentUser.id}`) !== 'false'
+    void updateAppBadge(notificationSummary.unread_count, badgeEnabled).catch(() => undefined)
+  }, [currentUser?.id, notificationSummary.unread_count])
 
   async function signInDemo(profileId) {
     const csrfResponse = await fetch('/api/auth/csrf')
@@ -398,7 +431,7 @@ function App() {
     }
     const response = await fetch('/api/me')
     if (!response.ok) throw new Error('E-Mail oder Passwort sind nicht korrekt.')
-    const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); await loadAuthAudit(user); setAuthOpen(false); showToast('Willkommen bei BoulderO')
+    const { user } = await response.json(); setCurrentUser(user); await loadPrivateData(); await loadSpotSuggestions(user); await loadSpotCorrectionReports(user); await loadAuthAudit(user); await Promise.all([loadFeedSummary(), loadNotificationSummary()]); setAuthOpen(false); showToast('Willkommen bei BoulderO')
   }
 
   async function registerMember(name, username, email, password) {
@@ -430,6 +463,7 @@ function App() {
   }
 
   async function signOut() {
+    if (currentUser) await disablePushNotifications(currentUser.id).catch(() => undefined)
     const csrfResponse = await fetch('/api/auth/csrf')
     const { csrfToken } = await csrfResponse.json()
     await fetch('/api/auth/signout', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin }), redirect: 'manual' })
@@ -441,6 +475,8 @@ function App() {
     setSpotCorrectionReports([])
     setFriendSummary({ unread_messages: 0, pending_requests: 0 })
     setFeedSummary({ unread_feed: 0 })
+    setNotificationSummary({ unread_count: 0 })
+    void updateAppBadge(0, false).catch(() => undefined)
     showToast('Du bist abgemeldet')
   }
 
@@ -458,6 +494,8 @@ function App() {
     setSpotCorrectionReports([])
     setFriendSummary({ unread_messages: 0, pending_requests: 0 })
     setFeedSummary({ unread_feed: 0, unread_plans: 0 })
+    setNotificationSummary({ unread_count: 0 })
+    void updateAppBadge(0, false).catch(() => undefined)
     setSelectedEntry(null)
     setActiveView('map')
     showToast('Dein Konto wurde gelöscht')
@@ -499,6 +537,13 @@ function App() {
       setComposerSurface('map')
       setComposerOpen(true)
     }
+  }
+
+  function openSpotOnMap(id) {
+    setSelectedId(id)
+    setFilter('all')
+    setQuery('')
+    navigate('map')
   }
 
   function chooseSpotOnMap() {
@@ -725,14 +770,16 @@ function App() {
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} onOpenPlanFeed={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} onOpenMessage={setMessageUser} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenNotifications={() => navigate('notifications')} notificationCount={notificationSummary.unread_count} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'notifications' && currentUser && <NotificationSettingsView currentUser={currentUser} onBack={() => goBack('profile')} onUnreadChange={(unreadCount) => setNotificationSummary({ unread_count: unreadCount })} onOpenTarget={openNotificationTarget} onMessage={showToast} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} onOpenUsers={openRegisteredUsers} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} />}
-      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
+      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
+      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onOpenSpot={openSpotOnMap} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
-        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
+        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests + (friendSummary.unread_groups ?? 0); const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); const active = id === 'friends' ? ['friends', 'groups', 'connections'].includes(activeView) : activeView === id; return <button key={id} className={active ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer key={composerPlan?.id ?? composerSpotId ?? 'new'} spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} plannedVisit={composerPlan} />}
