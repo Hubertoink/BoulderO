@@ -517,7 +517,7 @@ const spotInputSchema = z.object({
   address: z.string().trim().min(5).max(300),
   website: z.string().trim().url().max(500).optional().or(z.literal('')),
   openingHours: z.string().trim().max(300).optional(),
-  areaSqm: z.number().int().min(0).max(1000000).nullable().optional(),
+  areaSqm: z.union([z.string(), z.number()]).transform((value) => String(value).trim()).pipe(z.string().max(120)).nullable().optional(),
   imageUrl: z.string().trim().url().max(1000).optional().or(z.literal('')),
   latitude: z.number().gte(-90).lte(90),
   longitude: z.number().gte(-180).lte(180),
@@ -641,10 +641,10 @@ async function importFileRows(file) {
   return rows
 }
 
-function optionalImportNumber(value, field, rowNumber) {
+function optionalImportArea(value) {
   const normalized = importCellText(value).trim()
   if (!normalized || normalized === '0') return undefined
-  return numberFromCsv(normalized, field, rowNumber, { integer: true })
+  return normalized
 }
 
 function coordinateFromImport(value, field, rowNumber, maximum) {
@@ -722,7 +722,7 @@ async function parseAdminSpotImport(file) {
           address: importText(record.address),
           website: importText(record.website) || undefined,
           openingHours: importText(record.opening_hours) || undefined,
-          areaSqm: optionalImportNumber(record.area_sqm, 'area_sqm', record.rowNumber),
+          areaSqm: optionalImportArea(record.area_sqm),
           latitude: coordinateFromImport(record.latitude, 'latitude', record.rowNumber, 90),
           longitude: coordinateFromImport(record.longitude, 'longitude', record.rowNumber, 180),
         }),
@@ -1741,7 +1741,7 @@ app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (req, res)
     { header: 'address', key: 'address', width: 42 },
     { header: 'website', key: 'website', width: 42 },
     { header: 'opening_hours', key: 'opening_hours', width: 30 },
-    { header: 'area_sqm', key: 'area_sqm', width: 13 },
+    { header: 'area_sqm', key: 'area_sqm', width: 24 },
     { header: 'latitude', key: 'latitude', width: 15 },
     { header: 'longitude', key: 'longitude', width: 15 },
     { header: 'image_url', key: 'image_url', width: 52 },

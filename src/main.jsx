@@ -224,7 +224,7 @@ function App() {
     setJournalVisits(visits)
     setSpots(apiSpots.map((spot) => {
       const fallback = initialSpots.find((item) => item.id === spot.id) ?? {}
-      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: `${Number(spot.area_sqm ?? 0).toLocaleString('de-DE')} m²`, visits: countBySpot[spot.id] ?? 0, last_visit_at: lastVisitBySpot[spot.id] ?? null }
+      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: spot.area_sqm ?? fallback.size ?? '', visits: countBySpot[spot.id] ?? 0, last_visit_at: lastVisitBySpot[spot.id] ?? null }
     }))
   }
 

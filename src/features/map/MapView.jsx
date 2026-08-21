@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
 import { formatOpeningHoursLines } from '../../shared/openingHours.js'
+import { formatSpotArea, spotAreaSquareMeters } from '../../shared/spotArea.js'
 import { matchesSpotSearch, spotSearchMeta, spotSearchRank } from '../../shared/spotSearch.js'
 
 const mapViewStorageKey = 'bouldero.map-view'
@@ -342,6 +343,7 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
       </div>
       <div className="spot-meta">
         <span className="spot-meta__opening"><b>Öffnungszeiten</b>{formatOpeningHoursLines(spot.opening_hours ?? spot.open).map((line) => <small key={line}>{line}</small>)}</span>
+        <span><b>Area</b>{formatSpotArea(spot.area_sqm ?? spot.size)}</span>
         <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
         <span><b>Deine Besuche</b>{spot.visits}</span>
       </div>
@@ -477,11 +479,11 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
   const matchingSpots = useMemo(() => {
     return spots.filter((spot) => {
       const matchesSearch = matchesSpotSearch(spot, query)
-      const area = Number(spot.area_sqm ?? String(spot.size ?? '').replace(/[^0-9]/g, ''))
+      const area = spotAreaSquareMeters(spot.area_sqm ?? spot.size)
       const matchesFilter = hallFilter === 'all'
         || (hallFilter === 'visited' && spot.visits > 0)
-        || (hallFilter === 'large' && area >= 1000)
-        || (hallFilter === 'small' && area < 750)
+        || (hallFilter === 'large' && area !== null && area >= 1000)
+        || (hallFilter === 'small' && area !== null && area < 750)
         || (hallFilter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
       return matchesSearch && matchesFilter
     }).sort((first, second) => spotSearchRank(first, query) - spotSearchRank(second, query) || first.name.localeCompare(second.name, 'de-DE'))
