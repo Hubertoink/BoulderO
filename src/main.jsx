@@ -626,7 +626,8 @@ function App() {
       const payload = await response.json().catch(() => ({}))
       if (payload.error === 'csv_headers_invalid') throw new Error(`Diese Spalten fehlen: ${payload.missing.join(', ')}`)
       if (payload.error === 'csv_limit_exceeded') throw new Error('Pro Import sind höchstens 500 Hallen möglich.')
-      throw new Error('Die CSV-Datei konnte nicht analysiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
+      if (payload.error === 'xlsx_invalid') throw new Error('Die Excel-Datei konnte nicht gelesen werden. Bitte verwende eine gültige .xlsx-Datei.')
+      throw new Error('Die Datei konnte nicht analysiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
     }
     return response.json()
   }

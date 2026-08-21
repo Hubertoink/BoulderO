@@ -358,7 +358,7 @@ function BadgesView({ progress, onBack }) {
 
 
 function downloadHallTemplate() {
-  const csv = 'name,district,address,latitude,longitude,opening_hours,area_sqm,website,image_url\nBeispiel Boulderhalle,Jungbusch,Beispielstraße 12,49.4964,8.4548,Mo–Fr 10:00–22:00,850,https://example.com,https://images.example.com/halle.jpg\n'
+  const csv = 'id,source,source_external_id,name,district,address,latitude,longitude,opening_hours,area_sqm,website\n,,,Beispiel Boulderhalle,Jungbusch,Beispielstraße 12,49.4964,8.4548,Mo–Fr 10:00–22:00,850,https://example.com\n'
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
@@ -497,14 +497,21 @@ function SpotSuggestionReviewDialog({ suggestion, onApprove, onReject, onClose }
 
 function CsvImportReview({ preview, decisions, onDecisionChange, onBulk, onApply, onClose, applying }) {
   const [filter, setFilter] = useState('all')
-  const rows = preview.rows.filter((row) => filter === 'all' || (filter === 'new' && row.input && !row.candidates.length) || (filter === 'matches' && row.candidates.length) || (filter === 'invalid' && row.error))
+  const rows = preview.rows.filter((row) => filter === 'all' || (filter === 'new' && row.input && !row.candidates.length && !row.error) || (filter === 'matches' && row.candidates.length) || (filter === 'invalid' && row.error))
   const counts = {
-    new: preview.rows.filter((row) => row.input && !row.candidates.length).length,
+    new: preview.rows.filter((row) => row.input && !row.candidates.length && !row.error).length,
     matches: preview.rows.filter((row) => row.candidates.length).length,
+    safeUpdates: preview.rows.filter((row) => row.safeUpdateTargetId).length,
     invalid: preview.rows.filter((row) => row.error).length,
   }
   const selected = Object.values(decisions).filter((decision) => decision.action !== 'skip').length
-  return <section className="import-review"><div className="section-heading"><div><span className="eyebrow">CSV-Prüfung</span><h2>{preview.rows.length} Zeilen analysiert</h2></div><button type="button" className="text-back" onClick={onClose} disabled={applying}>Verwerfen</button></div><p>Treffer werden über gleichen Namen oder einen Abstand von höchstens 150 m vorgeschlagen. Erst mit „Auswahl anwenden“ werden Daten geändert.</p><div className="import-review__summary"><span>{counts.new} neu</span><span>{counts.matches} mögliche Treffer</span><span>{counts.invalid} ungültig</span><span>{selected} ausgewählt</span></div><div className="import-review__bulk"><button type="button" onClick={() => onBulk('create-new')} disabled={applying || !counts.new}>Alle neuen anlegen</button><button type="button" onClick={() => onBulk('update-matches')} disabled={applying || !counts.matches}>Treffer aktualisieren</button><button type="button" onClick={() => onBulk('skip-all')} disabled={applying}>Alle überspringen</button></div><div className="import-review__filters" role="tablist" aria-label="CSV-Zeilen filtern">{[['all', 'Alle'], ['new', 'Neu'], ['matches', 'Treffer'], ['invalid', 'Ungültig']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="admin-table-wrap"><table className="import-review__table"><thead><tr><th>Zeile</th><th>CSV-Halle</th><th>Prüfergebnis</th><th>Aktion</th></tr></thead><tbody>{rows.map((row) => { const decision = decisions[row.rowNumber] ?? { action: 'skip' }; const value = decision.action === 'update' ? `update:${decision.targetId}` : decision.action; return <tr key={row.rowNumber} className={row.error ? 'is-invalid' : row.candidates.length ? 'has-match' : ''}><td>{row.rowNumber}</td><td>{row.input ? <><b>{row.input.name}</b><small>{row.input.address} · {row.input.district}</small></> : 'Nicht lesbar'}</td><td>{row.error ? <span className="import-review__error">{row.error}</span> : row.candidates.length ? <div className="import-review__matches">{row.candidates.map((candidate) => <span key={candidate.id}><b>{candidate.name}</b> · {candidate.distance_m} m{candidate.same_name ? ' · gleicher Name' : ''}{candidate.status !== 'active' ? ` · ${candidate.status}` : ''}</span>)}</div> : <span className="import-review__new">Keine passende Halle gefunden</span>}</td><td>{row.error ? <span>Überspringen</span> : <select value={value} onChange={(event) => onDecisionChange(row.rowNumber, event.target.value)} disabled={applying}><option value="skip">Überspringen</option><option value="create">{row.candidates.length ? 'Trotzdem neu anlegen' : 'Neu anlegen'}</option>{row.candidates.map((candidate) => <option key={candidate.id} value={`update:${candidate.id}`}>„{candidate.name}“ aktualisieren</option>)}</select>}</td></tr> })}</tbody></table></div><div className="import-review__footer"><span>{selected ? `${selected} Zeilen werden verarbeitet.` : 'Keine Zeile ausgewählt.'}</span><button type="button" className="visit-button" onClick={onApply} disabled={applying || !selected}>{applying ? 'Import wird angewendet …' : 'Auswahl anwenden'}</button></div></section>
+  const matchLabel = (candidate) => ({
+    id: 'gleiche BoulderO-ID',
+    source_external_id: 'gleiche Quellen-ID',
+    name: 'gleicher Name',
+    nearby: `${candidate.distance_m} m entfernt`,
+  }[candidate.match_type] ?? 'möglicher Treffer')
+  return <section className="import-review"><div className="section-heading"><div><span className="eyebrow">Excel-/CSV-Prüfung</span><h2>{preview.rows.length} Zeilen analysiert</h2></div><button type="button" className="text-back" onClick={onClose} disabled={applying}>Verwerfen</button></div><p>Eine vorhandene BoulderO-ID wird immer direkt derselben Halle zugeordnet. Weitere Treffer werden über Quellen-ID, gleichen Namen oder bis zu 150 m Abstand vorgeschlagen. Erst mit „Auswahl anwenden“ werden Daten geändert.</p><div className="import-review__summary"><span>{counts.new} neu</span><span>{counts.matches} mögliche Treffer</span><span>{counts.safeUpdates} sichere Updates</span><span>{counts.invalid} ungültig</span><span>{selected} ausgewählt</span></div><div className="import-review__bulk"><button type="button" onClick={() => onBulk('create-new')} disabled={applying || !counts.new}>Alle neuen anlegen</button><button type="button" onClick={() => onBulk('update-matches')} disabled={applying || !counts.safeUpdates}>Sichere Updates übernehmen</button><button type="button" onClick={() => onBulk('skip-all')} disabled={applying}>Alle überspringen</button></div><div className="import-review__filters" role="tablist" aria-label="Importzeilen filtern">{[['all', 'Alle'], ['new', 'Neu'], ['matches', 'Treffer'], ['invalid', 'Ungültig']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="admin-table-wrap"><table className="import-review__table"><thead><tr><th>Zeile</th><th>Import-Halle</th><th>Prüfergebnis</th><th>Aktion</th></tr></thead><tbody>{rows.map((row) => { const decision = decisions[row.rowNumber] ?? { action: 'skip' }; const value = decision.action === 'update' ? `update:${decision.targetId}` : decision.action; return <tr key={row.rowNumber} className={row.error ? 'is-invalid' : row.candidates.length ? 'has-match' : ''}><td>{row.rowNumber}</td><td>{row.input ? <><b>{row.input.name}</b><small>{row.input.address} · {row.input.district}</small></> : 'Nicht lesbar'}</td><td>{row.error ? <span className="import-review__error">{row.error}</span> : row.candidates.length ? <div className="import-review__matches">{row.candidates.map((candidate) => <span key={candidate.id}><b>{candidate.name}</b> · {matchLabel(candidate)}{candidate.status !== 'active' ? ` · ${candidate.status}` : ''}</span>)}</div> : <span className="import-review__new">Keine passende Halle gefunden</span>}</td><td>{row.error ? <span>Überspringen</span> : <select value={value} onChange={(event) => onDecisionChange(row.rowNumber, event.target.value)} disabled={applying}><option value="skip">Überspringen</option><option value="create">{row.candidates.length ? 'Trotzdem neu anlegen' : 'Neu anlegen'}</option>{row.candidates.map((candidate) => <option key={candidate.id} value={`update:${candidate.id}`}>„{candidate.name}“ aktualisieren</option>)}</select>}</td></tr> })}</tbody></table></div><div className="import-review__footer"><span>{selected ? `${selected} Zeilen werden verarbeitet.` : 'Keine Zeile ausgewählt.'}</span><button type="button" className="visit-button" onClick={onApply} disabled={applying || !selected}>{applying ? 'Import wird angewendet …' : 'Auswahl anwenden'}</button></div></section>
 }
 
 
@@ -574,7 +581,7 @@ function AdminSpotsView({
       const preview = await onPreviewImport(file);
       setImportFile(file);
       setImportPreview(preview);
-      setImportDecisions(Object.fromEntries(preview.rows.map((row) => [row.rowNumber, { action: row.error || row.candidates.length ? 'skip' : 'create' }])));
+      setImportDecisions(Object.fromEntries(preview.rows.map((row) => [row.rowNumber, row.error ? { action: 'skip' } : row.safeUpdateTargetId ? { action: 'update', targetId: row.safeUpdateTargetId } : row.candidates.length ? { action: 'skip' } : { action: 'create' }])));
     } catch (importError) {
       setError(
         importError.message || "Der Import konnte nicht verarbeitet werden.",
@@ -610,7 +617,7 @@ function AdminSpotsView({
         if (row.error) { next[row.rowNumber] = { action: 'skip' }; continue; }
         if (action === 'skip-all') next[row.rowNumber] = { action: 'skip' };
         if (action === 'create-new' && !row.candidates.length) next[row.rowNumber] = { action: 'create' };
-        if (action === 'update-matches' && row.candidates.length) next[row.rowNumber] = { action: 'update', targetId: row.candidates[0].id };
+        if (action === 'update-matches' && row.safeUpdateTargetId) next[row.rowNumber] = { action: 'update', targetId: row.safeUpdateTargetId };
       }
       return next;
     });
@@ -708,10 +715,11 @@ function AdminSpotsView({
       <section className="admin-import">
         <div>
           <span className="eyebrow">Mehrere Hallen</span>
-          <h2>CSV importieren</h2>
+          <h2>Excel oder CSV importieren</h2>
           <p>
             Maximal 500 Hallen; Pflichtspalten: name, district, address,
-            latitude und longitude. image_url ist optional.
+            latitude und longitude. Für einen sicheren Rückimport die
+            exportierte <code>id</code>-Spalte unverändert lassen.
           </p>
         </div>
         <div className="admin-import__actions">
@@ -733,11 +741,11 @@ function AdminSpotsView({
           </button>
           <label className="visit-button">
             <IconPlus size={18} />
-            {importing ? "Import wird verarbeitet …" : "CSV auswählen"}
+            {importing ? "Import wird verarbeitet …" : "Datei auswählen"}
             <input
               ref={csvInput}
               type="file"
-              accept=".csv,text/csv"
+              accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
               onChange={importCsv}
               disabled={importing}
             />

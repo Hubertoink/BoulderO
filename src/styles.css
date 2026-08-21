@@ -307,6 +307,17 @@ body.map-dialog-open {
     textarea {
       font-size: 16px !important;
     }
+
+    .journal-composer--map.journal-composer--entry input[type="date"] {
+      min-width: 0;
+      max-width: 100%;
+      width: 100%;
+      box-sizing: border-box;
+      -webkit-appearance: none;
+      appearance: none;
+      line-height: 1.25;
+      overflow: hidden;
+    }
   }
 
   .composer-backdrop--map {
