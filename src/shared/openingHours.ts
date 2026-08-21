@@ -1,5 +1,5 @@
-const weekdayLabels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
-const weekdayIndex = new Map([
+const weekdayLabels: readonly string[] = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+const weekdayIndex = new Map<string, number>([
   ['mo', 0], ['montag', 0],
   ['di', 1], ['dienstag', 1],
   ['mi', 2], ['mittwoch', 2],
@@ -9,7 +9,7 @@ const weekdayIndex = new Map([
   ['so', 6], ['sonntag', 6],
 ])
 
-function normalizedTimeRange(value) {
+function normalizedTimeRange(value: unknown): string | null {
   const match = String(value ?? '')
     .replace(/\buhr\b/gi, '')
     .trim()
@@ -22,14 +22,15 @@ function normalizedTimeRange(value) {
   return `${startHour.padStart(2, '0')}:${startMinute}–${endHour.padStart(2, '0')}:${endMinute}`
 }
 
-function parseWeeklyOpeningHours(value) {
-  const days = Array(7).fill(null)
+function parseWeeklyOpeningHours(value: unknown): Array<string | null> | null {
+  const days: Array<string | null> = Array(7).fill(null)
   const entries = String(value ?? '').split(';').map((entry) => entry.trim()).filter(Boolean)
   if (!entries.length) return null
 
   for (const entry of entries) {
     const match = entry.match(/^([a-zäöü]+)\.?\s*:?\s*(.+)$/i)
-    const day = weekdayIndex.get(match?.[1]?.toLocaleLowerCase('de-DE'))
+    const dayLabel = match?.[1]?.toLocaleLowerCase('de-DE')
+    const day = dayLabel ? weekdayIndex.get(dayLabel) : undefined
     const hours = normalizedTimeRange(match?.[2])
     if (day === undefined || !hours || days[day]) return null
     days[day] = hours
@@ -37,7 +38,7 @@ function parseWeeklyOpeningHours(value) {
   return days.some(Boolean) ? days : null
 }
 
-export function formatOpeningHoursLines(value) {
+export function formatOpeningHoursLines(value: unknown): string[] {
   const source = String(value ?? '').trim()
   const days = parseWeeklyOpeningHours(source)
   if (!days) return [source || 'Öffnungszeiten folgen']
@@ -53,6 +54,6 @@ export function formatOpeningHoursLines(value) {
   return groups
 }
 
-export function formatOpeningHours(value) {
+export function formatOpeningHours(value: unknown): string {
   return formatOpeningHoursLines(value).join(' · ')
 }

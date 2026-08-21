@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { matchesSpotSearch, spotSearchLocation, spotSearchMeta, spotSearchRank } from '../src/shared/spotSearch.js'
+import { matchesSpotSearch, spotSearchLocation, spotSearchMeta, spotSearchRank } from '../src/shared/spotSearch.ts'
 
 const svn = { name: 'SVN e.V. München', district: '81737 München', address: 'Fritz-Erler-Straße 3' }
 

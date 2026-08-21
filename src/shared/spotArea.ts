@@ -1,9 +1,9 @@
-export function formatSpotArea(value, fallback = 'Keine Angabe') {
+export function formatSpotArea(value: unknown, fallback = 'Keine Angabe'): string {
   const area = String(value ?? '').trim()
   return area && area !== '0' ? area : fallback
 }
 
-export function spotAreaSquareMeters(value) {
+export function spotAreaSquareMeters(value: unknown): number | null {
   const area = String(value ?? '').trim()
   if (!/(?:m²|m2|qm|quadratmeter)/iu.test(area)) return null
 

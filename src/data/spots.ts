@@ -1,6 +1,8 @@
-export const mannheimCenter = [49.4875, 8.4660]
+import type { Coordinates, InitialSpot } from '../shared/domain.ts'
 
-export const initialSpots = [
+export const mannheimCenter: Coordinates = [49.4875, 8.4660]
+
+export const initialSpots: InitialSpot[] = [
   { id: '419ca859-f9a5-4b5e-87f3-a4f2da0ad201', name: 'Neckarblock', district: 'Jungbusch', address: 'Hafenstraße 18, Mannheim', position: [49.4964, 8.4548], distance: '1,2 km', open: '07:00–23:00', size: '1.150 m²', visits: 4 },
   { id: 'ee258faf-7be1-4b65-aeb8-af0ed41a2d02', name: 'Griffwerk Mannheim', district: 'Innenstadt', address: 'Rheinstraße 42, Mannheim', position: [49.4865, 8.4699], distance: '400 m', open: '08:00–22:30', size: '870 m²', visits: 2 },
   { id: 'a78b6ecb-5a5f-4ea4-a44b-af4553a3e303', name: 'Blockraum Lindenhof', district: 'Lindenhof', address: 'Meerfeldstraße 9, Mannheim', position: [49.4694, 8.4787], distance: '2,4 km', open: '09:00–22:00', size: '620 m²', visits: 0 },

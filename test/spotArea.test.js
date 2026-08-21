@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatSpotArea, spotAreaSquareMeters } from '../src/shared/spotArea.js'
+import { formatSpotArea, spotAreaSquareMeters } from '../src/shared/spotArea.ts'
 
 test('keeps arbitrary hall size descriptions for display', () => {
   assert.equal(formatSpotArea('2.000 m²'), '2.000 m²')

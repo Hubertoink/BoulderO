@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconAdjustmentsHorizontal, IconArrowsMaximize, IconBookmark, IconCalendarEvent, IconCheck, IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload, IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2, IconLogout, IconPhoto, IconPlus, IconSearch, IconSparkles, IconTrophy, IconTrash, IconUserCircle, IconUserCheck, IconUserPlus, IconUsers, IconWorld, IconX } from '@tabler/icons-react'
-import { formatJournalDate, formatPlanDate } from '../../shared/viewHelpers.js'
+import { formatJournalDate, formatPlanDate } from '../../shared/viewHelpers.ts'
 
 export async function optimizePhoto(file) {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size <= 1_500_000) return file
