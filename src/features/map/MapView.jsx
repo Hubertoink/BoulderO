@@ -97,11 +97,11 @@ function planMapIcon(plan, offset) {
   return icon
 }
 
-function FocusMap({ spot }) {
+function FocusMap({ spot, request }) {
   const map = useMap()
   useEffect(() => {
-    if (spot) map.flyTo(spot.position, 14, { duration: 0.45 })
-  }, [spot, map])
+    if (spot && request > 0) map.flyTo(spot.position, 14, { duration: 0.45 })
+  }, [spot, request, map])
   return null
 }
 
@@ -260,6 +260,7 @@ function MobileMapDismiss({ onDismiss }) {
 
 function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, onSelectPlan, onActivityBoundsChange }) {
   const [initialView] = useState(savedMapView)
+  const [spotFocusRequest, setSpotFocusRequest] = useState(0)
   return (
     <div className="map-frame">
       <MapContainer center={initialView ? [initialView.latitude, initialView.longitude] : mannheimCenter} zoom={initialView?.zoom ?? 13} zoomControl={false} scrollWheelZoom className="map-canvas">
@@ -267,7 +268,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <FocusMap spot={selectedSpot} />
+        <FocusMap spot={selectedSpot} request={spotFocusRequest} />
         <FocusLocation location={userLocation} request={locationFocusRequest} />
         <MapViewportResize />
         <MapViewportPersistence />
@@ -280,7 +281,11 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
             key={spot.id}
             position={spot.position}
             icon={markerIcon(spot.visits > 0, selectedSpot?.id === spot.id)}
-            eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(spot.id) } }}
+            eventHandlers={{ click: (event) => {
+              if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent)
+              if (selectedSpot?.id === spot.id) setSpotFocusRequest((current) => current + 1)
+              else onSelect(spot.id)
+            } }}
           />
         ))}
         <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
@@ -332,7 +337,6 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
   return (
     <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
-        <span className="eyebrow">{spot.district} · {spot.distance}</span>
         <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}<button type="button" className="icon-button ui-icon-button spot-sheet__close" onClick={onClose} aria-label="Hallenkarte schließen" title="Schließen"><IconX size={18} /></button></div>
       </div>
       <div className="spot-sheet__title-row">
