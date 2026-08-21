@@ -669,3 +669,10 @@ body.modal-open {
 .import-review__changes span { padding: 0 2px; color: var(--ink-soft); }
 .import-review__unchanged { color: var(--ink-soft); font-size: 11px; }
 .map-plan-attendee-count .spot-visitors__popover { right: 0; left: auto; }
+.spot-details-toggle { display: none; }
+@media (max-width: 560px) {
+  .spot-details-toggle { width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding: 0 11px; border: 1px solid var(--line); background: rgba(251,252,249,.88); color: var(--deep-space-blue); font-size: 12px; font-weight: 750; text-align: left; }
+  .spot-details-toggle svg { transition: transform .18s ease; }
+  .spot-details-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .spot-details { min-width: 0; }
+}

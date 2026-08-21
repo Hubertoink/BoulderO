@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
-import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronRight, IconCurrentLocation, IconFlag, IconMapPin, IconMessageCircle, IconSearch, IconX } from '@tabler/icons-react'
+import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronDown, IconChevronRight, IconCurrentLocation, IconFlag, IconMapPin, IconMessageCircle, IconSearch, IconX } from '@tabler/icons-react'
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
@@ -328,6 +328,7 @@ function SpotPlans({ plans, onOpenPlanFeed }) {
 }
 
 function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobile, onOpenUserFeed, onOpenPlanFeed }) {
+  const [detailsOpen, setDetailsOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 560px)').matches)
   const visited = spot.visits > 0
   const lastVisitDate = spot.last_visit_at ? new Date(`${String(spot.last_visit_at).slice(0, 10)}T00:00:00`) : null
   const daysSinceLastVisit = lastVisitDate ? Math.floor((Date.now() - lastVisitDate.getTime()) / 86400000) : 0
@@ -338,6 +339,9 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
     if (!spot.website) return 'Keine Website'
     try { return new URL(spot.website).hostname.replace(/^www\./, '') } catch { return spot.website }
   })()
+  useEffect(() => {
+    setDetailsOpen(typeof window === 'undefined' || !window.matchMedia('(max-width: 560px)').matches)
+  }, [spot.id])
   return (
     <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
@@ -349,13 +353,18 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
           <p>{spot.address}</p>
         </div>
       </div>
-      <div className="spot-meta">
-        <span className="spot-meta__opening"><b>Öffnungszeiten</b>{formatOpeningHoursLines(spot.opening_hours ?? spot.open).map((line) => <small key={line}>{line}</small>)}</span>
-        <span><b>Area</b>{formatSpotArea(spot.area_sqm ?? spot.size)}</span>
-        <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
-        <span><b>Deine Besuche</b>{spot.visits}</span>
+      <button type="button" className="spot-details-toggle" onClick={() => setDetailsOpen((value) => !value)} aria-expanded={detailsOpen} aria-controls={`spot-details-${spot.id}`}>
+        Infos <IconChevronDown size={18} />
+      </button>
+      <div className="spot-details" id={`spot-details-${spot.id}`} hidden={!detailsOpen}>
+        <div className="spot-meta">
+          <span className="spot-meta__opening"><b>Öffnungszeiten</b>{formatOpeningHoursLines(spot.opening_hours ?? spot.open).map((line) => <small key={line}>{line}</small>)}</span>
+          <span><b>Area</b>{formatSpotArea(spot.area_sqm ?? spot.size)}</span>
+          <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
+          <span><b>Deine Besuche</b>{spot.visits}</span>
+        </div>
+        <SpotVisitors spotId={spot.id} onOpenUserFeed={onOpenUserFeed} />
       </div>
-      <SpotVisitors spotId={spot.id} onOpenUserFeed={onOpenUserFeed} />
       <button className={`visit-button ${visited ? 'is-visited' : ''}`} onClick={() => onVisit(spot.id)}>
         <IconCheck size={19} />
         {visited ? 'Weiteren Besuch eintragen' : 'Ersten Besuch eintragen'}
