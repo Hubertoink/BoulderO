@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs'
 import express from 'express'
 import multer from 'multer'
 import nodemailer from 'nodemailer'
+import webpush from 'web-push'
 import { ExpressAuth, getSession } from '@auth/express'
 import Credentials from '@auth/express/providers/credentials'
 import Google from '@auth/express/providers/google'
@@ -29,6 +30,27 @@ const passwordScryptCost = 4096
 const legacyPasswordScryptCost = 16384
 const passwordScryptOptions = (cost) => ({ N: cost, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
 const appOrigin = process.env.APP_ORIGIN?.replace(/\/$/, '')
+const notificationCategories = ['messages', 'friendships', 'comments', 'reactions', 'plans', 'reminders']
+const notificationDefaults = {
+  messages: { inAppEnabled: true, pushEnabled: true },
+  friendships: { inAppEnabled: true, pushEnabled: true },
+  comments: { inAppEnabled: true, pushEnabled: true },
+  reactions: { inAppEnabled: true, pushEnabled: false },
+  plans: { inAppEnabled: true, pushEnabled: true },
+  reminders: { inAppEnabled: true, pushEnabled: true },
+}
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY?.trim()
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY?.trim()
+const vapidSubject = process.env.VAPID_SUBJECT?.trim()
+let pushConfigured = process.env.PUSH_NOTIFICATIONS_ENABLED === 'true' && Boolean(vapidPublicKey && vapidPrivateKey && vapidSubject)
+if (pushConfigured) {
+  try {
+    webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey)
+  } catch (error) {
+    pushConfigured = false
+    console.error('Web-Push ist deaktiviert: VAPID-Konfiguration ist ungültig.', error)
+  }
+}
 const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.SMTP_FROM)
 const geocodingCache = new Map()
 let lastGeocodingRequestAt = 0
@@ -423,15 +445,207 @@ async function areFriends(firstUserId, secondUserId) {
   })
 }
 
-async function notifyPlanUsers(client, planId, actorId, type, payload, recipientIds) {
-  const recipients = [...new Set(recipientIds.filter((id) => id && id !== actorId))]
-  if (!recipients.length) return
+async function ensureNotificationPreferences(client, userId) {
   await client.query(
-    `INSERT INTO notifications (user_id, actor_id, type, planned_visit_id, payload)
-     SELECT recipient_id, $2, $3, $4, $5::jsonb
-       FROM unnest($1::uuid[]) AS recipient_id`,
-    [recipients, actorId, type, planId, JSON.stringify(payload)],
+    `INSERT INTO notification_preferences (user_id, category, in_app_enabled, push_enabled)
+     VALUES
+       ($1, 'messages', TRUE, TRUE),
+       ($1, 'friendships', TRUE, TRUE),
+       ($1, 'comments', TRUE, TRUE),
+       ($1, 'reactions', TRUE, FALSE),
+       ($1, 'plans', TRUE, TRUE),
+       ($1, 'reminders', TRUE, TRUE)
+     ON CONFLICT (user_id, category) DO NOTHING`,
+    [userId],
   )
+}
+
+async function preferencesForUser(client, userId) {
+  await ensureNotificationPreferences(client, userId)
+  const result = await client.query(
+    'SELECT category, in_app_enabled, push_enabled FROM notification_preferences WHERE user_id = $1',
+    [userId],
+  )
+  return Object.fromEntries(result.rows.map((row) => [row.category, {
+    inAppEnabled: row.in_app_enabled,
+    pushEnabled: row.push_enabled,
+  }]))
+}
+
+function privatePushCopy(category) {
+  return ({
+    messages: 'Neue Nachricht in BoulderO',
+    friendships: 'Neue Freundschaftsaktivität in BoulderO',
+    comments: 'Neuer Kommentar zu deinem Beitrag',
+    reactions: 'Neue Reaktion auf deinen Beitrag',
+    plans: 'Neue Änderung bei einer Planung',
+    reminders: 'Erinnerung an deine Boulderplanung',
+  })[category] ?? 'Neue Benachrichtigung in BoulderO'
+}
+
+async function createNotifications(client, { recipientIds, actorId = null, type, category, plannedVisitId = null, payload = {}, title, body, targetUrl }) {
+  const recipients = [...new Set(recipientIds.filter((id) => id && id !== actorId))]
+  const createdIds = []
+  for (const recipientId of recipients) {
+    const preferences = await preferencesForUser(client, recipientId)
+    const preference = preferences[category] ?? notificationDefaults[category]
+    const deliverPush = pushConfigured && preference.pushEnabled
+    if (!preference.inAppEnabled && !deliverPush) continue
+    const notification = await client.query(
+      `INSERT INTO notifications (user_id, actor_id, type, category, planned_visit_id, payload, title, body, target_url, in_app_visible)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [recipientId, actorId, type, category, plannedVisitId, JSON.stringify(payload), title, body, targetUrl, preference.inAppEnabled],
+    )
+    if (!notification.rowCount) continue
+    const notificationId = notification.rows[0].id
+    createdIds.push(notificationId)
+    if (deliverPush) {
+      await client.query(
+        `INSERT INTO notification_deliveries (notification_id, subscription_id)
+         SELECT $1, id FROM push_subscriptions WHERE user_id = $2
+         ON CONFLICT (notification_id, subscription_id) DO NOTHING`,
+        [notificationId, recipientId],
+      )
+    }
+  }
+  return createdIds
+}
+
+async function notifyPlanUsers(client, planId, actorId, type, payload, recipientIds) {
+  const presentation = {
+    plan_rsvp: { title: 'Neue Zusage', body: `Es gibt eine neue Rückmeldung für ${payload.spotName}.` },
+    plan_updated: { title: 'Planung geändert', body: `Die Planung für ${payload.spotName} wurde geändert.` },
+    plan_cancelled: { title: 'Planung abgesagt', body: `Die Planung für ${payload.spotName} wurde abgesagt.` },
+    plan_reminder: { title: 'Erinnerung', body: `Deine Planung bei ${payload.spotName} steht bald an.` },
+  }[type]
+  return createNotifications(client, {
+    recipientIds,
+    actorId,
+    type,
+    category: type === 'plan_reminder' ? 'reminders' : 'plans',
+    plannedVisitId: planId,
+    payload,
+    title: presentation.title,
+    body: presentation.body,
+    targetUrl: `/social?section=plans&plan=${encodeURIComponent(planId)}`,
+  })
+}
+
+async function claimPendingPushDeliveries(limit = 25) {
+  if (!pushConfigured) return []
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const claimed = await client.query(
+      `WITH candidates AS (
+         SELECT id
+           FROM notification_deliveries
+          WHERE status = 'pending'
+            AND available_at <= NOW()
+            AND (locked_until IS NULL OR locked_until < NOW())
+          ORDER BY created_at
+          FOR UPDATE SKIP LOCKED
+          LIMIT $1
+       )
+       UPDATE notification_deliveries delivery
+          SET attempt_count = delivery.attempt_count + 1,
+              locked_until = NOW() + INTERVAL '2 minutes'
+         FROM candidates
+        WHERE delivery.id = candidates.id
+       RETURNING delivery.id`,
+      [limit],
+    )
+    if (!claimed.rowCount) {
+      await client.query('COMMIT')
+      return []
+    }
+    const deliveries = await client.query(
+      `SELECT delivery.id, delivery.attempt_count, notification.user_id, notification.title, notification.body,
+              notification.category, notification.target_url, subscription.endpoint, subscription.p256dh,
+              subscription.auth, subscription.content_preview_enabled, subscription.badge_enabled
+         FROM notification_deliveries delivery
+         JOIN notifications notification ON notification.id = delivery.notification_id
+         JOIN push_subscriptions subscription ON subscription.id = delivery.subscription_id
+        WHERE delivery.id = ANY($1::uuid[])`,
+      [claimed.rows.map((row) => row.id)],
+    )
+    await client.query('COMMIT')
+    return deliveries.rows
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+async function flushPushDeliveries() {
+  const deliveries = await claimPendingPushDeliveries()
+  for (const delivery of deliveries) {
+    try {
+      const unread = delivery.badge_enabled
+        ? await pool.query('SELECT COUNT(*)::int AS count FROM notifications WHERE user_id = $1 AND in_app_visible AND read_at IS NULL', [delivery.user_id])
+        : { rows: [{ count: 0 }] }
+      const payload = {
+        title: delivery.content_preview_enabled ? delivery.title : 'BoulderO',
+        body: delivery.content_preview_enabled ? delivery.body : privatePushCopy(delivery.category),
+        targetUrl: delivery.target_url,
+        badgeCount: unread.rows[0].count,
+        showBadge: delivery.badge_enabled,
+      }
+      await webpush.sendNotification({ endpoint: delivery.endpoint, keys: { p256dh: delivery.p256dh, auth: delivery.auth } }, JSON.stringify(payload), { TTL: 60 * 60 })
+      await pool.query('UPDATE notification_deliveries SET status = \'sent\', sent_at = NOW(), locked_until = NULL, last_error = NULL WHERE id = $1', [delivery.id])
+      await pool.query('UPDATE push_subscriptions SET last_used_at = NOW() WHERE endpoint = $1', [delivery.endpoint])
+    } catch (error) {
+      const statusCode = Number(error?.statusCode)
+      if (statusCode === 404 || statusCode === 410) {
+        await pool.query("UPDATE notification_deliveries SET status = 'failed', locked_until = NULL, last_error = 'subscription_expired' WHERE id = $1", [delivery.id])
+        await pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [delivery.endpoint])
+      } else {
+        const exhausted = delivery.attempt_count >= 5
+        const delayMinutes = Math.min(24 * 60, 2 ** delivery.attempt_count)
+        await pool.query(
+          `UPDATE notification_deliveries
+              SET status = CASE WHEN $2 THEN 'failed' ELSE 'pending' END,
+                  available_at = NOW() + ($3 * INTERVAL '1 minute'),
+                  locked_until = NULL,
+                  last_error = $4
+            WHERE id = $1`,
+          [delivery.id, exhausted, delayMinutes, String(error?.message ?? 'push_delivery_failed').slice(0, 500)],
+        )
+      }
+    }
+  }
+}
+
+async function schedulePlanReminders() {
+  const duePlans = await pool.query(
+    `SELECT plan.id, plan.user_id, plan.starts_at, spot.name AS spot_name
+       FROM planned_visits plan
+       JOIN spots spot ON spot.id = plan.spot_id
+      WHERE plan.status = 'scheduled'
+        AND plan.starts_at > NOW()
+        AND plan.starts_at <= NOW() + INTERVAL '2 hours'
+        AND NOT EXISTS (
+          SELECT 1 FROM notifications reminder
+           WHERE reminder.user_id = plan.user_id
+             AND reminder.planned_visit_id = plan.id
+             AND reminder.type = 'plan_reminder'
+        )
+      ORDER BY plan.starts_at
+      LIMIT 100`,
+  )
+  for (const plan of duePlans.rows) {
+    await createNotifications(pool, {
+      recipientIds: [plan.user_id], type: 'plan_reminder', category: 'reminders', plannedVisitId: plan.id,
+      payload: { spotName: plan.spot_name, startsAt: plan.starts_at }, title: 'Boulderplanung in Kürze',
+      body: `Deine Planung bei ${plan.spot_name} beginnt in weniger als zwei Stunden.`,
+      targetUrl: `/social?section=plans&plan=${encodeURIComponent(plan.id)}`,
+    })
+  }
+  if (duePlans.rowCount) void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
 }
 
 async function planRsvpUsers(client, planId) {
@@ -864,6 +1078,116 @@ app.get('/health', asyncRoute(async (_req, res) => {
 
 app.get('/me', requireUser, (req, res) => res.json({ user: req.user }))
 
+app.get('/notification-preferences', requireUser, asyncRoute(async (req, res) => {
+  const preferences = await preferencesForUser(pool, req.user.id)
+  res.json({
+    preferences: notificationCategories.map((category) => ({ category, ...preferences[category] })),
+    push: {
+      configured: pushConfigured,
+      publicKey: pushConfigured ? vapidPublicKey : null,
+    },
+  })
+}))
+
+app.put('/notification-preferences', requireUser, asyncRoute(async (req, res) => {
+  const input = z.object({
+    preferences: z.array(z.object({
+      category: z.enum(notificationCategories),
+      inAppEnabled: z.boolean(),
+      pushEnabled: z.boolean(),
+    })).min(1).max(notificationCategories.length),
+  }).parse(req.body)
+  if (new Set(input.preferences.map((preference) => preference.category)).size !== input.preferences.length) {
+    return res.status(400).json({ error: 'duplicate_notification_category' })
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await ensureNotificationPreferences(client, req.user.id)
+    for (const preference of input.preferences) {
+      await client.query(
+        `INSERT INTO notification_preferences (user_id, category, in_app_enabled, push_enabled, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (user_id, category)
+         DO UPDATE SET in_app_enabled = EXCLUDED.in_app_enabled, push_enabled = EXCLUDED.push_enabled, updated_at = NOW()`,
+        [req.user.id, preference.category, preference.inAppEnabled, preference.pushEnabled],
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+  const preferences = await preferencesForUser(pool, req.user.id)
+  res.json({ preferences: notificationCategories.map((category) => ({ category, ...preferences[category] })) })
+}))
+
+app.post('/push-subscriptions', requireUser, asyncRoute(async (req, res) => {
+  if (!pushConfigured) return res.status(503).json({ error: 'push_not_configured' })
+  const input = z.object({
+    endpoint: z.string().url().max(2048),
+    keys: z.object({ p256dh: z.string().min(16).max(1024), auth: z.string().min(8).max(1024) }),
+    expirationTime: z.number().finite().positive().nullable().optional(),
+    contentPreviewEnabled: z.boolean().optional().default(false),
+    badgeEnabled: z.boolean().optional().default(true),
+  }).parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const existing = await client.query('SELECT id FROM push_subscriptions WHERE endpoint = $1 FOR UPDATE', [input.endpoint])
+    if (existing.rowCount) await client.query('DELETE FROM notification_deliveries WHERE subscription_id = $1', [existing.rows[0].id])
+    const result = await client.query(
+      `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, expiration_time, user_agent, content_preview_enabled, badge_enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (endpoint) DO UPDATE
+         SET user_id = EXCLUDED.user_id,
+             p256dh = EXCLUDED.p256dh,
+             auth = EXCLUDED.auth,
+             expiration_time = EXCLUDED.expiration_time,
+             user_agent = EXCLUDED.user_agent,
+             content_preview_enabled = EXCLUDED.content_preview_enabled,
+             badge_enabled = EXCLUDED.badge_enabled,
+             updated_at = NOW()
+       RETURNING id, content_preview_enabled, badge_enabled`,
+      [req.user.id, input.endpoint, input.keys.p256dh, input.keys.auth, input.expirationTime ? new Date(input.expirationTime) : null, String(req.get('user-agent') ?? '').slice(0, 500), input.contentPreviewEnabled, input.badgeEnabled],
+    )
+    await client.query('COMMIT')
+    res.status(201).json({ subscription: result.rows[0] })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}))
+
+app.patch('/push-subscriptions/:subscriptionId', requireUser, asyncRoute(async (req, res) => {
+  const id = z.string().uuid().parse(req.params.subscriptionId)
+  const input = z.object({
+    contentPreviewEnabled: z.boolean().optional(),
+    badgeEnabled: z.boolean().optional(),
+  }).refine((value) => value.contentPreviewEnabled !== undefined || value.badgeEnabled !== undefined).parse(req.body)
+  const result = await pool.query(
+    `UPDATE push_subscriptions
+        SET content_preview_enabled = COALESCE($3, content_preview_enabled),
+            badge_enabled = COALESCE($4, badge_enabled),
+            updated_at = NOW()
+      WHERE id = $1 AND user_id = $2
+      RETURNING id, content_preview_enabled, badge_enabled`,
+    [id, req.user.id, input.contentPreviewEnabled ?? null, input.badgeEnabled ?? null],
+  )
+  if (!result.rowCount) return res.status(404).json({ error: 'push_subscription_not_found' })
+  res.json({ subscription: result.rows[0] })
+}))
+
+app.delete('/push-subscriptions/:subscriptionId', requireUser, asyncRoute(async (req, res) => {
+  const id = z.string().uuid().parse(req.params.subscriptionId)
+  await pool.query('DELETE FROM push_subscriptions WHERE id = $1 AND user_id = $2', [id, req.user.id])
+  res.status(204).end()
+}))
+
 app.delete('/me', requireUser, asyncRoute(async (req, res) => {
   const input = z.object({ confirmation: z.literal('LOESCHEN') }).parse(req.body)
   void input
@@ -1112,11 +1436,21 @@ app.post('/social/friend-requests/:userId', requireUser, asyncRoute(async (req, 
     if (reverse.rowCount) {
       await client.query("UPDATE friend_requests SET status = 'accepted', responded_at = NOW() WHERE id = $1", [reverse.rows[0].id])
       await client.query("INSERT INTO follows (follower_id, followed_id, status) VALUES ($1, $2, 'accepted'), ($2, $1, 'accepted') ON CONFLICT (follower_id, followed_id) DO UPDATE SET status = 'accepted'", [req.user.id, targetId])
+      await createNotifications(client, {
+        recipientIds: [targetId], actorId: req.user.id, type: 'friend_accepted', category: 'friendships',
+        payload: { userId: req.user.id }, title: 'Freundschaft bestätigt', body: `${req.user.name} hat eure Freundschaft bestätigt.`, targetUrl: '/friends',
+      })
       await client.query('COMMIT')
+      void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
       return res.status(201).json({ status: 'accepted' })
     }
     const request = await client.query("INSERT INTO friend_requests (sender_id, recipient_id, status, created_at, responded_at) VALUES ($1, $2, 'pending', NOW(), NULL) ON CONFLICT (sender_id, recipient_id) DO UPDATE SET status = 'pending', created_at = NOW(), responded_at = NULL RETURNING id, status, created_at", [req.user.id, targetId])
+    await createNotifications(client, {
+      recipientIds: [targetId], actorId: req.user.id, type: 'friend_request', category: 'friendships',
+      payload: { requestId: request.rows[0].id }, title: 'Neue Freundschaftsanfrage', body: `${req.user.name} möchte mit dir befreundet sein.`, targetUrl: '/friends?tab=requests',
+    })
     await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
     res.status(201).json({ request: request.rows[0] })
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1150,7 +1484,12 @@ app.post('/social/friend-requests/:requestId/accept', requireUser, asyncRoute(as
     }
     const { sender_id: senderId, recipient_id: recipientId } = request.rows[0]
     await client.query("INSERT INTO follows (follower_id, followed_id, status) VALUES ($1, $2, 'accepted'), ($2, $1, 'accepted') ON CONFLICT (follower_id, followed_id) DO UPDATE SET status = 'accepted'", [senderId, recipientId])
+    await createNotifications(client, {
+      recipientIds: [senderId], actorId: req.user.id, type: 'friend_accepted', category: 'friendships',
+      payload: { userId: req.user.id }, title: 'Freundschaft bestätigt', body: `${req.user.name} hat deine Anfrage angenommen.`, targetUrl: '/friends',
+    })
     await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
     res.json({ accepted: true })
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1270,7 +1609,7 @@ app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
       (SELECT COUNT(*) FROM entry_likes l JOIN journal_entries j ON j.id = l.journal_entry_id, last_seen WHERE j.user_id = $1 AND l.user_id <> $1 AND l.created_at > last_seen.value)
       + (SELECT COUNT(*) FROM entry_comments c JOIN journal_entries j ON j.id = c.journal_entry_id, last_seen WHERE j.user_id = $1 AND c.user_id <> $1 AND c.created_at > last_seen.value)
     )::int AS unread_feed,
-    (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $1 AND n.read_at IS NULL) AS unread_plans
+    (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $1 AND n.in_app_visible AND n.read_at IS NULL AND n.category IN ('plans', 'reminders')) AS unread_plans
   `, [req.user.id])
   res.json(result.rows[0])
 }))
@@ -1368,29 +1707,49 @@ app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
 app.get('/notifications', requireUser, asyncRoute(async (req, res) => {
   const { unreadOnly } = z.object({ unreadOnly: z.coerce.boolean().optional() }).parse(req.query)
   const result = await pool.query(`
-    SELECT n.id, n.type, n.payload, n.created_at, n.read_at, n.planned_visit_id,
+    SELECT n.id, n.type, n.category, n.title, n.body, n.target_url, n.payload, n.created_at, n.read_at, n.planned_visit_id,
            u.name AS actor_name, u.image AS actor_image,
            p.status AS plan_status, p.starts_at, s.name AS spot_name
       FROM notifications n
       LEFT JOIN users u ON u.id = n.actor_id
       LEFT JOIN planned_visits p ON p.id = n.planned_visit_id
       LEFT JOIN spots s ON s.id = p.spot_id
-     WHERE n.user_id = $1 AND ($2::boolean IS NOT TRUE OR n.read_at IS NULL)
+     WHERE n.user_id = $1 AND n.in_app_visible AND ($2::boolean IS NOT TRUE OR n.read_at IS NULL)
      ORDER BY n.created_at DESC
      LIMIT 40
   `, [req.user.id, unreadOnly ?? false])
   res.json({ notifications: result.rows })
 }))
 
+app.get('/notifications/summary', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query(
+    `SELECT COUNT(*)::int AS unread_count
+       FROM notifications
+      WHERE user_id = $1 AND in_app_visible AND read_at IS NULL`,
+    [req.user.id],
+  )
+  res.json(result.rows[0])
+}))
+
 app.post('/notifications/read', requireUser, asyncRoute(async (req, res) => {
-  const { plannedOnly } = z.object({ plannedOnly: z.boolean().optional() }).parse(req.body ?? {})
-  await pool.query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL${plannedOnly ? " AND type IN ('plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder')" : ''}`, [req.user.id])
+  const { plannedOnly, ids } = z.object({
+    plannedOnly: z.boolean().optional(),
+    ids: z.array(z.string().uuid()).min(1).max(40).optional(),
+  }).parse(req.body ?? {})
+  if (plannedOnly && ids) return res.status(400).json({ error: 'invalid_notification_read_scope' })
+  const scope = plannedOnly
+    ? " AND type IN ('plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder')"
+    : ids
+      ? ' AND id = ANY($2::uuid[])'
+      : ''
+  const parameters = ids ? [req.user.id, ids] : [req.user.id]
+  await pool.query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND in_app_visible AND read_at IS NULL${scope}`, parameters)
   res.status(204).end()
 }))
 
 app.post('/notifications/:notificationId/read', requireUser, asyncRoute(async (req, res) => {
   const id = z.string().uuid().parse(req.params.notificationId)
-  await pool.query('UPDATE notifications SET read_at = NOW() WHERE id = $1 AND user_id = $2 AND read_at IS NULL', [id, req.user.id])
+  await pool.query('UPDATE notifications SET read_at = NOW() WHERE id = $1 AND user_id = $2 AND in_app_visible AND read_at IS NULL', [id, req.user.id])
   res.status(204).end()
 }))
 
@@ -1476,6 +1835,7 @@ app.patch('/planned-visits/:planId', requireUser, asyncRoute(async (req, res) =>
       }, await planRsvpUsers(client, planId))
     }
     await client.query('COMMIT')
+    if (changed) void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
     res.json({ plannedVisit: result.rows[0] })
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1500,6 +1860,7 @@ app.post('/planned-visits/:planId/cancel', requireUser, asyncRoute(async (req, r
     const item = plan.rows[0]
     await notifyPlanUsers(client, planId, req.user.id, 'plan_cancelled', { spotName: item.spot_name, startsAt: item.starts_at, reason }, await planRsvpUsers(client, planId))
     await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
     res.status(204).end()
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1536,12 +1897,19 @@ app.post('/planned-visits/:planId/rsvp', requireUser, asyncRoute(async (req, res
      RETURNING response`,
     [planId, req.user.id, input.response],
   )
-  await pool.query(`
-    INSERT INTO notifications (user_id, actor_id, type, planned_visit_id, payload)
-    SELECT p.user_id, $2, 'plan_rsvp', p.id, jsonb_build_object('response', $3::text, 'spotName', s.name, 'startsAt', p.starts_at)
-      FROM planned_visits p JOIN spots s ON s.id = p.spot_id
-     WHERE p.id = $1 AND p.user_id <> $2
-  `, [planId, req.user.id, input.response])
+  const details = await pool.query(
+    `SELECT p.starts_at, s.name AS spot_name
+       FROM planned_visits p JOIN spots s ON s.id = p.spot_id
+      WHERE p.id = $1`,
+    [planId],
+  )
+  await createNotifications(pool, {
+    recipientIds: [item.user_id], actorId: req.user.id, type: 'plan_rsvp', category: 'plans', plannedVisitId: planId,
+    payload: { response: input.response, spotName: details.rows[0].spot_name, startsAt: details.rows[0].starts_at },
+    title: 'Neue Zusage', body: `${req.user.name} ist bei ${details.rows[0].spot_name} ${input.response === 'going' ? 'dabei' : 'interessiert'}.`,
+    targetUrl: `/social?section=plans&plan=${encodeURIComponent(planId)}`,
+  })
+  void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
   res.json({ rsvp: result.rows[0] })
 }))
 
@@ -1607,13 +1975,25 @@ app.post('/social/entries/:entryId/comments', requireUser, asyncRoute(async (req
     VALUES ($1, $2, $3)
     RETURNING id, body, created_at
   `, [entry.id, req.user.id, input.body])
+  await createNotifications(pool, {
+    recipientIds: [entry.user_id], actorId: req.user.id, type: 'entry_comment', category: 'comments',
+    payload: { entryId: entry.id, commentId: result.rows[0].id }, title: 'Neuer Kommentar', body: `${req.user.name} hat deinen Beitrag kommentiert.`, targetUrl: `/social?entry=${encodeURIComponent(entry.id)}`,
+  })
+  void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
   res.status(201).json({ comment: { ...result.rows[0], user_id: req.user.id, user_name: req.user.name, username: req.user.username } })
 }))
 
 app.post('/social/entries/:entryId/like', requireUser, asyncRoute(async (req, res) => {
   const entry = await getViewableEntry(req.user.id, req.params.entryId)
   if (!entry) return res.status(404).json({ error: 'entry_not_found' })
-  await pool.query('INSERT INTO entry_likes (journal_entry_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [entry.id, req.user.id])
+  const like = await pool.query('INSERT INTO entry_likes (journal_entry_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING journal_entry_id', [entry.id, req.user.id])
+  if (like.rowCount) {
+    await createNotifications(pool, {
+      recipientIds: [entry.user_id], actorId: req.user.id, type: 'entry_like', category: 'reactions',
+      payload: { entryId: entry.id }, title: 'Neue Reaktion', body: `${req.user.name} gefällt dein Beitrag.`, targetUrl: `/social?entry=${encodeURIComponent(entry.id)}`,
+    })
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+  }
   res.status(201).json({ liked: true })
 }))
 
@@ -1641,6 +2021,11 @@ app.post('/messages/:userId', requireUser, asyncRoute(async (req, res) => {
     INSERT INTO direct_messages (sender_id, recipient_id, body) VALUES ($1, $2, $3)
     RETURNING id, body, created_at, sender_id, recipient_id
   `, [req.user.id, req.params.userId, input.body])
+  await createNotifications(pool, {
+    recipientIds: [req.params.userId], actorId: req.user.id, type: 'direct_message', category: 'messages',
+    payload: { messageId: result.rows[0].id, senderId: req.user.id }, title: 'Neue Nachricht', body: `${req.user.name} hat dir geschrieben.`, targetUrl: `/friends?message=${encodeURIComponent(req.user.id)}`,
+  })
+  void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
   res.status(201).json({ message: result.rows[0] })
 }))
 
@@ -2267,4 +2652,16 @@ app.use((error, _req, res, _next) => {
 })
 
 await ensureManagedUsers()
+void schedulePlanReminders().catch((error) => console.error('Planungserinnerungen konnten nicht geplant werden:', error))
+const planReminderInterval = setInterval(() => {
+  void schedulePlanReminders().catch((error) => console.error('Planungserinnerungen konnten nicht geplant werden:', error))
+}, 5 * 60_000)
+planReminderInterval.unref()
+if (pushConfigured) {
+  void flushPushDeliveries().catch((error) => console.error('Ausstehende Push-Zustellungen konnten nicht gestartet werden:', error))
+  const pushDeliveryInterval = setInterval(() => {
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+  }, 60_000)
+  pushDeliveryInterval.unref()
+}
 app.listen(port, () => console.log(`BoulderO API listening on ${port}`))

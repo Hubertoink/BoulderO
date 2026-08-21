@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "BoulderO",
+  "short_name": "BoulderO",
+  "description": "Deine persönliche Boulderhallen-Karte.",
+  "lang": "de",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#edf1f0",
+  "theme_color": "#153243",
+  "icons": [
+    {
+      "src": "/BoulderO_Logo.ico",
+      "sizes": "any",
+      "type": "image/x-icon",
+      "purpose": "any maskable"
+    }
+  ]
+}

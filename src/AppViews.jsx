@@ -4,7 +4,7 @@ import L from 'leaflet'
 import {
   IconAdjustmentsHorizontal, IconArrowsMaximize, IconBookmark, IconCalendarEvent, IconCheck,
   IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload,
-  IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2,
+  IconBell, IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2,
   IconLogout, IconPhoto, IconPlus, IconSearch, IconSparkles, IconTrophy, IconTrash, IconUserCircle,
   IconUserCheck, IconUserPlus, IconUsers, IconWorld, IconX,
 } from '@tabler/icons-react'
@@ -13,6 +13,7 @@ import { mannheimCenter } from './data/spots'
 import { MapView, markerIcon } from './features/map/MapView.jsx'
 import { JournalComposer, optimizePhoto, PlannedVisitDialog, VisibilityPicker } from './features/journal/JournalComposer.jsx'
 import { formatFeedDate, formatJournalDate, formatPlanDate, useOutsideDismiss } from './shared/viewHelpers.ts'
+import { disablePushNotifications, enablePushNotifications, supportsPushNotifications, updatePushDeviceSettings } from './shared/pushNotifications.js'
 
 let activePlanningAuthorFilter = null
 
@@ -290,7 +291,7 @@ function AccountDeletionDialog({ username, onClose, onDelete }) {
   return <div className="composer-backdrop"><section className="journal-composer account-deletion-dialog" role="dialog" aria-modal="true" aria-label="Konto löschen"><div className="composer-header"><div><span className="eyebrow">Konto</span><h2>Konto endgültig löschen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Dein Profil, Besuche, Fotos, Planungen und persönlichen Daten werden dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.</p><form className="admin-login" onSubmit={submit}><label className="form-field"><span>Zur Bestätigung <b>LOESCHEN</b> eingeben</span><input required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoCapitalize="characters" /></label>{error && <p className="form-error">{error}</p>}<div className="account-deletion-dialog__actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="submit" className="danger" disabled={confirmation !== 'LOESCHEN' || saving}>{saving ? 'Wird gelöscht …' : `@${username} löschen`}</button></div></form></section></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenNotifications, notificationCount, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [avatarFile, setAvatarFile] = useState(null)
   if (!currentUser) {
@@ -331,6 +332,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
         </section>
         <section className="profile-actions">
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
+          <button onClick={onOpenNotifications}><IconBell size={18} /><span><b>Benachrichtigungen</b><small>Hinweise und Push-Einstellungen</small></span>{notificationCount > 0 && <b className="admin-count-badge">{notificationCount > 99 ? '99+' : notificationCount}</b>}<IconChevronRight size={18} /></button>
           <button onClick={onSuggestSpot}><IconMapPin size={18} /><span><b>Halle melden</b><small>Schlage eine Boulderhalle zur Prüfung vor</small></span><IconChevronRight size={18} /></button>
           {currentUser.role === 'superadmin' && <button onClick={onOpenAdmin}><IconAdjustmentsHorizontal size={18} /><span><b>Hallen verwalten</b><small>{spots.length} Hallen · {pendingSuggestionCount + pendingCorrectionCount} Hinweis{pendingSuggestionCount + pendingCorrectionCount === 1 ? '' : 'e'} offen</small></span>{pendingSuggestionCount + pendingCorrectionCount > 0 && <b className="admin-count-badge">{pendingSuggestionCount + pendingCorrectionCount > 99 ? '99+' : pendingSuggestionCount + pendingCorrectionCount}</b>}<IconChevronRight size={18} /></button>}
           {currentUser.role === 'superadmin' && <button onClick={onOpenAudit}><IconLock size={18} /><span><b>Registrierungen & Anmeldungen</b><small>Audit der letzten Kontoereignisse</small></span><IconChevronRight size={18} /></button>}
@@ -346,9 +348,128 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
   )
 }
 
+const notificationCategoryCopy = {
+  messages: ['Nachrichten', 'Direkte Nachrichten von Freund:innen'],
+  friendships: ['Freundschaften', 'Anfragen und bestätigte Freundschaften'],
+  comments: ['Kommentare', 'Kommentare zu deinen Beiträgen'],
+  reactions: ['Reaktionen', 'Likes auf deine Beiträge'],
+  plans: ['Planungen', 'Zusagen, Änderungen und Absagen'],
+  reminders: ['Erinnerungen', 'Bevorstehende Boulderplanungen'],
+}
+
+function NotificationSettingsView({ currentUser, onBack, onUnreadChange, onOpenTarget, onMessage }) {
+  const [preferences, setPreferences] = useState([])
+  const [push, setPush] = useState({ configured: false, publicKey: null })
+  const [notifications, setNotifications] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [pushEnabled, setPushEnabled] = useState(() => Boolean(window.localStorage.getItem(`bouldero-push-subscription:${currentUser?.id}`)))
+  const [contentPreviewEnabled, setContentPreviewEnabled] = useState(false)
+  const [badgeEnabled, setBadgeEnabled] = useState(() => window.localStorage.getItem(`bouldero-app-badge-enabled:${currentUser?.id}`) !== 'false')
+
+  async function load() {
+    setLoading(true); setError('')
+    try {
+      const [preferenceResponse, notificationResponse] = await Promise.all([
+        fetch('/api/notification-preferences'),
+        fetch('/api/notifications'),
+      ])
+      if (!preferenceResponse.ok || !notificationResponse.ok) throw new Error('Die Benachrichtigungseinstellungen konnten nicht geladen werden.')
+      const preferencePayload = await preferenceResponse.json()
+      const notificationPayload = await notificationResponse.json()
+      setPreferences(preferencePayload.preferences)
+      setPush(preferencePayload.push)
+      setNotifications(notificationPayload.notifications)
+      onUnreadChange(notificationPayload.notifications.filter((item) => !item.read_at).length)
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function savePreferences(next) {
+    setPreferences(next); setSaving(true); setError('')
+    try {
+      const response = await fetch('/api/notification-preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preferences: next }) })
+      if (!response.ok) throw new Error('Deine Einstellungen konnten nicht gespeichert werden.')
+      const payload = await response.json()
+      setPreferences(payload.preferences)
+    } catch (saveError) {
+      setError(saveError.message)
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function togglePreference(category, field) {
+    const next = preferences.map((preference) => preference.category === category ? { ...preference, [field]: !preference[field] } : preference)
+    void savePreferences(next)
+  }
+
+  async function setPushState(enabled) {
+    setSaving(true); setError('')
+    try {
+      if (enabled) {
+        if (!push.configured) throw new Error('Push-Benachrichtigungen werden auf dem Server noch eingerichtet.')
+        await enablePushNotifications({ userId: currentUser.id, publicKey: push.publicKey, contentPreviewEnabled, badgeEnabled })
+        setPushEnabled(true)
+        onMessage('Push-Benachrichtigungen sind auf diesem Gerät aktiv.')
+      } else {
+        await disablePushNotifications(currentUser.id)
+        setPushEnabled(false)
+        onMessage('Push-Benachrichtigungen wurden auf diesem Gerät deaktiviert.')
+      }
+    } catch (pushError) {
+      setError(pushError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function setDeviceSetting(field, value) {
+    if (field === 'badgeEnabled') {
+      window.localStorage.setItem(`bouldero-app-badge-enabled:${currentUser.id}`, String(value))
+      setBadgeEnabled(value)
+    } else {
+      setContentPreviewEnabled(value)
+    }
+    if (!pushEnabled) return
+    try {
+      await updatePushDeviceSettings(currentUser.id, { [field]: value })
+    } catch (deviceError) {
+      setError(deviceError.message)
+    }
+  }
+
+  async function markAllRead() {
+    const response = await fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+    if (!response.ok) return setError('Benachrichtigungen konnten nicht als gelesen markiert werden.')
+    setNotifications((current) => current.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })))
+    onUnreadChange(0)
+  }
+
+  async function openNotification(notification) {
+    if (!notification.read_at) {
+      await fetch(`/api/notifications/${notification.id}/read`, { method: 'POST' })
+      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read_at: new Date().toISOString() } : item))
+      onUnreadChange(notifications.filter((item) => item.id !== notification.id && !item.read_at).length)
+    }
+    void onOpenTarget(notification.target_url)
+  }
+
+  const unreadCount = notifications.filter((item) => !item.read_at).length
+  const pushAvailable = supportsPushNotifications() && push.configured
+  return <main className="view content-view compact-view notification-settings-view"><div className="page-intro"><div><span className="eyebrow">Profil</span><h1>Benachrichtigungen</h1><p>Lege fest, welche Hinweise du in BoulderO und auf diesem Gerät erhältst.</p></div></div>{error && <p className="form-error">{error}</p>}{loading ? <p className="journal-empty">Wird geladen …</p> : <><section className="notification-inbox"><div className="section-heading"><div><h2>Neu für dich</h2><span>{unreadCount} ungelesen</span></div>{unreadCount > 0 && <button type="button" onClick={markAllRead}>Alle gelesen</button>}</div>{!notifications.length && <p className="journal-empty">Keine Benachrichtigungen vorhanden.</p>}{notifications.slice(0, 12).map((notification) => <button type="button" className={`notification-item${notification.read_at ? '' : ' is-unread'}`} key={notification.id} onClick={() => void openNotification(notification)}><IconBell size={18} /><span><b>{notification.title}</b><small>{notification.body}</small><time>{formatFeedDate(notification.created_at)}</time></span><IconChevronRight size={17} /></button>)}</section><section className="notification-settings"><div className="section-heading"><div><h2>Dieses Gerät</h2><span>{pushEnabled ? 'Push aktiv' : 'Push aus'}</span></div></div><p className="notification-settings__copy">Die Freigabe erfolgt über die Systemeinstellung deines Geräts. Sie wird erst nach deinem Klick angefragt.</p><label className="notification-switch"><span><b>Push-Benachrichtigungen</b><small>{!push.configured ? 'Der Push-Dienst wird noch eingerichtet.' : !supportsPushNotifications() ? 'Dieses Gerät unterstützt Web Push nicht.' : pushEnabled ? 'Auf diesem Gerät aktiv' : 'Auf diesem Gerät deaktiviert'}</small></span><input type="checkbox" checked={pushEnabled} disabled={saving || !pushAvailable && !pushEnabled} onChange={(event) => void setPushState(event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Inhalte in der Vorschau</b><small>Namen und Hinweise in Systembenachrichtigungen anzeigen</small></span><input type="checkbox" checked={contentPreviewEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('contentPreviewEnabled', event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Badge am App-Icon</b><small>Ungelesene Hinweise am installierten App-Symbol zeigen</small></span><input type="checkbox" checked={badgeEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('badgeEnabled', event.target.checked)} /><i /></label></section><section className="notification-settings"><div className="section-heading"><div><h2>Welche Hinweise möchtest du erhalten?</h2><span>{saving ? 'Wird gespeichert …' : 'Kontoweite Einstellung'}</span></div></div><div className="notification-preference-list">{preferences.map((preference) => { const copy = notificationCategoryCopy[preference.category] ?? [preference.category, '']; return <article key={preference.category}><div><b>{copy[0]}</b><small>{copy[1]}</small></div><label><span>In App</span><input type="checkbox" checked={preference.inAppEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'inAppEnabled')} /></label><label><span>Push</span><input type="checkbox" checked={preference.pushEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'pushEnabled')} /></label></article> })}</div></section></>}<button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+}
+
 function LegalDialog({ kind, onClose }) {
   const privacy = kind === 'privacy'
-  return <div className="composer-backdrop legal-backdrop"><section className="journal-composer legal-dialog" role="dialog" aria-modal="true" aria-label={privacy ? 'Datenschutzerklärung' : 'Impressum'}><div className="composer-header"><div><span className="eyebrow">BoulderO</span><h2>{privacy ? 'Datenschutzerklärung' : 'Impressum'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{privacy ? <div className="legal-content"><p>Stand: 18. August 2026</p><h3>Verantwortlicher</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim<br /><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Welche Daten wir verarbeiten</h3><p>Bei der Registrierung verarbeiten wir Name, Benutzername, E-Mail-Adresse und ein nur gehasht gespeichertes Passwort. Wenn du BoulderO nutzt, kommen je nach Funktion Profilbild, Besuche, Tagebucheinträge, Fotos, soziale Verbindungen, Nachrichten und Hallenvorschläge hinzu.</p><h3>Zweck und Rechtsgrundlage</h3><p>Wir verarbeiten diese Daten, um dein Konto bereitzustellen, die von dir gewählten Funktionen auszuführen und BoulderO sicher zu betreiben. Rechtsgrundlage ist in der Regel die Vertragserfüllung nach Art. 6 Abs. 1 lit. b DSGVO sowie unser berechtigtes Interesse an Sicherheit und Missbrauchsschutz nach Art. 6 Abs. 1 lit. f DSGVO.</p><h3>Hosting, E-Mail und Karte</h3><p>BoulderO wird bei Mittwald gehostet. Bestätigungs- und Passwort-E-Mails werden über das BoulderO-Postfach versendet. Für die Karte werden Kacheln von OpenStreetMap geladen; dabei erhält OpenStreetMap technisch bedingt deine IP-Adresse und die angeforderten Kartendaten. Die optionale Straßensuche übermittelt deinen Suchbegriff an den Geocoding-Dienst Nominatim von OpenStreetMap.</p><h3>Speicherdauer</h3><p>Kontodaten und von dir erstellte Inhalte speichern wir grundsätzlich für die Dauer deines Kontos. Danach löschen oder anonymisieren wir sie, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p><h3>Deine Rechte</h3><p>Du kannst Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch verlangen. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren. Für Anliegen genügt eine E-Mail an die oben genannte Adresse.</p></div> : <div className="legal-content"><p><strong>Angaben gemäß § 5 DDG</strong></p><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p><h3>Kontakt</h3><p><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Verantwortlich für den Inhalt</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p></div>}</section></div>
+  return <div className="composer-backdrop legal-backdrop"><section className="journal-composer legal-dialog" role="dialog" aria-modal="true" aria-label={privacy ? 'Datenschutzerklärung' : 'Impressum'}><div className="composer-header"><div><span className="eyebrow">BoulderO</span><h2>{privacy ? 'Datenschutzerklärung' : 'Impressum'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div>{privacy ? <div className="legal-content"><p>Stand: 21. August 2026</p><h3>Verantwortlicher</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim<br /><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Welche Daten wir verarbeiten</h3><p>Bei der Registrierung verarbeiten wir Name, Benutzername, E-Mail-Adresse und ein nur gehasht gespeichertes Passwort. Wenn du BoulderO nutzt, kommen je nach Funktion Profilbild, Besuche, Tagebucheinträge, Fotos, soziale Verbindungen, Nachrichten und Hallenvorschläge hinzu.</p><h3>Push-Benachrichtigungen</h3><p>Wenn du Push-Benachrichtigungen aktivierst, speichern wir die technische Push-Adresse und die zugehörigen kryptografischen Schlüssel deines Geräts. Wir verwenden sie ausschließlich, um die von dir gewählten Hinweise zuzustellen. Du kannst Push jederzeit in deinem Profil oder in den Geräteeinstellungen deaktivieren; beim Abmelden wird die Zuordnung dieses Geräts entfernt.</p><h3>Zweck und Rechtsgrundlage</h3><p>Wir verarbeiten diese Daten, um dein Konto bereitzustellen, die von dir gewählten Funktionen auszuführen und BoulderO sicher zu betreiben. Rechtsgrundlage ist in der Regel die Vertragserfüllung nach Art. 6 Abs. 1 lit. b DSGVO sowie unser berechtigtes Interesse an Sicherheit und Missbrauchsschutz nach Art. 6 Abs. 1 lit. f DSGVO.</p><h3>Hosting, E-Mail und Karte</h3><p>BoulderO wird bei Mittwald gehostet. Bestätigungs- und Passwort-E-Mails werden über das BoulderO-Postfach versendet. Für die Karte werden Kacheln von OpenStreetMap geladen; dabei erhält OpenStreetMap technisch bedingt deine IP-Adresse und die angeforderten Kartendaten. Die optionale Straßensuche übermittelt deinen Suchbegriff an den Geocoding-Dienst Nominatim von OpenStreetMap.</p><h3>Speicherdauer</h3><p>Kontodaten und von dir erstellte Inhalte speichern wir grundsätzlich für die Dauer deines Kontos. Danach löschen oder anonymisieren wir sie, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p><h3>Deine Rechte</h3><p>Du kannst Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch verlangen. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren. Für Anliegen genügt eine E-Mail an die oben genannte Adresse.</p></div> : <div className="legal-content"><p><strong>Angaben gemäß § 5 DDG</strong></p><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p><h3>Kontakt</h3><p><a href="mailto:hubertoink@outlook.de">hubertoink@outlook.de</a></p><h3>Verantwortlich für den Inhalt</h3><p>Nikolas Häfner<br />Paul-Gerhardt-Straße 5<br />68169 Mannheim</p></div>}</section></div>
 }
 
 function BadgesView({ progress, onBack }) {
@@ -1034,7 +1155,7 @@ function PlanCancelDialog({ plan, onCancel, onClose }) {
 
 function PlanNotifications({ notifications, onRead }) {
   if (!notifications.length) return null
-  return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const copy = notification.type === 'plan_cancelled' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} abgesagt.` : notification.type === 'plan_updated' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} geändert.` : `${notification.actor_name ?? 'Jemand'} ist ${payload.response === 'going' ? 'dabei' : 'interessiert'} bei ${payload.spotName ?? notification.spot_name}.`; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
+  return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const copy = notification.type === 'plan_cancelled' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} abgesagt.` : notification.type === 'plan_updated' ? `${notification.actor_name ?? 'Jemand'} hat ${payload.spotName ?? notification.spot_name} geändert.` : notification.type === 'plan_reminder' ? `Deine Planung bei ${payload.spotName ?? notification.spot_name} beginnt bald.` : `${notification.actor_name ?? 'Jemand'} ist ${payload.response === 'going' ? 'dabei' : 'interessiert'} bei ${payload.spotName ?? notification.spot_name}.`; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
 }
 
 function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan, planFocus, onPlanFocusConsumed }) {
@@ -1048,7 +1169,7 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   const [expanded, setExpanded] = useState(null)
   const [commentDraft, setCommentDraft] = useState('')
   const [feedMode, setFeedMode] = useState('all')
-  const [section, setSection] = useState('feed')
+  const [section, setSection] = useState(() => new URLSearchParams(window.location.search).get('section') === 'plans' ? 'plans' : 'feed')
   const [planScope, setPlanScope] = useState('all')
   const [planResponse, setPlanResponse] = useState('all')
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
@@ -1153,7 +1274,8 @@ function UserAvatar({ user, onOpenImage }) {
 
 function FriendsView({ onOpenMessages, onSummaryChange, onOpenUserFeed, onOpenImage }) {
   const initialDiscoverUsername = new URLSearchParams(window.location.search).get('discover')?.replace(/^@+/, '') ?? ''
-  const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : 'friends')
+  const initialRequests = new URLSearchParams(window.location.search).get('tab') === 'requests'
+  const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : initialRequests ? 'requests' : 'friends')
   const [friends, setFriends] = useState([])
   const [friendSuggestions, setFriendSuggestions] = useState([])
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] })
@@ -1325,5 +1447,5 @@ function PasswordDialog({ onClose, onSave }) {
 export {
   AdminSpotsView, BadgesView, FeedView, FriendsView, JournalComposer, JournalEntryDialog,
   JournalView, LegalDialog, Lightbox, MapView, MessageDialog, PasswordDialog, PlannedVisitDialog,
-  ProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
+  NotificationSettingsView, ProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
 }

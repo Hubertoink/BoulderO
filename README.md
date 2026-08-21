@@ -62,6 +62,10 @@ docker compose up --build -d
 
 Für Mittwald wird die separate Datei [`compose.mittwald.yaml`](compose.mittwald.yaml) verwendet. Sie referenziert die beim Push nach `main` automatisch nach GitHub Container Registry veröffentlichten Images. Die Zugangswerte werden ausschließlich bei der Bereitstellung als Umgebungsvariablen gesetzt und nicht in Git gespeichert.
 
+## Push-Benachrichtigungen
+
+Die PWA kann Nachrichten, Freundschaftsaktivitäten, Beitragsreaktionen und Planungsänderungen als Web Push zustellen. Die Funktion bleibt standardmäßig deaktiviert. Einmalig lokal `npm run push:keys` ausführen und die drei ausgegebenen VAPID-Werte ausschließlich als Deployment-Variablen setzen. Anschließend `PUSH_NOTIFICATIONS_ENABLED=true` setzen. Private Schlüssel gehören niemals in Git. Nutzer:innen aktivieren Push anschließend bewusst unter Profil → Benachrichtigungen auf jedem Gerät separat.
+
 ```bash
 AUTH_SECRET="..." POSTGRES_PASSWORD="..." \
   mw stack deploy -s <stack-id> -c compose.mittwald.yaml
