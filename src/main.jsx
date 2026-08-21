@@ -40,6 +40,7 @@ import 'leaflet/dist/leaflet.css'
 import './styles.css'
 import { initialSpots, mannheimCenter } from './data/spots'
 import { AuditView, RegisteredUsersDialog } from './features/admin/AuthAudit.tsx'
+import { GroupsView } from './features/groups/GroupsView.jsx'
 import {
   AdminSpotsView,
   BadgesView,
@@ -68,11 +69,11 @@ const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
   { id: 'journal', label: 'Tagebuch', icon: IconBookmark },
   { id: 'social', label: 'Feed', icon: IconMessageCircle },
-  { id: 'friends', label: 'Freunde', icon: IconUsers },
+  { id: 'friends', label: 'Community', icon: IconUsers },
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
 
-const appViews = new Set(['map', 'journal', 'social', 'friends', 'profile', 'notifications', 'badges', 'connections', 'admin', 'audit'])
+const appViews = new Set(['map', 'journal', 'social', 'friends', 'groups', 'profile', 'notifications', 'badges', 'connections', 'admin', 'audit'])
 
 function viewFromLocation() {
   const segment = window.location.pathname.split('/').filter(Boolean)[0]
@@ -768,9 +769,10 @@ function App() {
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} onOpenUsers={openRegisteredUsers} />}
       {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} />}
-      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
+      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
+      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onSummaryChange={setFriendSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
-        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests; const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); return <button key={id} className={activeView === id ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
+        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests + (friendSummary.unread_groups ?? 0); const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); const active = id === 'friends' ? ['friends', 'groups', 'connections'].includes(activeView) : activeView === id; return <button key={id} className={active ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer key={composerPlan?.id ?? composerSpotId ?? 'new'} spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} plannedVisit={composerPlan} />}
