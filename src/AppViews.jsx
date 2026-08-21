@@ -551,9 +551,11 @@ function AdminSpotsView({
   const [importFile, setImportFile] = useState(null);
   const [importDecisions, setImportDecisions] = useState({});
   const [applyingImport, setApplyingImport] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [reviewingSuggestion, setReviewingSuggestion] = useState(null);
   const [sort, setSort] = useState({ key: "name", direction: "asc" });
   const csvInput = useRef(null);
+  const exportMenuRef = useOutsideDismiss(exportOpen, () => setExportOpen(false));
   const filteredSpots = spots.filter((spot) =>
     `${spot.name} ${spot.district} ${spot.address}`
       .toLowerCase()
@@ -648,10 +650,11 @@ function AdminSpotsView({
       setApplyingImport(false);
     }
   }
-  async function exportHalls() {
+  async function exportHalls(includeArchived = false) {
+    setExportOpen(false);
     setError("");
     try {
-      await onExport();
+      await onExport(includeArchived);
     } catch (exportError) {
       setError(exportError.message || "Der Hallenexport konnte nicht erstellt werden.");
     }
@@ -734,14 +737,16 @@ function AdminSpotsView({
           </p>
         </div>
         <div className="admin-import__actions">
-          <button
-            type="button"
-            className="text-back"
-            onClick={exportHalls}
-          >
-            <IconDownload size={16} />
-            Export herunterladen
-          </button>
+          <div className="admin-export-menu" ref={exportMenuRef}>
+            <button type="button" className="text-back" onClick={() => setExportOpen((current) => !current)} aria-expanded={exportOpen}>
+              <IconDownload size={16} />
+              Export herunterladen
+            </button>
+            {exportOpen && <div className="admin-export-menu__popover">
+              <button type="button" onClick={() => exportHalls(false)}><b>Nur aktive Hallen</b><small>Für Abgleich und Rückimport</small></button>
+              <button type="button" onClick={() => exportHalls(true)}><b>Mit archivierten Hallen</b><small>Vollständige Datenübersicht</small></button>
+            </div>}
+          </div>
           <button
             type="button"
             className="text-back"

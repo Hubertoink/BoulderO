@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatOpeningHours } from '../src/shared/openingHours.js'
+import { formatOpeningHours, formatOpeningHoursLines } from '../src/shared/openingHours.js'
 
 test('groups consecutive weekdays with identical opening hours', () => {
   assert.equal(
@@ -19,4 +19,11 @@ test('keeps differing weekdays separate and supports German weekday names', () =
 test('leaves unrecognised or already condensed opening hours intact', () => {
   assert.equal(formatOpeningHours('Mo–Fr 10:00–22:00'), 'Mo–Fr 10:00–22:00')
   assert.equal(formatOpeningHours('07:00–23:00'), '07:00–23:00')
+})
+
+test('returns a separate display line for every weekday block', () => {
+  assert.deepEqual(
+    formatOpeningHoursLines('Mo 9-23; Di 9-23; Mi 9-23; Do 9-23; Fr 9-23; Sa 10-22; So 10-22'),
+    ['Mo–Fr 09:00–23:00', 'Sa–So 10:00–22:00'],
+  )
 })

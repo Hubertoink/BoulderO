@@ -663,13 +663,13 @@ function App() {
     showToast('Halle von der Karte entfernt')
   }
 
-  async function exportSpots() {
-    const response = await fetch('/api/admin/spots/export')
+  async function exportSpots(includeArchived = false) {
+    const response = await fetch(`/api/admin/spots/export?includeArchived=${includeArchived}`)
     if (!response.ok) throw new Error('Der Hallenexport konnte nicht erstellt werden.')
     const downloadUrl = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a')
     anchor.href = downloadUrl
-    anchor.download = 'bouldero-hallen-export.zip'
+    anchor.download = includeArchived ? 'bouldero-hallen-export-inklusive-archiv.zip' : 'bouldero-hallen-export-aktiv.zip'
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()

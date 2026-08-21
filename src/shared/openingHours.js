@@ -37,10 +37,10 @@ function parseWeeklyOpeningHours(value) {
   return days.some(Boolean) ? days : null
 }
 
-export function formatOpeningHours(value) {
+export function formatOpeningHoursLines(value) {
   const source = String(value ?? '').trim()
   const days = parseWeeklyOpeningHours(source)
-  if (!days) return source || 'Öffnungszeiten folgen'
+  if (!days) return [source || 'Öffnungszeiten folgen']
 
   const groups = []
   for (let start = 0; start < days.length; start += 1) {
@@ -50,5 +50,9 @@ export function formatOpeningHours(value) {
     groups.push(`${weekdayLabels[start]}${end > start ? `–${weekdayLabels[end]}` : ''} ${days[start]}`)
     start = end
   }
-  return groups.join(' · ')
+  return groups
+}
+
+export function formatOpeningHours(value) {
+  return formatOpeningHoursLines(value).join(' · ')
 }

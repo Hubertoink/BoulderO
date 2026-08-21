@@ -1718,15 +1718,17 @@ app.get('/admin/users', ...requireSuperAdmin, asyncRoute(async (req, res) => {
   res.json({ users: result.rows, total: count.rows[0].total })
 }))
 
-app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
+app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const includeArchived = z.enum(['true', 'false']).parse(req.query.includeArchived ?? 'false') === 'true'
   const result = await pool.query(`
     SELECT id, name, district, address, website, opening_hours, area_sqm, image_url,
            source, source_external_id, source_license, status, created_at, updated_at,
            ST_Y(coordinates::geometry) AS latitude,
            ST_X(coordinates::geometry) AS longitude
       FROM spots
+     WHERE status = 'active' OR $1::boolean
      ORDER BY name ASC
-  `)
+  `, [includeArchived])
 
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'BoulderO'
@@ -1773,7 +1775,7 @@ app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res
   }
   const xlsx = await workbook.xlsx.writeBuffer()
 
-  res.attachment('bouldero-hallen-export.zip')
+  res.attachment(includeArchived ? 'bouldero-hallen-export-inklusive-archiv.zip' : 'bouldero-hallen-export-aktiv.zip')
   const archive = new ZipArchive({ zlib: { level: 9 } })
   archive.on('error', (error) => res.destroy(error))
   archive.pipe(res)
