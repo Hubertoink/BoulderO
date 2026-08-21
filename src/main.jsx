@@ -162,9 +162,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (window.CSS?.supports?.('height: 100dvh')) return undefined
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`)
+      const height = `${Math.round(viewport?.height || window.innerHeight)}px`
+      document.documentElement.style.setProperty('--app-viewport-height', height)
+      document.documentElement.style.setProperty('--dialog-viewport-height', height)
     }
     updateViewportHeight()
     viewport?.addEventListener('resize', updateViewportHeight)
@@ -221,7 +224,7 @@ function App() {
     setJournalVisits(visits)
     setSpots(apiSpots.map((spot) => {
       const fallback = initialSpots.find((item) => item.id === spot.id) ?? {}
-      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: `${Number(spot.area_sqm ?? 0).toLocaleString('de-DE')} m²`, visits: countBySpot[spot.id] ?? 0, last_visit_at: lastVisitBySpot[spot.id] ?? null }
+      return { ...fallback, ...spot, position: [Number(spot.latitude), Number(spot.longitude)], open: spot.opening_hours, size: spot.area_sqm ?? fallback.size ?? '', visits: countBySpot[spot.id] ?? 0, last_visit_at: lastVisitBySpot[spot.id] ?? null }
     }))
   }
 
@@ -277,6 +280,67 @@ function App() {
       document.body.classList.remove('map-dialog-open')
     }
   }, [composerOpen, composerSurface, planDialogSpotId])
+
+  useEffect(() => {
+    let activeDialog = null
+    let returnFocus = null
+
+    function getActiveDialog() {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+      return dialogs[dialogs.length - 1] ?? null
+    }
+
+    function syncDialogState() {
+      const nextDialog = getActiveDialog()
+      const dialogChanged = nextDialog !== activeDialog
+      document.documentElement.classList.toggle('modal-open', Boolean(nextDialog))
+      document.body.classList.toggle('modal-open', Boolean(nextDialog))
+
+      if (dialogChanged && nextDialog) {
+        returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const closeButton = nextDialog.querySelector('button[aria-label*="schließen" i]')
+        closeButton?.focus({ preventScroll: true })
+      } else if (dialogChanged && !nextDialog) {
+        returnFocus?.focus({ preventScroll: true })
+        returnFocus = null
+      }
+
+      activeDialog = nextDialog
+    }
+
+    function handleKeyDown(event) {
+      const dialog = getActiveDialog()
+      if (!dialog) return
+      if (event.key === 'Escape') {
+        dialog.querySelector('button[aria-label*="schließen" i]')?.click()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = [...dialog.querySelectorAll('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hasAttribute('hidden'))
+      if (!focusable.length) return
+      const currentIndex = focusable.indexOf(document.activeElement)
+      if (event.shiftKey && (currentIndex <= 0 || !dialog.contains(document.activeElement))) {
+        event.preventDefault()
+        focusable[focusable.length - 1].focus()
+      } else if (!event.shiftKey && currentIndex === focusable.length - 1) {
+        event.preventDefault()
+        focusable[0].focus()
+      }
+    }
+
+    const observer = new MutationObserver(syncDialogState)
+    observer.observe(document.getElementById('root'), { childList: true, subtree: true })
+    document.addEventListener('keydown', handleKeyDown)
+    syncDialogState()
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('keydown', handleKeyDown)
+      document.documentElement.classList.remove('modal-open')
+      document.body.classList.remove('modal-open')
+    }
+  }, [])
 
   async function refreshSession() {
     const response = await fetch('/api/me')
@@ -562,7 +626,8 @@ function App() {
       const payload = await response.json().catch(() => ({}))
       if (payload.error === 'csv_headers_invalid') throw new Error(`Diese Spalten fehlen: ${payload.missing.join(', ')}`)
       if (payload.error === 'csv_limit_exceeded') throw new Error('Pro Import sind höchstens 500 Hallen möglich.')
-      throw new Error('Die CSV-Datei konnte nicht analysiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
+      if (payload.error === 'xlsx_invalid') throw new Error('Die Excel-Datei konnte nicht gelesen werden. Bitte verwende eine gültige .xlsx-Datei.')
+      throw new Error('Die Datei konnte nicht analysiert werden. Bitte prüfe die Vorlage und die Koordinaten.')
     }
     return response.json()
   }
@@ -598,13 +663,13 @@ function App() {
     showToast('Halle von der Karte entfernt')
   }
 
-  async function exportSpots() {
-    const response = await fetch('/api/admin/spots/export')
+  async function exportSpots(includeArchived = false) {
+    const response = await fetch(`/api/admin/spots/export?includeArchived=${includeArchived}`)
     if (!response.ok) throw new Error('Der Hallenexport konnte nicht erstellt werden.')
     const downloadUrl = URL.createObjectURL(await response.blob())
     const anchor = document.createElement('a')
     anchor.href = downloadUrl
-    anchor.download = 'bouldero-hallen-export.zip'
+    anchor.download = includeArchived ? 'bouldero-hallen-export-inklusive-archiv.zip' : 'bouldero-hallen-export-aktiv.zip'
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()

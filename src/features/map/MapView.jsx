@@ -5,6 +5,8 @@ import { IconAdjustmentsHorizontal, IconCalendarEvent, IconCheck, IconChevronRig
 import 'leaflet/dist/leaflet.css'
 import { mannheimCenter } from '../../data/spots'
 import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.js'
+import { formatOpeningHoursLines } from '../../shared/openingHours.js'
+import { formatSpotArea, spotAreaSquareMeters } from '../../shared/spotArea.js'
 import { matchesSpotSearch, spotSearchMeta, spotSearchRank } from '../../shared/spotSearch.js'
 
 const mapViewStorageKey = 'bouldero.map-view'
@@ -64,18 +66,19 @@ function activityIcon(activity, index, offset, isPreview) {
   return icon
 }
 
-function planMapIcon(plan, offset) {
+function planMapIcon(plan, offset, showAttendees) {
   const cacheKey = [
     plan.id,
     plan.starts_at,
     offset.x,
     offset.y,
+    showAttendees,
     ...(plan.attendees ?? []).map((person) => [person.user_id, person.user_name, person.user_image, person.response].join(':')),
   ].join('|')
   const cached = planIconCache.get(cacheKey)
   if (cached) return cached
   const day = new Intl.DateTimeFormat('de-DE', { day: '2-digit' }).format(new Date(plan.starts_at))
-  const attendees = (plan.attendees ?? []).slice(0, 6)
+  const attendees = showAttendees ? (plan.attendees ?? []).slice(0, 6) : []
   const attendeeIcons = attendees.map((person, index) => {
     const angle = ((Math.PI * 2 * index) / attendees.length) - Math.PI / 2
     const initials = person.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
@@ -83,7 +86,7 @@ function planMapIcon(plan, offset) {
     const responseClass = person.response === 'going' ? 'is-going' : 'is-interested'
     return `<span class="map-plan-attendee ${responseClass}" style="--plan-attendee-x:${(Math.cos(angle) * 26).toFixed(1)}px;--plan-attendee-y:${(Math.sin(angle) * 26).toFixed(1)}px;--plan-attendee-delay:${(index * -.42).toFixed(2)}s"><span class="map-plan-attendee__float">${escapeMarkerText(initials)}${avatar}</span></span>`
   }).join('')
-  const overflow = (plan.attendees?.length ?? 0) > attendees.length ? `<span class="map-plan-attendee map-plan-attendee--more">+${plan.attendees.length - attendees.length}</span>` : ''
+  const overflow = showAttendees && (plan.attendees?.length ?? 0) > attendees.length ? `<span class="map-plan-attendee map-plan-attendee--more">+${plan.attendees.length - attendees.length}</span>` : ''
   return L.divIcon({
     className: 'map-plan-wrapper',
     html: `<span class="map-plan-stage"><span class="map-plan-offset" style="--plan-offset-x:${offset.x}px;--plan-offset-y:${offset.y}px"><span class="map-plan-marker"><small>${day}</small>${attendeeIcons}${overflow}</span></span></span>`,
@@ -95,11 +98,14 @@ function planMapIcon(plan, offset) {
   return icon
 }
 
-function FocusMap({ spot }) {
+function FocusMap({ spot, request }) {
   const map = useMap()
+  const handledRequest = useRef(request)
   useEffect(() => {
-    if (spot) map.flyTo(spot.position, 14, { duration: 0.45 })
-  }, [spot, map])
+    if (!spot || request <= handledRequest.current) return
+    handledRequest.current = request
+    map.flyTo(spot.position, 14, { duration: 0.45 })
+  }, [spot, request, map])
   return null
 }
 
@@ -219,7 +225,7 @@ function MapActivityLayer({ activities }) {
   return markers.map(({ activity, index, position, offset }) => <Marker key={activity.id} position={position} icon={activityIcon(activity, index, offset, activity.id === previewId)} zIndexOffset={activity.id === previewId ? 700 : 400} interactive={false} />)
 }
 
-function MapPlanLayer({ plans, onSelect }) {
+function MapPlanLayer({ plans, onSelect, showAttendees }) {
   const map = useMap()
   const [zoom, setZoom] = useState(() => map.getZoom())
   useEffect(() => {
@@ -243,8 +249,8 @@ function MapPlanLayer({ plans, onSelect }) {
       return { plan, position: [Number(plan.latitude), Number(plan.longitude)], offset: { x: Number((Math.cos(angle) * radius).toFixed(1)), y: Number((Math.sin(angle) * radius).toFixed(1)) } }
     })
   }, [plans])
-  if (zoom < 10) return null
-  return markers.map(({ plan, position, offset }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan, offset)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
+  const showPlanAttendees = showAttendees && zoom >= 10
+  return markers.map(({ plan, position, offset }) => <Marker key={plan.id} position={position} icon={planMapIcon(plan, offset, showPlanAttendees)} zIndexOffset={600} eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(plan) } }} />)
 }
 
 function MobileMapDismiss({ onDismiss }) {
@@ -256,8 +262,9 @@ function MobileMapDismiss({ onDismiss }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, onSelectPlan, onActivityBoundsChange }) {
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, activities, plans, showVisitMarkers, onSelectPlan, onActivityBoundsChange }) {
   const [initialView] = useState(savedMapView)
+  const [spotFocusRequest, setSpotFocusRequest] = useState(0)
   return (
     <div className="map-frame">
       <MapContainer center={initialView ? [initialView.latitude, initialView.longitude] : mannheimCenter} zoom={initialView?.zoom ?? 13} zoomControl={false} scrollWheelZoom className="map-canvas">
@@ -265,7 +272,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <FocusMap spot={selectedSpot} />
+        <FocusMap spot={selectedSpot} request={spotFocusRequest} />
         <FocusLocation location={userLocation} request={locationFocusRequest} />
         <MapViewportResize />
         <MapViewportPersistence />
@@ -278,10 +285,14 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
             key={spot.id}
             position={spot.position}
             icon={markerIcon(spot.visits > 0, selectedSpot?.id === spot.id)}
-            eventHandlers={{ click: (event) => { if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent); onSelect(spot.id) } }}
+            eventHandlers={{ click: (event) => {
+              if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent)
+              if (selectedSpot?.id === spot.id) setSpotFocusRequest((current) => current + 1)
+              else onSelect(spot.id)
+            } }}
           />
         ))}
-        <MapPlanLayer plans={plans} onSelect={onSelectPlan} />
+        <MapPlanLayer plans={plans} onSelect={onSelectPlan} showAttendees={showVisitMarkers} />
       </MapContainer>
       <div className="map-key" aria-label="Kartenlegende">
         <span><i className="key-dot key-dot--visited">✓</i>Besucht</span>
@@ -330,7 +341,6 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
   return (
     <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
       <div className="spot-sheet__topline">
-        <span className="eyebrow">{spot.district} · {spot.distance}</span>
         <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}<button type="button" className="icon-button ui-icon-button spot-sheet__close" onClick={onClose} aria-label="Hallenkarte schließen" title="Schließen"><IconX size={18} /></button></div>
       </div>
       <div className="spot-sheet__title-row">
@@ -340,7 +350,8 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, hideOnMobi
         </div>
       </div>
       <div className="spot-meta">
-        <span><b>Heute</b>{spot.open}</span>
+        <span className="spot-meta__opening"><b>Öffnungszeiten</b>{formatOpeningHoursLines(spot.opening_hours ?? spot.open).map((line) => <small key={line}>{line}</small>)}</span>
+        <span><b>Area</b>{formatSpotArea(spot.area_sqm ?? spot.size)}</span>
         <span><b>URL</b>{spot.website ? <a className="spot-website-link" href={spot.website} target="_blank" rel="noreferrer" title={spot.website}>{websiteLabel}</a> : websiteLabel}</span>
         <span><b>Deine Besuche</b>{spot.visits}</span>
       </div>
@@ -476,11 +487,11 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
   const matchingSpots = useMemo(() => {
     return spots.filter((spot) => {
       const matchesSearch = matchesSpotSearch(spot, query)
-      const area = Number(spot.area_sqm ?? String(spot.size ?? '').replace(/[^0-9]/g, ''))
+      const area = spotAreaSquareMeters(spot.area_sqm ?? spot.size)
       const matchesFilter = hallFilter === 'all'
         || (hallFilter === 'visited' && spot.visits > 0)
-        || (hallFilter === 'large' && area >= 1000)
-        || (hallFilter === 'small' && area < 750)
+        || (hallFilter === 'large' && area !== null && area >= 1000)
+        || (hallFilter === 'small' && area !== null && area < 750)
         || (hallFilter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
       return matchesSearch && matchesFilter
     }).sort((first, second) => spotSearchRank(first, query) - spotSearchRank(second, query) || first.name.localeCompare(second.name, 'de-DE'))
@@ -521,7 +532,7 @@ export function MapView({ spots, currentUser, selectedId, lastVisitedSpotId, onS
         <span className="result-count">{visibleSpots.length} Orte{showPlanned ? ` · ${mapPlans.length} Planungen` : ''}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={showVisitMarkers ? activities.filter((activity) => !showPlanned || !plannedSpotIds.has(String(activity.spot_id))) : []} plans={showPlanned ? mapPlans : []} onActivityBoundsChange={setActivityBounds} />
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} activities={showVisitMarkers ? activities.filter((activity) => !showPlanned || !plannedSpotIds.has(String(activity.spot_id))) : []} plans={showPlanned ? mapPlans : []} showVisitMarkers={showVisitMarkers} onActivityBoundsChange={setActivityBounds} />
       {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onClose={() => onSelectSpot(null)} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
       {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} onOpenPlanFeed={onOpenPlanFeed} onOpenMessage={onOpenMessage} onOpenUserFeed={onOpenUserFeed} />}
     </main>

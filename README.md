@@ -13,6 +13,13 @@ docker compose up --build -d
 
 Danach ist die App unter [http://localhost:8090](http://localhost:8090) erreichbar.
 
+Die Responsive-Regressionen pruefen die Docker-Auslieferung in den Viewports 320x568, 375x667, 390x844, 844x390, 412x915 und 768x1024:
+
+```bash
+npx playwright install chromium
+npm run test:responsive
+```
+
 Nützliche Befehle:
 
 ```bash
@@ -74,18 +81,11 @@ Der Feed unterstützt Likes und Kommentare. Direktnachrichten sind bewusst auf g
 
 ## Hallenimport
 
-Die versionierte Datei [`data/StammBoulderhallen.csv`](data/StammBoulderhallen.csv) ist die zentrale Quelle der Standardhallen. Sie wird bei jedem API-Start idempotent synchronisiert. Neue Einträge werden angelegt, bestehende Stammhallen aus der CSV aktualisiert; hochgeladene Hallenbilder, Besuche und manuelle Archivierungen bleiben erhalten. Falls eine entsprechende Halle bereits manuell angelegt wurde, übernimmt der Seeder sie über Name und Koordinatennähe, anstatt ein Duplikat zu erstellen.
+Die Datenbank ist die zentrale Quelle der Hallendaten. Es gibt keine Stammdaten-Datei, die beim Start erneut in die Datenbank geschrieben wird. Ein Deployment löscht oder ersetzt keine bestehenden Hallen, Besuche, Tagebucheinträge oder Bilder.
 
-Die CSV enthält eine stabile `source_external_id`. Änderungen an den Stammdaten erfolgen daher direkt per Pull Request bzw. Commit an dieser Datei und werden beim nächsten Deployment reproduzierbar in die Datenbank übertragen.
+Superadmins exportieren Hallen als Excel-Datei aus „Hallen verwalten“, bearbeiten sie und laden sie anschließend dort wieder hoch. XLSX und CSV werden unterstützt. Für einen sicheren Rückimport muss die exportierte `id` unverändert bleiben: Sie aktualisiert genau diesen bestehenden Datensatz und erhält damit alle Nutzerverknüpfungen. Ohne `id` werden eine Quellen-ID, gleicher Name und ein Abstand von bis zu 150 Metern als mögliche Treffer vorgeschlagen.
 
-Die spätere CSV wird idempotent importiert; wiederholte Importe aktualisieren Datensätze anhand von `source_external_id`, `id` oder einer aus Name und Koordinaten abgeleiteten Kennung. Erwartete Pflichtfelder sind `name`, `latitude` und `longitude`; optional sind unter anderem `district`, `address`, `website`, `opening_hours`, `area_sqm` und `source_license`.
-
-Eine CSV wird zunächst in den API-Container kopiert und dann importiert:
-
-```bash
-docker cp /pfad/zur/hallen.csv bouldero-api-1:/tmp/hallen.csv
-docker compose exec api node scripts/import-spots.js /tmp/hallen.csv
-```
+Der Import zeigt vor dem Schreiben eine Vorschau. Jede Zeile kann angelegt, einer bestehenden Halle zugeordnet oder übersprungen werden. Fehlende Zeilen führen niemals zu einer Löschung oder Archivierung. Leere optionale Felder überschreiben keine bestehenden Werte; Bilder und der Archivstatus bleiben beim Import erhalten.
 
 `Dockerfile` dient dem schnellen lokalen Test und verpackt den bereits erzeugten `dist`-Ordner. Für eine CI-Pipeline mit Zugriff auf npm gibt es zusätzlich `Dockerfile.ci`; dieses erzeugt den Web-Build vollständig innerhalb des Container-Builds:
 

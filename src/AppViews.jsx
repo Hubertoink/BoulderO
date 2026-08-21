@@ -358,7 +358,7 @@ function BadgesView({ progress, onBack }) {
 
 
 function downloadHallTemplate() {
-  const csv = 'name,district,address,latitude,longitude,opening_hours,area_sqm,website,image_url\nBeispiel Boulderhalle,Jungbusch,Beispielstraße 12,49.4964,8.4548,Mo–Fr 10:00–22:00,850,https://example.com,https://images.example.com/halle.jpg\n'
+  const csv = 'id,source,source_external_id,name,district,address,latitude,longitude,opening_hours,area_sqm,website\n,,,Beispiel Boulderhalle,Jungbusch,Beispielstraße 12,49.4964,8.4548,Mo–Fr 10:00–22:00,850 m²,https://example.com\n'
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
@@ -432,11 +432,11 @@ function SpotEditDialog({ spot, reports = [], onSave, onResolveReport, onClose }
     setSaving(true)
     setError('')
     try {
-      await onSave({ ...draft, areaSqm: draft.areaSqm === '' ? null : Number(draft.areaSqm), latitude: Number(draft.latitude), longitude: Number(draft.longitude) }, imageFile)
+      await onSave({ ...draft, areaSqm: draft.areaSqm.trim() || null, latitude: Number(draft.latitude), longitude: Number(draft.longitude) }, imageFile)
       onClose()
     } catch (saveError) { setError(saveError.message || 'Die Halle konnte nicht gespeichert werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${spot.name} bearbeiten`}><div className="composer-header"><div><span className="eyebrow">Halle bearbeiten</span><h2>{spot.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div>{reports.length > 0 && <section className="correction-review-panel"><span className="eyebrow">Community-Hinweise · {reports.length}</span>{reports.map((report) => <article key={report.id}><p><b>{({ coordinates: 'Position', address: 'Adresse', opening_hours: 'Öffnungszeiten', website: 'Website', other: 'Sonstiges' })[report.category]}</b> · von {report.reporter_name}</p><p>{report.note}</p>{report.suggested_latitude !== null && <small>Vorschlag: {report.suggested_latitude}, {report.suggested_longitude}</small>}<div><button type="button" onClick={() => onResolveReport(report.id, 'resolve')}>Erledigt</button><button type="button" onClick={() => onResolveReport(report.id, 'dismiss')}>Verwerfen</button></div></article>)}</section>}<form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><SuggestionCoordinatePicker latitude={draft.latitude} longitude={draft.longitude} onChange={(latitude, longitude) => setDraft((current) => ({ ...current, latitude, longitude }))} /><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={draft.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label><label className="form-field"><span>Bild hochladen</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} ersetzt das bestehende Bild.` : hasUploadedImage ? 'Vorhandenes Upload-Bild bleibt erhalten.' : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label>{hasUploadedImage ? null : <label className="form-field"><span>Bild-URL</span><input type="url" value={draft.imageUrl ?? ''} onChange={(event) => update('imageUrl', event.target.value)} /><small>Feld leeren, um die Bild-URL zu entfernen.</small></label>}{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button></form></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${spot.name} bearbeiten`}><div className="composer-header"><div><span className="eyebrow">Halle bearbeiten</span><h2>{spot.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div>{reports.length > 0 && <section className="correction-review-panel"><span className="eyebrow">Community-Hinweise · {reports.length}</span>{reports.map((report) => <article key={report.id}><p><b>{({ coordinates: 'Position', address: 'Adresse', opening_hours: 'Öffnungszeiten', website: 'Website', other: 'Sonstiges' })[report.category]}</b> · von {report.reporter_name}</p><p>{report.note}</p>{report.suggested_latitude !== null && <small>Vorschlag: {report.suggested_latitude}, {report.suggested_longitude}</small>}<div><button type="button" onClick={() => onResolveReport(report.id, 'resolve')}>Erledigt</button><button type="button" onClick={() => onResolveReport(report.id, 'dismiss')}>Verwerfen</button></div></article>)}</section>}<form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><SuggestionCoordinatePicker latitude={draft.latitude} longitude={draft.longitude} onChange={(latitude, longitude) => setDraft((current) => ({ ...current, latitude, longitude }))} /><div className="admin-form-grid"><label className="form-field"><span>Größe / Kapazität</span><input value={draft.areaSqm} placeholder="z. B. 1.000 m² oder 50 Boulder" onChange={(event) => update('areaSqm', event.target.value)} /></label><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label><label className="form-field"><span>Bild hochladen</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} ersetzt das bestehende Bild.` : hasUploadedImage ? 'Vorhandenes Upload-Bild bleibt erhalten.' : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label>{hasUploadedImage ? null : <label className="form-field"><span>Bild-URL</span><input type="url" value={draft.imageUrl ?? ''} onChange={(event) => update('imageUrl', event.target.value)} /><small>Feld leeren, um die Bild-URL zu entfernen.</small></label>}{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button></form></section></div>
 }
 
 function SpotCreateDialog({ onCreate, onClose }) {
@@ -450,11 +450,11 @@ function SpotCreateDialog({ onCreate, onClose }) {
     setSaving(true)
     setError('')
     try {
-      await onCreate({ ...form, areaSqm: form.areaSqm ? Number(form.areaSqm) : null, latitude: Number(form.latitude), longitude: Number(form.longitude) }, imageFile)
+      await onCreate({ ...form, areaSqm: form.areaSqm.trim() || null, latitude: Number(form.latitude), longitude: Number(form.longitude) }, imageFile)
       onClose()
     } catch (saveError) { setError(saveError.message || 'Die Halle konnte nicht angelegt werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label="Halle anlegen"><div className="composer-header"><div><span className="eyebrow">Neue Boulderhalle</span><h2>Halle anlegen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={form.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} /></label><label className="form-field"><span>Bild hochladen</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} wird nach dem Speichern verknüpft.` : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label><label className="form-field"><span>Oder Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} /><small>Praktisch für den CSV-Massenimport.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label="Halle anlegen"><div className="composer-header"><div><span className="eyebrow">Neue Boulderhalle</span><h2>Halle anlegen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose}><IconX size={19} /></button></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={form.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={form.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={form.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={form.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><div className="admin-form-grid"><label className="form-field"><span>Größe / Kapazität</span><input value={form.areaSqm} placeholder="z. B. 1.000 m² oder 50 Boulder" onChange={(event) => update('areaSqm', event.target.value)} /></label><label className="form-field"><span>Öffnungszeiten</span><input value={form.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={form.website} onChange={(event) => update('website', event.target.value)} /></label><label className="form-field"><span>Bild hochladen</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files[0] ?? null)} /><small>{imageFile ? `${imageFile.name} wird nach dem Speichern verknüpft.` : 'JPEG, PNG oder WebP, maximal 10 MB.'}</small></label><label className="form-field"><span>Oder Bild-URL</span><input type="url" value={form.imageUrl} onChange={(event) => update('imageUrl', event.target.value)} /><small>Praktisch für den CSV-Massenimport.</small></label>{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}><IconPlus size={18} />{saving ? 'Wird gespeichert …' : 'Boulderhalle anlegen'}</button></form></section></div>
 }
 
 function SpotSuggestionDialog({ onSubmit, onClose }) {
@@ -483,7 +483,7 @@ function SpotSuggestionReviewDialog({ suggestion, onApprove, onReject, onClose }
     event.preventDefault()
     setSaving(true)
     setError('')
-    try { await onApprove(suggestion.id, { ...draft, areaSqm: draft.areaSqm === '' ? null : Number(draft.areaSqm), latitude: Number(draft.latitude), longitude: Number(draft.longitude) }); onClose() } catch (saveError) { setError(saveError.message || 'Der Vorschlag konnte nicht freigegeben werden.') } finally { setSaving(false) }
+    try { await onApprove(suggestion.id, { ...draft, areaSqm: draft.areaSqm.trim() || null, latitude: Number(draft.latitude), longitude: Number(draft.longitude) }); onClose() } catch (saveError) { setError(saveError.message || 'Der Vorschlag konnte nicht freigegeben werden.') } finally { setSaving(false) }
   }
   async function reject() {
     if (!window.confirm(`„${suggestion.name}“ ablehnen?`)) return
@@ -491,20 +491,64 @@ function SpotSuggestionReviewDialog({ suggestion, onApprove, onReject, onClose }
     setError('')
     try { await onReject(suggestion.id); onClose() } catch (rejectError) { setError(rejectError.message || 'Der Vorschlag konnte nicht abgelehnt werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${suggestion.name} prüfen`}><div className="composer-header"><div><span className="eyebrow">Hallenvorschlag prüfen</span><h2>{suggestion.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="suggestion-meta">Gemeldet von {suggestion.submitted_by_name} · {suggestion.submitted_by_email}</p>{suggestion.notes && <p className="suggestion-note"><b>Hinweis:</b> {suggestion.notes}</p>}<form onSubmit={approve}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><SuggestionCoordinatePicker latitude={draft.latitude} longitude={draft.longitude} onChange={(latitude, longitude) => setDraft((current) => ({ ...current, latitude, longitude }))} /><div className="admin-form-grid"><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label><label className="form-field"><span>Fläche in m²</span><input type="number" min="0" value={draft.areaSqm} onChange={(event) => update('areaSqm', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<div className="suggestion-review-actions"><button type="button" className="danger" disabled={saving} onClick={reject}>Ablehnen</button><button className="visit-button" disabled={saving}>{saving ? 'Wird geprüft …' : 'Freigeben und veröffentlichen'}</button></div></form></section></div>
+  return <div className="composer-backdrop"><section className="journal-composer admin-edit-dialog" role="dialog" aria-modal="true" aria-label={`${suggestion.name} prüfen`}><div className="composer-header"><div><span className="eyebrow">Hallenvorschlag prüfen</span><h2>{suggestion.name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="suggestion-meta">Gemeldet von {suggestion.submitted_by_name} · {suggestion.submitted_by_email}</p>{suggestion.notes && <p className="suggestion-note"><b>Hinweis:</b> {suggestion.notes}</p>}<form onSubmit={approve}><div className="admin-form-grid"><label className="form-field"><span>Name *</span><input required value={draft.name} onChange={(event) => update('name', event.target.value)} /></label><label className="form-field"><span>Stadtteil *</span><input required value={draft.district} onChange={(event) => update('district', event.target.value)} /></label></div><label className="form-field"><span>Adresse *</span><input required value={draft.address} onChange={(event) => update('address', event.target.value)} /></label><div className="admin-form-grid"><label className="form-field"><span>Breitengrad *</span><input required type="number" step="any" value={draft.latitude} onChange={(event) => update('latitude', event.target.value)} /></label><label className="form-field"><span>Längengrad *</span><input required type="number" step="any" value={draft.longitude} onChange={(event) => update('longitude', event.target.value)} /></label></div><SuggestionCoordinatePicker latitude={draft.latitude} longitude={draft.longitude} onChange={(latitude, longitude) => setDraft((current) => ({ ...current, latitude, longitude }))} /><div className="admin-form-grid"><label className="form-field"><span>Größe / Kapazität</span><input value={draft.areaSqm} placeholder="z. B. 1.000 m² oder 50 Boulder" onChange={(event) => update('areaSqm', event.target.value)} /></label><label className="form-field"><span>Öffnungszeiten</span><input value={draft.openingHours} onChange={(event) => update('openingHours', event.target.value)} /></label></div><label className="form-field"><span>Website</span><input type="url" value={draft.website} onChange={(event) => update('website', event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<div className="suggestion-review-actions"><button type="button" className="danger" disabled={saving} onClick={reject}>Ablehnen</button><button className="visit-button" disabled={saving}>{saving ? 'Wird geprüft …' : 'Freigeben und veröffentlichen'}</button></div></form></section></div>
 }
 
 
 function CsvImportReview({ preview, decisions, onDecisionChange, onBulk, onApply, onClose, applying }) {
   const [filter, setFilter] = useState('all')
-  const rows = preview.rows.filter((row) => filter === 'all' || (filter === 'new' && row.input && !row.candidates.length) || (filter === 'matches' && row.candidates.length) || (filter === 'invalid' && row.error))
+  const [checkedRows, setCheckedRows] = useState({})
+  const rows = preview.rows.filter((row) => filter === 'all' || (filter === 'new' && row.input && !row.candidates.length && !row.error) || (filter === 'matches' && row.candidates.length) || (filter === 'invalid' && row.error))
   const counts = {
-    new: preview.rows.filter((row) => row.input && !row.candidates.length).length,
+    new: preview.rows.filter((row) => row.input && !row.candidates.length && !row.error).length,
     matches: preview.rows.filter((row) => row.candidates.length).length,
+    safeUpdates: preview.rows.filter((row) => row.safeUpdateTargetId).length,
     invalid: preview.rows.filter((row) => row.error).length,
   }
   const selected = Object.values(decisions).filter((decision) => decision.action !== 'skip').length
-  return <section className="import-review"><div className="section-heading"><div><span className="eyebrow">CSV-Prüfung</span><h2>{preview.rows.length} Zeilen analysiert</h2></div><button type="button" className="text-back" onClick={onClose} disabled={applying}>Verwerfen</button></div><p>Treffer werden über gleichen Namen oder einen Abstand von höchstens 150 m vorgeschlagen. Erst mit „Auswahl anwenden“ werden Daten geändert.</p><div className="import-review__summary"><span>{counts.new} neu</span><span>{counts.matches} mögliche Treffer</span><span>{counts.invalid} ungültig</span><span>{selected} ausgewählt</span></div><div className="import-review__bulk"><button type="button" onClick={() => onBulk('create-new')} disabled={applying || !counts.new}>Alle neuen anlegen</button><button type="button" onClick={() => onBulk('update-matches')} disabled={applying || !counts.matches}>Treffer aktualisieren</button><button type="button" onClick={() => onBulk('skip-all')} disabled={applying}>Alle überspringen</button></div><div className="import-review__filters" role="tablist" aria-label="CSV-Zeilen filtern">{[['all', 'Alle'], ['new', 'Neu'], ['matches', 'Treffer'], ['invalid', 'Ungültig']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="admin-table-wrap"><table className="import-review__table"><thead><tr><th>Zeile</th><th>CSV-Halle</th><th>Prüfergebnis</th><th>Aktion</th></tr></thead><tbody>{rows.map((row) => { const decision = decisions[row.rowNumber] ?? { action: 'skip' }; const value = decision.action === 'update' ? `update:${decision.targetId}` : decision.action; return <tr key={row.rowNumber} className={row.error ? 'is-invalid' : row.candidates.length ? 'has-match' : ''}><td>{row.rowNumber}</td><td>{row.input ? <><b>{row.input.name}</b><small>{row.input.address} · {row.input.district}</small></> : 'Nicht lesbar'}</td><td>{row.error ? <span className="import-review__error">{row.error}</span> : row.candidates.length ? <div className="import-review__matches">{row.candidates.map((candidate) => <span key={candidate.id}><b>{candidate.name}</b> · {candidate.distance_m} m{candidate.same_name ? ' · gleicher Name' : ''}{candidate.status !== 'active' ? ` · ${candidate.status}` : ''}</span>)}</div> : <span className="import-review__new">Keine passende Halle gefunden</span>}</td><td>{row.error ? <span>Überspringen</span> : <select value={value} onChange={(event) => onDecisionChange(row.rowNumber, event.target.value)} disabled={applying}><option value="skip">Überspringen</option><option value="create">{row.candidates.length ? 'Trotzdem neu anlegen' : 'Neu anlegen'}</option>{row.candidates.map((candidate) => <option key={candidate.id} value={`update:${candidate.id}`}>„{candidate.name}“ aktualisieren</option>)}</select>}</td></tr> })}</tbody></table></div><div className="import-review__footer"><span>{selected ? `${selected} Zeilen werden verarbeitet.` : 'Keine Zeile ausgewählt.'}</span><button type="button" className="visit-button" onClick={onApply} disabled={applying || !selected}>{applying ? 'Import wird angewendet …' : 'Auswahl anwenden'}</button></div></section>
+  const selectableRows = rows.filter((row) => !row.error)
+  const selectedRows = selectableRows.filter((row) => checkedRows[row.rowNumber])
+  const allVisibleRowsSelected = selectableRows.length > 0 && selectableRows.every((row) => checkedRows[row.rowNumber])
+  const matchLabel = (candidate) => ({
+    id: 'gleiche BoulderO-ID',
+    source_external_id: 'gleiche Quellen-ID',
+    name: 'gleicher Name',
+    nearby: `${candidate.distance_m} m entfernt`,
+  }[candidate.match_type] ?? 'möglicher Treffer')
+  const selectedCandidate = (row, decision) => decision.action === 'update'
+    ? row.candidates.find((candidate) => candidate.id === decision.targetId) ?? null
+    : null
+  const formatChangeValue = (value) => value === null || value === undefined || value === '' ? '—' : String(value)
+  function setSelectedRows(action) {
+    for (const row of selectedRows) {
+      if (action === 'update' && row.safeUpdateTargetId) onDecisionChange(row.rowNumber, `update:${row.safeUpdateTargetId}`)
+      if (action === 'create' && !row.candidates.length) onDecisionChange(row.rowNumber, 'create')
+      if (action === 'skip') onDecisionChange(row.rowNumber, 'skip')
+    }
+  }
+  return <section className="import-review">
+    <div className="section-heading"><div><span className="eyebrow">Excel-/CSV-Prüfung</span><h2>{preview.rows.length} Zeilen analysiert</h2></div><button type="button" className="text-back" onClick={onClose} disabled={applying}>Verwerfen</button></div>
+    <p>Eine vorhandene BoulderO-ID wird immer direkt derselben Halle zugeordnet. Weitere Treffer werden über Quellen-ID, gleichen Namen oder bis zu 150 m Abstand vorgeschlagen. Erst mit „Auswahl anwenden“ werden Daten geändert.</p>
+    <div className="import-review__summary"><span>{counts.new} neu</span><span>{counts.matches} mögliche Treffer</span><span>{counts.safeUpdates} sichere Updates</span><span>{counts.invalid} ungültig</span><span>{selected} ausgewählt</span></div>
+    <div className="import-review__bulk"><button type="button" onClick={() => onBulk('create-new')} disabled={applying || !counts.new}>Alle neuen anlegen</button><button type="button" onClick={() => onBulk('update-matches')} disabled={applying || !counts.safeUpdates}>Sichere Updates übernehmen</button><button type="button" onClick={() => onBulk('skip-all')} disabled={applying}>Alle überspringen</button></div>
+    <div className="import-review__selection"><span>{selectedRows.length} Zeilen markiert</span><button type="button" onClick={() => setSelectedRows('update')} disabled={applying || !selectedRows.some((row) => row.safeUpdateTargetId)}>Markierte aktualisieren</button><button type="button" onClick={() => setSelectedRows('create')} disabled={applying || !selectedRows.some((row) => !row.candidates.length)}>Markierte anlegen</button><button type="button" onClick={() => setSelectedRows('skip')} disabled={applying || !selectedRows.length}>Markierte überspringen</button></div>
+    <div className="import-review__filters" role="tablist" aria-label="Importzeilen filtern">{[['all', 'Alle'], ['new', 'Neu'], ['matches', 'Treffer'], ['invalid', 'Ungültig']].map(([filterValue, label]) => <button key={filterValue} type="button" role="tab" aria-selected={filter === filterValue} className={filter === filterValue ? 'is-active' : ''} onClick={() => setFilter(filterValue)}>{label}</button>)}</div>
+    <div className="admin-table-wrap"><table className="import-review__table"><thead><tr><th><input type="checkbox" aria-label="Alle sichtbaren Zeilen markieren" checked={allVisibleRowsSelected} onChange={(event) => setCheckedRows((current) => ({ ...current, ...Object.fromEntries(selectableRows.map((row) => [row.rowNumber, event.target.checked])) }))} /></th><th>Zeile</th><th>Import-Halle</th><th>Prüfergebnis</th><th>Änderungen</th><th>Aktion</th></tr></thead><tbody>{rows.map((row) => {
+      const decision = decisions[row.rowNumber] ?? { action: 'skip' }
+      const value = decision.action === 'update' ? `update:${decision.targetId}` : decision.action
+      const candidate = selectedCandidate(row, decision)
+      const changes = candidate?.changes ?? []
+      return <tr key={row.rowNumber} className={row.error ? 'is-invalid' : row.candidates.length ? 'has-match' : ''}>
+        <td><input type="checkbox" aria-label={`Zeile ${row.rowNumber} markieren`} checked={Boolean(checkedRows[row.rowNumber])} disabled={Boolean(row.error)} onChange={(event) => setCheckedRows((current) => ({ ...current, [row.rowNumber]: event.target.checked }))} /></td>
+        <td>{row.rowNumber}</td>
+        <td>{row.input ? <><b>{row.input.name}</b><small>{row.input.address} · {row.input.district}</small></> : 'Nicht lesbar'}</td>
+        <td>{row.error ? <span className="import-review__error">{row.error}</span> : row.candidates.length ? <div className="import-review__matches">{row.candidates.map((item) => <span key={item.id}><b>{item.name}</b> · {matchLabel(item)}{item.status !== 'active' ? ` · ${item.status}` : ''}</span>)}</div> : <span className="import-review__new">Keine passende Halle gefunden</span>}</td>
+        <td>{row.error ? '—' : decision.action === 'create' ? <span className="import-review__new">Neue Halle wird angelegt</span> : candidate ? changes.length ? <ul className="import-review__changes">{changes.map((change) => <li key={change.field}><b>{change.field}:</b> <s>{formatChangeValue(change.before)}</s> <span>→</span> {formatChangeValue(change.after)}</li>)}</ul> : <span className="import-review__unchanged">Keine Datenänderung</span> : <span className="import-review__unchanged">Aktualisierung auswählen</span>}</td>
+        <td>{row.error ? <span>Überspringen</span> : <select value={value} onChange={(event) => onDecisionChange(row.rowNumber, event.target.value)} disabled={applying}><option value="skip">Überspringen</option><option value="create">{row.candidates.length ? 'Trotzdem neu anlegen' : 'Neu anlegen'}</option>{row.candidates.map((item) => <option key={item.id} value={`update:${item.id}`}>Aktualisieren</option>)}</select>}</td>
+      </tr>
+    })}</tbody></table></div>
+    <div className="import-review__footer"><span>{selected ? `${selected} Zeilen werden verarbeitet.` : 'Keine Zeile ausgewählt.'}</span><button type="button" className="visit-button" onClick={onApply} disabled={applying || !selected}>{applying ? 'Import wird angewendet …' : 'Auswahl anwenden'}</button></div>
+  </section>
 }
 
 
@@ -533,9 +577,11 @@ function AdminSpotsView({
   const [importFile, setImportFile] = useState(null);
   const [importDecisions, setImportDecisions] = useState({});
   const [applyingImport, setApplyingImport] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [reviewingSuggestion, setReviewingSuggestion] = useState(null);
   const [sort, setSort] = useState({ key: "name", direction: "asc" });
   const csvInput = useRef(null);
+  const exportMenuRef = useOutsideDismiss(exportOpen, () => setExportOpen(false));
   const filteredSpots = spots.filter((spot) =>
     `${spot.name} ${spot.district} ${spot.address}`
       .toLowerCase()
@@ -574,7 +620,7 @@ function AdminSpotsView({
       const preview = await onPreviewImport(file);
       setImportFile(file);
       setImportPreview(preview);
-      setImportDecisions(Object.fromEntries(preview.rows.map((row) => [row.rowNumber, { action: row.error || row.candidates.length ? 'skip' : 'create' }])));
+      setImportDecisions(Object.fromEntries(preview.rows.map((row) => [row.rowNumber, row.error ? { action: 'skip' } : row.safeUpdateTargetId ? { action: 'update', targetId: row.safeUpdateTargetId } : row.candidates.length ? { action: 'skip' } : { action: 'create' }])));
     } catch (importError) {
       setError(
         importError.message || "Der Import konnte nicht verarbeitet werden.",
@@ -610,7 +656,7 @@ function AdminSpotsView({
         if (row.error) { next[row.rowNumber] = { action: 'skip' }; continue; }
         if (action === 'skip-all') next[row.rowNumber] = { action: 'skip' };
         if (action === 'create-new' && !row.candidates.length) next[row.rowNumber] = { action: 'create' };
-        if (action === 'update-matches' && row.candidates.length) next[row.rowNumber] = { action: 'update', targetId: row.candidates[0].id };
+        if (action === 'update-matches' && row.safeUpdateTargetId) next[row.rowNumber] = { action: 'update', targetId: row.safeUpdateTargetId };
       }
       return next;
     });
@@ -630,10 +676,11 @@ function AdminSpotsView({
       setApplyingImport(false);
     }
   }
-  async function exportHalls() {
+  async function exportHalls(includeArchived = false) {
+    setExportOpen(false);
     setError("");
     try {
-      await onExport();
+      await onExport(includeArchived);
     } catch (exportError) {
       setError(exportError.message || "Der Hallenexport konnte nicht erstellt werden.");
     }
@@ -708,21 +755,24 @@ function AdminSpotsView({
       <section className="admin-import">
         <div>
           <span className="eyebrow">Mehrere Hallen</span>
-          <h2>CSV importieren</h2>
+          <h2>Excel oder CSV importieren</h2>
           <p>
             Maximal 500 Hallen; Pflichtspalten: name, district, address,
-            latitude und longitude. image_url ist optional.
+            latitude und longitude. Für einen sicheren Rückimport die
+            exportierte <code>id</code>-Spalte unverändert lassen.
           </p>
         </div>
         <div className="admin-import__actions">
-          <button
-            type="button"
-            className="text-back"
-            onClick={exportHalls}
-          >
-            <IconDownload size={16} />
-            Export herunterladen
-          </button>
+          <div className="admin-export-menu" ref={exportMenuRef}>
+            <button type="button" className="text-back" onClick={() => setExportOpen((current) => !current)} aria-expanded={exportOpen}>
+              <IconDownload size={16} />
+              Export herunterladen
+            </button>
+            {exportOpen && <div className="admin-export-menu__popover">
+              <button type="button" onClick={() => exportHalls(false)}><b>Nur aktive Hallen</b><small>Für Abgleich und Rückimport</small></button>
+              <button type="button" onClick={() => exportHalls(true)}><b>Mit archivierten Hallen</b><small>Vollständige Datenübersicht</small></button>
+            </div>}
+          </div>
           <button
             type="button"
             className="text-back"
@@ -733,11 +783,11 @@ function AdminSpotsView({
           </button>
           <label className="visit-button">
             <IconPlus size={18} />
-            {importing ? "Import wird verarbeitet …" : "CSV auswählen"}
+            {importing ? "Import wird verarbeitet …" : "Datei auswählen"}
             <input
               ref={csvInput}
               type="file"
-              accept=".csv,text/csv"
+              accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
               onChange={importCsv}
               disabled={importing}
             />

@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS spots (
   address TEXT NOT NULL,
   website TEXT,
   opening_hours TEXT,
-  area_sqm INTEGER,
+  area_sqm TEXT,
   image_url TEXT,
   coordinates GEOGRAPHY(POINT, 4326) NOT NULL,
   source TEXT NOT NULL DEFAULT 'seed',
@@ -127,16 +127,3 @@ INSERT INTO badges (id, name, threshold) VALUES
   ('deutschland-crusher', 'Deutschland-Crusher', 25),
   ('boulder-veteran', 'Boulder-Veteran', 50)
 ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO spots (id, name, district, address, opening_hours, area_sqm, coordinates, source, source_external_id) VALUES
-  ('419ca859-f9a5-4b5e-87f3-a4f2da0ad201', 'Neckarblock', 'Jungbusch', 'Hafenstraße 18, Mannheim', '07:00–23:00', 1150, ST_SetSRID(ST_MakePoint(8.4548, 49.4964), 4326)::geography, 'seed', 'neckarblock'),
-  ('ee258faf-7be1-4b65-aeb8-af0ed41a2d02', 'Griffwerk Mannheim', 'Innenstadt', 'Rheinstraße 42, Mannheim', '08:00–22:30', 870, ST_SetSRID(ST_MakePoint(8.4699, 49.4865), 4326)::geography, 'seed', 'griffwerk'),
-  ('a78b6ecb-5a5f-4ea4-a44b-af4553a3e303', 'Blockraum Lindenhof', 'Lindenhof', 'Meerfeldstraße 9, Mannheim', '09:00–22:00', 620, ST_SetSRID(ST_MakePoint(8.4787, 49.4694), 4326)::geography, 'seed', 'blockraum'),
-  ('d247196a-fa2c-4bde-ae89-5d739cd6b404', 'Kantenwerk', 'Neckarstadt', 'Lange Rötterstraße 76, Mannheim', '06:30–23:00', 1340, ST_SetSRID(ST_MakePoint(8.4754, 49.5092), 4326)::geography, 'seed', 'kantenwerk'),
-  ('408c62e5-9fd9-4a9e-9c42-083b14db6505', 'Felsfrei', 'Schwetzingerstadt', 'Seckenheimer Straße 88, Mannheim', '08:00–23:00', 980, ST_SetSRID(ST_MakePoint(8.4878, 49.4786), 4326)::geography, 'seed', 'felsfrei'),
-  ('08a85e22-2b66-46e7-b698-8f9ce3487506', 'Route Sieben', 'Käfertal', 'Wasserwerkstraße 7, Mannheim', '10:00–22:00', 540, ST_SetSRID(ST_MakePoint(8.5042, 49.5246), 4326)::geography, 'seed', 'route7'),
-  ('1a4e8043-4b2e-4a13-b9ea-0d423f7a4607', 'Beton & Boulder', 'Sandhofen', 'Kalthorstraße 31, Mannheim', '09:00–22:30', 760, ST_SetSRID(ST_MakePoint(8.4579, 49.5424), 4326)::geography, 'seed', 'betonboulder'),
-  ('b2d1ab78-3388-4e63-a343-4d9758f16708', 'Rheinhold', 'Neckarau', 'Moritzenstraße 21, Mannheim', '07:00–22:00', 690, ST_SetSRID(ST_MakePoint(8.4941, 49.4548), 4326)::geography, 'seed', 'rheinhold'),
-  ('90556ec4-974d-4c56-a0a9-1da8ae71c409', 'Boulderbase Süd', 'Rheinau', 'Relaisstraße 104, Mannheim', '08:00–22:00', 1020, ST_SetSRID(ST_MakePoint(8.5245, 49.4303), 4326)::geography, 'seed', 'boulderbase'),
-  ('c01119f6-65a8-45a7-aa37-6261eac8ea10', 'Boulderhof', 'Vogelstang', 'Freiberger Ring 14, Mannheim', '09:00–22:30', 810, ST_SetSRID(ST_MakePoint(8.5352, 49.5341), 4326)::geography, 'seed', 'boulderhof')
-ON CONFLICT (source, source_external_id) DO NOTHING;

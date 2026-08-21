@@ -501,10 +501,14 @@ const spotImageUpload = multer({
   fileFilter: (_req, file, callback) => callback(null, /^image\/(jpeg|png|webp)$/.test(file.mimetype)),
 })
 
-const csvUpload = multer({
+const spotImportUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 1024 * 1024, files: 1 },
-  fileFilter: (_req, file, callback) => callback(null, /^(text\/csv|application\/csv|application\/vnd\.ms-excel)$/.test(file.mimetype) || file.originalname.toLowerCase().endsWith('.csv')),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    const name = file.originalname.toLowerCase()
+    const supportedType = /^(text\/csv|application\/csv|application\/vnd\.ms-excel|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet)$/.test(file.mimetype)
+    callback(null, supportedType || name.endsWith('.csv') || name.endsWith('.xlsx'))
+  },
 })
 
 const spotInputSchema = z.object({
@@ -513,7 +517,7 @@ const spotInputSchema = z.object({
   address: z.string().trim().min(5).max(300),
   website: z.string().trim().url().max(500).optional().or(z.literal('')),
   openingHours: z.string().trim().max(300).optional(),
-  areaSqm: z.number().int().min(0).max(1000000).nullable().optional(),
+  areaSqm: z.union([z.string(), z.number()]).transform((value) => String(value).trim()).pipe(z.string().max(120)).nullable().optional(),
   imageUrl: z.string().trim().url().max(1000).optional().or(z.literal('')),
   latitude: z.number().gte(-90).lte(90),
   longitude: z.number().gte(-180).lte(180),
@@ -605,12 +609,97 @@ function numberFromCsv(value, field, rowNumber, { optional = false, integer = fa
   return number
 }
 
-function parseAdminSpotCsv(file) {
-  if (!file) throw new Error('csv_file_required')
-  const rows = parseCsv(file.buffer.toString('utf8'))
+function importCellText(value) {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') {
+    if (value.hyperlink !== undefined) return String(value.hyperlink)
+    if (Array.isArray(value.richText)) return value.richText.map((part) => part.text ?? '').join('')
+    if (value.text !== undefined) return importCellText(value.text)
+    if (value.result !== undefined) return importCellText(value.result)
+  }
+  return String(value)
+}
+
+function normalizedImportHeader(value) {
+  return importCellText(value).trim().replace(/^\uFEFF/, '').toLowerCase()
+}
+
+async function importFileRows(file) {
+  const isXlsx = file.originalname.toLowerCase().endsWith('.xlsx')
+    || file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (!isXlsx) return parseCsv(file.buffer.toString('utf8')).map((values, index) => ({ rowNumber: index + 1, values }))
+
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(file.buffer)
+  const sheet = workbook.getWorksheet('Hallen') ?? workbook.worksheets[0]
+  if (!sheet) throw new Error('xlsx_sheet_required')
+  const rows = []
+  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    const values = row.values.slice(1).map(importCellText)
+    if (values.some((value) => value.trim())) rows.push({ rowNumber, values })
+  })
+  return rows
+}
+
+function optionalImportArea(value) {
+  const normalized = importCellText(value).trim()
+  if (!normalized || normalized === '0') return undefined
+  return normalized
+}
+
+function coordinateFromImport(value, field, rowNumber, maximum) {
+  const text = importCellText(value).trim()
+  let coordinate = numberFromCsv(text, field, rowNumber)
+  // German Excel can interpret dots in copied coordinates as thousands
+  // separators (48.8161875 becomes 488161875). Reinsert the decimal point
+  // only when an integer is clearly outside the valid coordinate range.
+  if (Math.abs(coordinate) > maximum && /^-?\d+$/.test(text)) {
+    while (Math.abs(coordinate) > maximum) coordinate /= 10
+  }
+  if (coordinate < -maximum || coordinate > maximum) throw new Error(`Zeile ${rowNumber}: ${field} ist ungültig.`)
+  return coordinate
+}
+
+function importText(value) {
+  return importCellText(value).trim()
+}
+
+function normalizedImportKey(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('de-DE').replace(/[^a-z0-9]/g, '')
+}
+
+function markDuplicateImportRows(rows) {
+  const groups = new Map()
+  for (const row of rows) {
+    if (!row.input || row.error) continue
+    const input = row.input
+    const key = row.id
+      ? `id:${row.id}`
+      : row.source && row.sourceExternalId
+        ? `source:${row.source}:${row.sourceExternalId}`
+        : `hall:${normalizedImportKey(input.name)}:${input.latitude.toFixed(5)}:${input.longitude.toFixed(5)}`
+    const group = groups.get(key) ?? []
+    group.push(row)
+    groups.set(key, group)
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    for (const row of group) row.error = 'Die Halle kommt in dieser Datei mehrfach vor.'
+  }
+}
+
+async function parseAdminSpotImport(file) {
+  if (!file) throw new Error('import_file_required')
+  let rows
+  try {
+    rows = await importFileRows(file)
+  } catch (error) {
+    if (error.message?.startsWith('xlsx_')) throw error
+    throw new Error('xlsx_invalid')
+  }
   if (rows.length < 2) throw new Error('csv_rows_required')
   if (rows.length > 501) throw new Error('csv_limit_exceeded')
-  const headers = rows[0].map((value) => value.trim().replace(/^\uFEFF/, '').toLowerCase())
+  const headers = rows[0].values.map(normalizedImportHeader)
   const required = ['name', 'district', 'address', 'latitude', 'longitude']
   const missing = required.filter((name) => !headers.includes(name))
   if (missing.length) {
@@ -618,42 +707,140 @@ function parseAdminSpotCsv(file) {
     error.missing = missing
     throw error
   }
-  return rows.slice(1).map((values, index) => {
-    const record = { rowNumber: index + 2 }
+  const parsed = rows.slice(1).map(({ rowNumber, values }) => {
+    const record = { rowNumber }
     headers.forEach((header, column) => { record[header] = values[column] ?? '' })
     try {
+      const id = importText(record.id)
+      const source = importText(record.source)
+      const sourceExternalId = importText(record.source_external_id)
       return {
         rowNumber: record.rowNumber,
         input: spotInputSchema.parse({
-          name: record.name,
-          district: record.district,
-          address: record.address,
-          website: record.website || '',
-          openingHours: record.opening_hours || '',
-          areaSqm: numberFromCsv(record.area_sqm, 'area_sqm', record.rowNumber, { optional: true, integer: true }),
-          imageUrl: record.image_url || '',
-          latitude: numberFromCsv(record.latitude, 'latitude', record.rowNumber),
-          longitude: numberFromCsv(record.longitude, 'longitude', record.rowNumber),
+          name: importText(record.name),
+          district: importText(record.district),
+          address: importText(record.address),
+          website: importText(record.website) || undefined,
+          openingHours: importText(record.opening_hours) || undefined,
+          areaSqm: optionalImportArea(record.area_sqm),
+          latitude: coordinateFromImport(record.latitude, 'latitude', record.rowNumber, 90),
+          longitude: coordinateFromImport(record.longitude, 'longitude', record.rowNumber, 180),
         }),
+        id: id ? z.string().uuid().parse(id) : null,
+        source: source || null,
+        sourceExternalId: sourceExternalId || null,
         error: null,
       }
     } catch (error) {
       return { rowNumber: record.rowNumber, input: null, error: error.issues?.[0]?.message ?? error.message }
     }
   })
+  markDuplicateImportRows(parsed)
+  return parsed
 }
 
-async function findImportCandidates(inputs) {
-  if (!inputs.length) return new Map()
+function candidateFromSpot(spot, input, matchType) {
+  const latitude = Number(spot.latitude)
+  const longitude = Number(spot.longitude)
+  const latitudeDifference = (input.latitude - latitude) * Math.PI / 180
+  const longitudeDifference = (input.longitude - longitude) * Math.PI / 180
+  const a = Math.sin(latitudeDifference / 2) ** 2
+    + Math.cos(input.latitude * Math.PI / 180) * Math.cos(latitude * Math.PI / 180) * Math.sin(longitudeDifference / 2) ** 2
+  return {
+    ...spot,
+    match_type: matchType,
+    same_name: normalizedImportKey(spot.name) === normalizedImportKey(input.name),
+    distance_m: Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))),
+    changes: importChanges(input, spot),
+  }
+}
+
+function sameImportValue(first, second) {
+  return String(first ?? '').trim() === String(second ?? '').trim()
+}
+
+function importChanges(input, spot) {
+  const changes = []
+  const fields = [
+    ['Name', 'name'],
+    ['Ort', 'district'],
+    ['Adresse', 'address'],
+    ['Website', 'website'],
+    ['Öffnungszeiten', 'openingHours', 'opening_hours'],
+    ['Area', 'areaSqm', 'area_sqm'],
+  ]
+  for (const [label, inputKey, spotKey = inputKey] of fields) {
+    // Leere optionale Importfelder lassen vorhandene Daten bewusst unverändert.
+    if (['website', 'openingHours', 'areaSqm'].includes(inputKey) && input[inputKey] === undefined) continue
+    if (!sameImportValue(input[inputKey], spot[spotKey])) {
+      changes.push({ field: label, before: spot[spotKey] ?? null, after: input[inputKey] ?? null })
+    }
+  }
+  const latitudeChanged = Math.abs(Number(input.latitude) - Number(spot.latitude)) > 0.0000001
+  const longitudeChanged = Math.abs(Number(input.longitude) - Number(spot.longitude)) > 0.0000001
+  if (latitudeChanged || longitudeChanged) {
+    changes.push({
+      field: 'Position',
+      before: `${Number(spot.latitude).toFixed(6)}, ${Number(spot.longitude).toFixed(6)}`,
+      after: `${Number(input.latitude).toFixed(6)}, ${Number(input.longitude).toFixed(6)}`,
+    })
+  }
+  return changes
+}
+
+async function findImportCandidates(rows) {
+  const candidates = new Map()
+  const validRows = rows.filter((row) => row.input && !row.error)
+  if (!validRows.length) return candidates
+
+  const withId = validRows.filter((row) => row.id)
+  if (withId.length) {
+    const result = await pool.query(`
+      SELECT id, name, district, address, website, opening_hours, area_sqm, status,
+             ST_Y(coordinates::geometry) AS latitude, ST_X(coordinates::geometry) AS longitude
+        FROM spots
+       WHERE id = ANY($1::uuid[])
+    `, [withId.map((row) => row.id)])
+    const spotsById = new Map(result.rows.map((spot) => [spot.id, spot]))
+    for (const row of withId) {
+      const spot = spotsById.get(row.id)
+      if (!spot) row.error = 'Die BoulderO-ID existiert nicht mehr. Entferne die ID, um die Halle als neue Halle zu importieren.'
+      else candidates.set(row.rowNumber, [candidateFromSpot(spot, row.input, 'id')])
+    }
+  }
+
+  const withSourceId = validRows.filter((row) => !row.id && row.source && row.sourceExternalId)
+  if (withSourceId.length) {
+    const params = []
+    const values = withSourceId.map((row, index) => {
+      const start = index * 3
+      params.push(row.rowNumber, row.source, row.sourceExternalId)
+      return `($${start + 1}::int, $${start + 2}::text, $${start + 3}::text)`
+    }).join(', ')
+    const result = await pool.query(`
+      WITH incoming(row_number, source, source_external_id) AS (VALUES ${values})
+      SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.website, spots.opening_hours, spots.area_sqm, spots.status,
+             ST_Y(spots.coordinates::geometry) AS latitude, ST_X(spots.coordinates::geometry) AS longitude
+        FROM incoming
+        JOIN spots ON spots.source = incoming.source AND spots.source_external_id = incoming.source_external_id
+    `, params)
+    for (const spot of result.rows) {
+      const row = withSourceId.find((item) => item.rowNumber === spot.row_number)
+      if (row) candidates.set(row.rowNumber, [candidateFromSpot(spot, row.input, 'source_external_id')])
+    }
+  }
+
+  const fuzzyRows = validRows.filter((row) => !row.id && !candidates.has(row.rowNumber))
+  if (!fuzzyRows.length) return candidates
   const params = []
-  const values = inputs.map((row, index) => {
+  const values = fuzzyRows.map((row, index) => {
     const start = index * 4
     params.push(row.rowNumber, row.input.name, row.input.latitude, row.input.longitude)
     return `($${start + 1}::int, $${start + 2}::text, $${start + 3}::double precision, $${start + 4}::double precision)`
   }).join(', ')
   const result = await pool.query(`
     WITH incoming(row_number, name, latitude, longitude) AS (VALUES ${values})
-    SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.status,
+    SELECT incoming.row_number, spots.id, spots.name, spots.district, spots.address, spots.website, spots.opening_hours, spots.area_sqm, spots.status,
            ROUND(ST_Distance(spots.coordinates, ST_SetSRID(ST_MakePoint(incoming.longitude, incoming.latitude), 4326)::geography))::int AS distance_m,
            LOWER(TRIM(spots.name)) = LOWER(TRIM(incoming.name)) AS same_name
       FROM incoming
@@ -661,10 +848,10 @@ async function findImportCandidates(inputs) {
         OR ST_DWithin(spots.coordinates, ST_SetSRID(ST_MakePoint(incoming.longitude, incoming.latitude), 4326)::geography, 150)
      ORDER BY incoming.row_number, same_name DESC, distance_m ASC, spots.name ASC
   `, params)
-  const candidates = new Map()
   for (const row of result.rows) {
     const items = candidates.get(row.row_number) ?? []
-    items.push(row)
+    const input = fuzzyRows.find((item) => item.rowNumber === row.row_number)?.input
+    items.push({ ...row, match_type: row.same_name ? 'name' : 'nearby', changes: input ? importChanges(input, row) : [] })
     candidates.set(row.row_number, items)
   }
   return candidates
@@ -1566,15 +1753,17 @@ app.get('/admin/users', ...requireSuperAdmin, asyncRoute(async (req, res) => {
   res.json({ users: result.rows, total: count.rows[0].total })
 }))
 
-app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res) => {
+app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (req, res) => {
+  const includeArchived = z.enum(['true', 'false']).parse(req.query.includeArchived ?? 'false') === 'true'
   const result = await pool.query(`
     SELECT id, name, district, address, website, opening_hours, area_sqm, image_url,
            source, source_external_id, source_license, status, created_at, updated_at,
            ST_Y(coordinates::geometry) AS latitude,
            ST_X(coordinates::geometry) AS longitude
       FROM spots
+     WHERE status = 'active' OR $1::boolean
      ORDER BY name ASC
-  `)
+  `, [includeArchived])
 
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'BoulderO'
@@ -1587,7 +1776,7 @@ app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res
     { header: 'address', key: 'address', width: 42 },
     { header: 'website', key: 'website', width: 42 },
     { header: 'opening_hours', key: 'opening_hours', width: 30 },
-    { header: 'area_sqm', key: 'area_sqm', width: 13 },
+    { header: 'area_sqm', key: 'area_sqm', width: 24 },
     { header: 'latitude', key: 'latitude', width: 15 },
     { header: 'longitude', key: 'longitude', width: 15 },
     { header: 'image_url', key: 'image_url', width: 52 },
@@ -1621,7 +1810,7 @@ app.get('/admin/spots/export', ...requireSuperAdmin, asyncRoute(async (_req, res
   }
   const xlsx = await workbook.xlsx.writeBuffer()
 
-  res.attachment('bouldero-hallen-export.zip')
+  res.attachment(includeArchived ? 'bouldero-hallen-export-inklusive-archiv.zip' : 'bouldero-hallen-export-aktiv.zip')
   const archive = new ZipArchive({ zlib: { level: 9 } })
   archive.on('error', (error) => res.destroy(error))
   archive.pipe(res)
@@ -1783,21 +1972,27 @@ app.get('/spot-images/:spotId', asyncRoute(async (req, res) => {
   res.sendFile(absolutePath)
 }))
 
-app.post('/admin/spots/import/preview', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
+app.post('/admin/spots/import/preview', ...requireSuperAdmin, spotImportUpload.single('file'), asyncRoute(async (req, res) => {
   let rows
   try {
-    rows = parseAdminSpotCsv(req.file)
+    rows = await parseAdminSpotImport(req.file)
   } catch (error) {
     return res.status(400).json({ error: error.message, missing: error.missing })
   }
-  const candidates = await findImportCandidates(rows.filter((row) => row.input))
-  res.json({ rows: rows.map((row) => ({ ...row, candidates: candidates.get(row.rowNumber) ?? [] })) })
+  const candidates = await findImportCandidates(rows)
+  res.json({ rows: rows.map((row) => {
+    const rowCandidates = candidates.get(row.rowNumber) ?? []
+    const safeUpdateTargetId = rowCandidates.length === 1 && ['id', 'source_external_id'].includes(rowCandidates[0].match_type)
+      ? rowCandidates[0].id
+      : null
+    return { ...row, candidates: rowCandidates, safeUpdateTargetId }
+  }) })
 }))
 
-app.post('/admin/spots/import/apply', ...requireSuperAdmin, csvUpload.single('file'), asyncRoute(async (req, res) => {
+app.post('/admin/spots/import/apply', ...requireSuperAdmin, spotImportUpload.single('file'), asyncRoute(async (req, res) => {
   let rows
   try {
-    rows = parseAdminSpotCsv(req.file)
+    rows = await parseAdminSpotImport(req.file)
   } catch (error) {
     return res.status(400).json({ error: error.message, missing: error.missing })
   }
@@ -1812,6 +2007,7 @@ app.post('/admin/spots/import/apply', ...requireSuperAdmin, csvUpload.single('fi
     return res.status(400).json({ error: 'csv_decisions_invalid' })
   }
   const decisionsByRow = new Map(decisions.map((decision) => [decision.rowNumber, decision]))
+  const candidates = await findImportCandidates(rows)
   const client = await pool.connect()
   let created = 0
   let updated = 0
@@ -1821,24 +2017,28 @@ app.post('/admin/spots/import/apply', ...requireSuperAdmin, csvUpload.single('fi
     for (const row of rows) {
       const decision = decisionsByRow.get(row.rowNumber) ?? { action: 'skip' }
       if (!row.input || decision.action === 'skip') { skipped += 1; continue }
+      if (row.error) throw new Error(`Zeile ${row.rowNumber}: ${row.error}`)
       const input = row.input
       if (decision.action === 'create') {
         await client.query(
-          `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, image_url, coordinates, source, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, 'admin-import', 'active')`,
-          [input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || null, input.latitude, input.longitude],
+          `INSERT INTO spots (name, district, address, website, opening_hours, area_sqm, coordinates, source, source_external_id, status)
+           VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($8, $7), 4326)::geography, $9, $10, 'active')`,
+          [input.name, input.district, input.address, input.website ?? null, input.openingHours ?? null, input.areaSqm ?? null, input.latitude, input.longitude, row.source ?? 'admin-import', row.sourceExternalId],
         )
         created += 1
       } else {
         if (!decision.targetId) throw new Error(`Zeile ${row.rowNumber}: Zielhalle fehlt.`)
+        const validTargetIds = new Set((candidates.get(row.rowNumber) ?? []).map((candidate) => candidate.id))
+        if (!validTargetIds.has(decision.targetId)) throw new Error(`Zeile ${row.rowNumber}: Die ausgewählte Zielhalle passt nicht zu dieser Importzeile.`)
         const result = await client.query(
           `UPDATE spots
-              SET name = $2, district = $3, address = $4, website = $5, opening_hours = $6,
-                  area_sqm = $7, image_url = CASE WHEN $8 = '' THEN image_url ELSE $8 END,
-                  coordinates = ST_SetSRID(ST_MakePoint($10, $9), 4326)::geography, updated_at = NOW()
+              SET name = $2, district = $3, address = $4,
+                  website = COALESCE($5, website), opening_hours = COALESCE($6, opening_hours),
+                  area_sqm = COALESCE($7, area_sqm),
+                  coordinates = ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography, updated_at = NOW()
             WHERE id = $1
             RETURNING id`,
-          [decision.targetId, input.name, input.district, input.address, input.website || null, input.openingHours || null, input.areaSqm ?? null, input.imageUrl || '', input.latitude, input.longitude],
+          [decision.targetId, input.name, input.district, input.address, input.website ?? null, input.openingHours ?? null, input.areaSqm ?? null, input.latitude, input.longitude],
         )
         if (!result.rowCount) throw new Error(`Zeile ${row.rowNumber}: Zielhalle existiert nicht mehr.`)
         updated += 1
