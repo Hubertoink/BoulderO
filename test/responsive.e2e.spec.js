@@ -57,45 +57,60 @@ test('does not scroll short mobile content views', async ({ page }) => {
   }
 })
 
-test('keeps the mobile app stable behind an offset keyboard viewport', async ({ page }) => {
+test('resizes the mobile app and navigation above the keyboard viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.addInitScript(() => {
-    const viewport = new EventTarget()
-    viewport.height = 844
-    viewport.offsetTop = 0
-    viewport.scale = 1
-    window.__setVisualViewport = (height, offsetTop = 0) => {
-      viewport.height = height
-      viewport.offsetTop = offsetTop
-      viewport.dispatchEvent(new Event('resize'))
-      viewport.dispatchEvent(new Event('scroll'))
-    }
-    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
-  })
   await page.goto('/')
   await page.getByRole('button', { name: 'Karte entdecken' }).click()
 
-  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /interactive-widget=overlays-content/)
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /interactive-widget=resizes-content/)
   await expect(page.locator('.bottom-nav')).toHaveCSS('position', 'fixed')
-  const initialLayout = await page.evaluate(() => ({
+  await expect.poll(() => page.evaluate(() => ({
     appBottom: Math.round(document.querySelector('.app-shell').getBoundingClientRect().bottom),
     mapBottom: Math.round(document.querySelector('.map-frame').getBoundingClientRect().bottom),
+    navTop: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().top),
     navBottom: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().bottom),
-  }))
+  }))).toEqual({ appBottom: 844, mapBottom: 768, navTop: 768, navBottom: 844 })
+
   await page.getByPlaceholder('Hallen in Mannheim suchen').focus()
-  await page.evaluate(() => window.__setVisualViewport(520, 96))
+  await page.setViewportSize({ width: 390, height: 520 })
   await expect(page.locator('.bottom-nav')).toBeVisible()
   await expect.poll(() => page.evaluate(() => ({
+    viewportHeight: window.innerHeight,
     appBottom: Math.round(document.querySelector('.app-shell').getBoundingClientRect().bottom),
     mapBottom: Math.round(document.querySelector('.map-frame').getBoundingClientRect().bottom),
+    navTop: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().top),
     navBottom: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().bottom),
-  }))).toEqual(initialLayout)
+  }))).toEqual({ viewportHeight: 520, appBottom: 520, mapBottom: 444, navTop: 444, navBottom: 520 })
   await expect.poll(() => page.evaluate(() => ({
+    appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-height').trim(),
     dialogHeight: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-height').trim(),
     dialogTop: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-top').trim(),
-  }))).toEqual({ dialogHeight: '520px', dialogTop: '96px' })
+  }))).toEqual({ appHeight: '100dvh', dialogHeight: '520px', dialogTop: '0px' })
 
-  await page.evaluate(() => window.__setVisualViewport(844, 0))
+  await expect(page.getByPlaceholder('Hallen in Mannheim suchen')).toBeFocused()
+})
+
+test('keeps a focused mobile dialog within the resized keyboard viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Karte entdecken' }).click()
+  await page.getByRole('button', { name: 'Anmelden', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'BoulderO Konto' })
+  const email = dialog.getByLabel('E-Mail')
+
+  await email.focus()
+  await page.setViewportSize({ width: 390, height: 520 })
+
+  await expect(email).toBeFocused()
+  await expect.poll(() => dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return {
+      top: Math.round(bounds.top),
+      bottom: Math.round(bounds.bottom),
+      viewportHeight: window.innerHeight,
+      scrollable: element.scrollHeight > element.clientHeight,
+    }
+  })).toEqual({ top: 0, bottom: 520, viewportHeight: 520, scrollable: true })
 })
 
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {

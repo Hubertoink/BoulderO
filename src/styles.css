@@ -18,6 +18,8 @@
   --radius-control: 8px;
   --radius-surface: 12px;
   --app-viewport-height: 100vh;
+  --dialog-viewport-height: 100vh;
+  --dialog-viewport-top: 0px;
   font-family: Inter, "Avenir Next", "Helvetica Neue", Arial, sans-serif;
   color: var(--deep-space-blue);
   background: var(--soft-linen);
@@ -461,21 +463,10 @@ body.map-dialog-open {
 }
 
 /* Responsive viewport foundation */
-:root {
-  --app-viewport-height: 100vh;
-  --dialog-viewport-height: 100vh;
-  --dialog-viewport-top: 0px;
-}
-
 @supports (height: 100dvh) {
   :root {
+    --app-viewport-height: 100dvh;
     --dialog-viewport-height: 100dvh;
-  }
-}
-
-@supports (height: 100lvh) {
-  :root {
-    --app-viewport-height: 100lvh;
   }
 }
 
