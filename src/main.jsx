@@ -63,7 +63,8 @@ import {
   SpotSuggestionDialog,
   optimizePhoto,
 } from './AppViews.jsx'
-import { disablePushNotifications, registerServiceWorker, updateAppBadge } from './shared/pushNotifications.js'
+import { registerServiceWorker, updateAppBadge } from './shared/pushNotifications.js'
+import { dialogViewportHeight } from './shared/viewport.js'
 
 const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
@@ -185,7 +186,7 @@ function App() {
   useEffect(() => {
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      const height = `${Math.round(viewport?.height || window.innerHeight)}px`
+      const height = `${Math.round(dialogViewportHeight(viewport?.height, window.innerHeight))}px`
       const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
       document.documentElement.style.setProperty('--app-viewport-height', height)
       document.documentElement.style.setProperty('--dialog-viewport-height', height)
@@ -478,7 +479,6 @@ function App() {
   }
 
   async function signOut() {
-    if (currentUser) await disablePushNotifications(currentUser.id).catch(() => undefined)
     const csrfResponse = await fetch('/api/auth/csrf')
     const { csrfToken } = await csrfResponse.json()
     await fetch('/api/auth/signout', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrfToken, callbackUrl: window.location.origin }), redirect: 'manual' })
