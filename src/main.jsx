@@ -185,11 +185,9 @@ function App() {
   useEffect(() => {
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      const height = `${Math.round(viewport?.height || window.innerHeight)}px`
-      const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
+      const height = `${viewport?.height || window.innerHeight}px`
       document.documentElement.style.setProperty('--app-viewport-height', height)
       document.documentElement.style.setProperty('--dialog-viewport-height', height)
-      document.documentElement.style.setProperty('--dialog-viewport-top', offsetTop)
     }
     updateViewportHeight()
     viewport?.addEventListener('resize', updateViewportHeight)

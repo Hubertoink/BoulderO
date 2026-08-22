@@ -17,6 +17,7 @@ Thumbs.db
 # Lokale Hallenexporte und persönliche Arbeitsmappen.
 assets/*.xlsx
 assets/BoulderO_B.af
+docs/website-assets/oulderO (1).png
 
 # Local uploads and database data
 uploads/

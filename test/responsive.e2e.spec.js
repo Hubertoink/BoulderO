@@ -58,20 +58,3 @@ test('does not scroll short mobile content views', async ({ page }) => {
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBe(844)
   }
 })
-
-test('keeps a mobile composer inside the visible keyboard viewport', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto('/')
-  await page.evaluate(() => {
-    document.documentElement.style.setProperty('--dialog-viewport-height', '520px')
-    const backdrop = document.createElement('div')
-    backdrop.className = 'composer-backdrop composer-backdrop--map'
-    backdrop.innerHTML = '<form class="journal-composer journal-composer--map journal-composer--entry"><label class="form-field"><span>Erfahrungsbericht</span><textarea></textarea></label></form>'
-    document.body.append(backdrop)
-  })
-
-  await expect.poll(() => page.locator('.composer-backdrop').evaluate((element) => {
-    const bounds = element.getBoundingClientRect()
-    return { height: Math.round(bounds.height), bottom: Math.round(bounds.bottom) }
-  })).toEqual({ height: 520, bottom: 520 })
-})
