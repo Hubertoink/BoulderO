@@ -85,7 +85,7 @@ test('resizes the mobile app and navigation above the keyboard viewport', async 
     appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-height').trim(),
     dialogHeight: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-height').trim(),
     dialogTop: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-top').trim(),
-  }))).toEqual({ appHeight: '100dvh', dialogHeight: '520px', dialogTop: '0px' })
+  }))).toEqual({ appHeight: '520px', dialogHeight: '520px', dialogTop: '0px' })
 
   await expect(page.getByPlaceholder('Hallen in Mannheim suchen')).toBeFocused()
 })
@@ -131,6 +131,26 @@ test('keeps a mobile map composer flush with the resized keyboard viewport', asy
       viewportHeight: window.innerHeight,
     }
   })).toEqual({ bottom: 520, marginBottom: '0px', viewportHeight: 520 })
+})
+
+test('keeps the mobile map and navigation above Android bottom browser controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.addInitScript(() => {
+    const viewport = new EventTarget()
+    viewport.height = 779
+    viewport.offsetTop = 0
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Karte entdecken' }).click()
+
+  await expect.poll(() => page.evaluate(() => ({
+    appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-height').trim(),
+    appBottom: Math.round(document.querySelector('.app-shell').getBoundingClientRect().bottom),
+    mapBottom: Math.round(document.querySelector('.map-frame').getBoundingClientRect().bottom),
+    navTop: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().top),
+    navBottom: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().bottom),
+  }))).toEqual({ appHeight: '779px', appBottom: 779, mapBottom: 703, navTop: 703, navBottom: 779 })
 })
 
 test('keeps a mobile map composer above Android bottom browser controls', async ({ page }) => {

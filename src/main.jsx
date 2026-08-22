@@ -186,9 +186,15 @@ function App() {
   useEffect(() => {
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      const dialogHeight = `${Math.round(dialogViewportHeight(viewport?.height, window.innerHeight))}px`
-      const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
-      document.documentElement.style.setProperty('--dialog-viewport-height', dialogHeight)
+      const visibleHeight = dialogViewportHeight(viewport?.height, window.innerHeight)
+      const visualOffsetTop = Number.isFinite(viewport?.offsetTop) ? Math.max(0, viewport.offsetTop) : 0
+      const visualBottom = Math.min(window.innerHeight, visibleHeight + visualOffsetTop)
+      const viewportHeight = `${Math.round(visibleHeight)}px`
+      const offsetTop = `${Math.round(visualOffsetTop)}px`
+      const bottomOffset = `${Math.round(Math.max(0, window.innerHeight - visualBottom))}px`
+      document.documentElement.style.setProperty('--app-viewport-height', viewportHeight)
+      document.documentElement.style.setProperty('--app-viewport-bottom-offset', bottomOffset)
+      document.documentElement.style.setProperty('--dialog-viewport-height', viewportHeight)
       document.documentElement.style.setProperty('--dialog-viewport-top', offsetTop)
     }
     updateViewportHeight()
