@@ -583,22 +583,9 @@ body.modal-open {
 }
 
 @media (max-width: 799px), (max-height: 599px) and (orientation: landscape) {
-  html,
-  body,
-  #root {
-    height: var(--app-viewport-height);
-    min-height: var(--app-viewport-height);
-    background: var(--paper);
-  }
-
   .app-shell {
-    height: var(--app-viewport-height);
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
     padding-top: calc(62px + env(safe-area-inset-top, 0px));
-    padding-bottom: 0;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
   }
 
   .app-header {
@@ -607,9 +594,10 @@ body.modal-open {
   }
 
   .bottom-nav {
-    position: relative;
-    inset: auto;
-    flex: 0 0 calc(76px + env(safe-area-inset-bottom, 0px));
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
     width: 100%;
     height: calc(76px + env(safe-area-inset-bottom, 0px));
     flex-direction: row;
@@ -618,7 +606,6 @@ body.modal-open {
     border-top: 1px solid var(--line);
     border-right: 0;
     padding-top: 0;
-    transform: none;
   }
 
   .bottom-nav button {
@@ -630,12 +617,8 @@ body.modal-open {
 
   .view {
     width: 100%;
-    min-height: 0;
-    flex: 1 1 auto;
+    min-height: calc(var(--app-viewport-height) - 138px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     margin-left: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
   }
 
   .map-view,
@@ -647,6 +630,27 @@ body.modal-open {
   .content-view {
     min-height: calc(var(--app-viewport-height) - 138px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     padding: 0 max(20px, env(safe-area-inset-right, 0px)) 30px max(20px, env(safe-area-inset-left, 0px));
+  }
+
+  /* A mobile keyboard needs the whole visible viewport. The global navigation
+     is not useful while text is being entered, so remove it instead of
+     reserving a browser-dependent area beneath it. */
+  .app-shell:has(input:focus, textarea:focus, select:focus) {
+    padding-bottom: 0;
+  }
+
+  .app-shell:has(input:focus, textarea:focus, select:focus) .bottom-nav {
+    display: none;
+  }
+
+  .app-shell:has(input:focus, textarea:focus, select:focus) .view,
+  .app-shell:has(input:focus, textarea:focus, select:focus) .content-view {
+    min-height: calc(var(--app-viewport-height) - 62px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell:has(input:focus, textarea:focus, select:focus) .map-view,
+  .app-shell:has(input:focus, textarea:focus, select:focus) .map-frame {
+    height: calc(var(--app-viewport-height) - 62px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
 
   /* Keep the Community section's top margin inside the viewport container.

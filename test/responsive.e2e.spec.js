@@ -59,13 +59,15 @@ test('does not scroll short mobile content views', async ({ page }) => {
   }
 })
 
-test('keeps the mobile navigation inside the app instead of fixing it to the browser viewport', async ({ page }) => {
+test('hides the mobile navigation and lets the map fill the viewport while typing', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   await page.getByRole('button', { name: 'Karte entdecken' }).click()
 
-  await expect(page.locator('.bottom-nav')).toHaveCSS('position', 'relative')
-  await expect.poll(() => page.locator('.bottom-nav').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(844)
+  await expect(page.locator('.bottom-nav')).toHaveCSS('position', 'fixed')
+  await page.getByPlaceholder('Hallen in Mannheim suchen').focus()
+  await expect(page.locator('.bottom-nav')).toBeHidden()
+  await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(844)
 })
 
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {
