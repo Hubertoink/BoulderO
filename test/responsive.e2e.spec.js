@@ -58,3 +58,58 @@ test('does not scroll short mobile content views', async ({ page }) => {
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBe(844)
   }
 })
+
+test('marks the map field as a search instead of an autofill field', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Karte entdecken' }).click()
+  const search = page.getByPlaceholder('Hallen in Mannheim suchen')
+
+  await expect(search).toHaveAttribute('type', 'search')
+  await expect(search).toHaveAttribute('autocomplete', 'off')
+  await expect(search).toHaveAttribute('enterkeyhint', 'search')
+  await expect(search).toHaveCSS('appearance', 'none')
+})
+
+test('keeps mobile dialogs flush with an offset keyboard viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-height'))).toBe('844px')
+  await page.evaluate(() => {
+    const backdrop = document.createElement('div')
+    backdrop.className = 'composer-backdrop keyboard-test-backdrop'
+    backdrop.style.setProperty('--dialog-viewport-height', '520px')
+    backdrop.style.setProperty('--dialog-viewport-top', '96px')
+    backdrop.innerHTML = '<section class="journal-composer group-editor"><div style="height: 800px"></div></section>'
+    document.body.append(backdrop)
+  })
+
+  await expect.poll(() => page.locator('.keyboard-test-backdrop').evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return { top: Math.round(bounds.top), height: Math.round(bounds.height), bottom: Math.round(bounds.bottom) }
+  })).toEqual({ top: 96, height: 520, bottom: 616 })
+
+  await expect.poll(() => page.locator('.keyboard-test-backdrop .journal-composer').evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return { top: Math.round(bounds.top), bottom: Math.round(bounds.bottom), scrollable: element.scrollHeight > element.clientHeight }
+  })).toEqual({ top: 96, bottom: 616, scrollable: true })
+})
+
+test('sizes the group map picker against the keyboard viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-height'))).toBe('844px')
+  await page.evaluate(() => {
+    const backdrop = document.createElement('div')
+    backdrop.className = 'composer-backdrop group-spot-map-backdrop keyboard-test-map-backdrop'
+    backdrop.style.setProperty('--dialog-viewport-height', '520px')
+    backdrop.style.setProperty('--dialog-viewport-top', '96px')
+    backdrop.innerHTML = '<section class="group-spot-map-dialog"><div style="height: 800px"></div></section>'
+    document.body.append(backdrop)
+  })
+
+  await expect.poll(() => page.locator('.keyboard-test-map-backdrop .group-spot-map-dialog').evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return { bottom: Math.round(bounds.bottom), maxHeight: getComputedStyle(element).maxHeight }
+  })).toEqual({ bottom: 616, maxHeight: '508px' })
+})

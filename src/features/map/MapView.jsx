@@ -541,7 +541,7 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
         <div className="search-control">
           <label className="search-field">
             <IconSearch size={18} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Hallen in Mannheim suchen" aria-expanded={Boolean(query)} aria-controls="search-results" />
+            <input type="search" name="map-search" autoComplete="off" autoCorrect="off" spellCheck={false} enterKeyHint="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Hallen in Mannheim suchen" aria-expanded={Boolean(query)} aria-controls="search-results" />
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}
           </label>
           {query && <div className={`search-results${matchingSpots.length >= 4 ? ' search-results--scrollable' : ''}`} id="search-results" role="listbox">

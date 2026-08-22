@@ -51,6 +51,8 @@ button { cursor: pointer; }
 .search-field { height: 46px; background: var(--paper); border: 1px solid var(--line); display: flex; align-items: center; gap: 10px; padding: 0 13px; flex: 1; box-shadow: 0 5px 16px rgba(21, 50, 67, .08); border-radius: 8px; }
 .search-field svg { color: var(--yale-blue); flex: 0 0 auto; }
 .search-field input { border: 0; outline: 0; background: transparent; min-width: 0; flex: 1; color: var(--deep-space-blue); font-size: 14px; }
+.search-field input[type="search"], .group-spot-map-search input[type="search"] { -webkit-appearance: none; appearance: none; }
+.search-field input[type="search"]::-webkit-search-cancel-button, .group-spot-map-search input[type="search"]::-webkit-search-cancel-button { display: none; }
 .search-field input::placeholder { color: #7c8c92; }
 .search-field button { border: 0; background: transparent; padding: 2px; color: var(--ink-soft); display: grid; place-items: center; }
 .toolbar-filter, .toolbar-location { width: 46px; height: 46px; flex: 0 0 auto; box-shadow: 0 5px 16px rgba(21, 50, 67, .08); }
@@ -463,6 +465,7 @@ body.map-dialog-open {
 :root {
   --app-viewport-height: 100vh;
   --dialog-viewport-height: 100vh;
+  --dialog-viewport-top: 0px;
 }
 
 @supports (height: 100dvh) {
@@ -637,6 +640,14 @@ body.modal-open {
   }
 
   .composer-backdrop {
+    top: var(--dialog-viewport-top);
+    right: auto;
+    bottom: auto;
+    left: 0;
+    width: 100%;
+    height: var(--dialog-viewport-height);
+    min-height: 0;
+    max-height: var(--dialog-viewport-height);
     align-items: end;
     padding: env(safe-area-inset-top, 0px) 0 0;
   }
@@ -763,7 +774,7 @@ body.modal-open {
 .group-image-picker { margin-bottom: 0; }
 .group-image-picker > small { display: block; margin-top: 6px; color: var(--ink-soft); font-size: 11px; }
 .group-spot-map-backdrop { z-index: 2200 !important; padding: 22px; }
-.group-spot-map-dialog { width: min(820px, 100%); max-height: calc(var(--app-viewport-height) - 44px); overflow: auto; padding: 22px; border-radius: var(--radius-surface); background: var(--paper); box-shadow: 0 22px 65px rgba(12, 31, 42, .35); }
+.group-spot-map-dialog { width: min(820px, 100%); max-height: calc(var(--dialog-viewport-height) - 44px); overflow: auto; padding: 22px; border-radius: var(--radius-surface); background: var(--paper); box-shadow: 0 22px 65px rgba(12, 31, 42, .35); }
 .group-spot-map-help { display: flex; align-items: center; gap: 7px; margin: 15px 0 10px; color: var(--ink-soft); font-size: 12px; line-height: 1.35; }
 .group-spot-map-help > svg { flex: 0 0 auto; color: var(--yale-blue); }
 .group-spot-map-help b { margin-left: auto; color: var(--visited); white-space: nowrap; }
@@ -790,7 +801,7 @@ body.modal-open {
 
 @media (max-width: 560px) {
   .group-spot-map-backdrop { padding: 0; align-items: end; }
-  .group-spot-map-dialog { max-height: calc(var(--app-viewport-height) - 12px); padding: 18px; border-radius: 12px 12px 0 0; }
+  .group-spot-map-dialog { max-height: calc(var(--dialog-viewport-height) - 12px); padding: 18px; border-radius: 12px 12px 0 0; }
   .group-spot-map-canvas { height: 46vh; min-height: 250px; }
 }
 

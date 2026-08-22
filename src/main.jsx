@@ -185,15 +185,19 @@ function App() {
   useEffect(() => {
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      const height = `${viewport?.height || window.innerHeight}px`
+      const height = `${Math.round(viewport?.height || window.innerHeight)}px`
+      const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
       document.documentElement.style.setProperty('--app-viewport-height', height)
       document.documentElement.style.setProperty('--dialog-viewport-height', height)
+      document.documentElement.style.setProperty('--dialog-viewport-top', offsetTop)
     }
     updateViewportHeight()
     viewport?.addEventListener('resize', updateViewportHeight)
+    viewport?.addEventListener('scroll', updateViewportHeight)
     window.addEventListener('resize', updateViewportHeight)
     return () => {
       viewport?.removeEventListener('resize', updateViewportHeight)
+      viewport?.removeEventListener('scroll', updateViewportHeight)
       window.removeEventListener('resize', updateViewportHeight)
     }
   }, [])
