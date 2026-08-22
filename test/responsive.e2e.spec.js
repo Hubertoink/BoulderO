@@ -113,6 +113,26 @@ test('keeps a focused mobile dialog within the resized keyboard viewport', async
   })).toEqual({ top: 0, bottom: 520, viewportHeight: 520, scrollable: true })
 })
 
+test('keeps a mobile map composer flush with the resized keyboard viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 520 })
+  await page.goto('/')
+  await page.evaluate(() => {
+    const backdrop = document.createElement('div')
+    backdrop.className = 'composer-backdrop composer-backdrop--map keyboard-test-map-composer'
+    backdrop.innerHTML = '<section class="journal-composer journal-composer--map"><div style="height: 800px"></div></section>'
+    document.body.append(backdrop)
+  })
+
+  await expect.poll(() => page.locator('.keyboard-test-map-composer .journal-composer').evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return {
+      bottom: Math.round(bounds.bottom),
+      marginBottom: getComputedStyle(element).marginBottom,
+      viewportHeight: window.innerHeight,
+    }
+  })).toEqual({ bottom: 520, marginBottom: '0px', viewportHeight: 520 })
+})
+
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
