@@ -641,10 +641,9 @@ body.modal-open {
 
   .composer-backdrop {
     top: var(--dialog-viewport-top);
-    right: auto;
+    right: 0;
     bottom: auto;
     left: 0;
-    width: 100%;
     height: var(--dialog-viewport-height);
     min-height: 0;
     max-height: var(--dialog-viewport-height);

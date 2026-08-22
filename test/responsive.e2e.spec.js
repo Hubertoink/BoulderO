@@ -81,13 +81,16 @@ test('keeps mobile dialogs flush with an offset keyboard viewport', async ({ pag
     backdrop.style.setProperty('--dialog-viewport-height', '520px')
     backdrop.style.setProperty('--dialog-viewport-top', '96px')
     backdrop.innerHTML = '<section class="journal-composer group-editor"><div style="height: 800px"></div></section>'
-    document.body.append(backdrop)
+    const host = document.createElement('main')
+    host.className = 'compact-view'
+    host.append(backdrop)
+    document.body.append(host)
   })
 
   await expect.poll(() => page.locator('.keyboard-test-backdrop').evaluate((element) => {
     const bounds = element.getBoundingClientRect()
-    return { top: Math.round(bounds.top), height: Math.round(bounds.height), bottom: Math.round(bounds.bottom) }
-  })).toEqual({ top: 96, height: 520, bottom: 616 })
+    return { top: Math.round(bounds.top), width: Math.round(bounds.width), height: Math.round(bounds.height), bottom: Math.round(bounds.bottom) }
+  })).toEqual({ top: 96, width: 390, height: 520, bottom: 616 })
 
   await expect.poll(() => page.locator('.keyboard-test-backdrop .journal-composer').evaluate((element) => {
     const bounds = element.getBoundingClientRect()
@@ -105,11 +108,14 @@ test('sizes the group map picker against the keyboard viewport', async ({ page }
     backdrop.style.setProperty('--dialog-viewport-height', '520px')
     backdrop.style.setProperty('--dialog-viewport-top', '96px')
     backdrop.innerHTML = '<section class="group-spot-map-dialog"><div style="height: 800px"></div></section>'
-    document.body.append(backdrop)
+    const host = document.createElement('main')
+    host.className = 'compact-view'
+    host.append(backdrop)
+    document.body.append(host)
   })
 
   await expect.poll(() => page.locator('.keyboard-test-map-backdrop .group-spot-map-dialog').evaluate((element) => {
     const bounds = element.getBoundingClientRect()
-    return { bottom: Math.round(bounds.bottom), maxHeight: getComputedStyle(element).maxHeight }
-  })).toEqual({ bottom: 616, maxHeight: '508px' })
+    return { width: Math.round(bounds.width), bottom: Math.round(bounds.bottom), maxHeight: getComputedStyle(element).maxHeight }
+  })).toEqual({ width: 390, bottom: 616, maxHeight: '508px' })
 })
