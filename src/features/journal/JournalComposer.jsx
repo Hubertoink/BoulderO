@@ -73,7 +73,7 @@ export function VisibilityPicker({ value, onChange }) {
 export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface, plannedVisit }) {
   const plannedDate = plannedVisit ? new Date(plannedVisit.starts_at) : null
   const [visitedAt, setVisitedAt] = useState(plannedDate ? dateInputValue(plannedDate) : dateInputValue())
-  const [timesOpen, setTimesOpen] = useState(false)
+  const [timesOpen, setTimesOpen] = useState(Boolean(plannedVisit))
   const [startedAt, setStartedAt] = useState(plannedDate ? timeInputValue(plannedDate) : '')
   const [endedAt, setEndedAt] = useState(plannedVisit?.ends_at ? timeInputValue(plannedVisit.ends_at) : '')
   const [body, setBody] = useState('')

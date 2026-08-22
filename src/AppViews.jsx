@@ -53,7 +53,7 @@ function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
 
   async function save() {
     setError('')
-    if (Boolean(startedAt) !== Boolean(endedAt)) return setError('Bitte gib Beginn und Ende zusammen an.')
+    if (endedAt && !startedAt) return setError('Bitte gib für das Ende auch den Beginn an.')
     if (startedAt && endedAt && endedAt <= startedAt) return setError('Das Ende muss nach dem Beginn liegen.')
     setSaving(true)
     try { await onUpdate(entry.journal_entry_id, { body, visibility, visitedAt, startedAt, endedAt, removedMediaIds, files: newFiles.map((item) => item.file) }); onClose() } catch (saveError) { setError(saveError.message || 'Der Eintrag konnte nicht aktualisiert werden.') } finally { setSaving(false) }

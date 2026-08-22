@@ -919,7 +919,7 @@ const visitInputSchema = z.object({
   body: z.string().trim().max(4000).default(''),
   visibility: z.enum(['private', 'friends', 'followers', 'public']).default('private'),
 }).superRefine((value, context) => {
-  if (Boolean(value.startedAt) !== Boolean(value.endedAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Start- und Endzeit müssen zusammen angegeben werden.' })
+  if (value.endedAt && !value.startedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Für eine Endzeit wird auch eine Startzeit benötigt.' })
   if (value.startedAt && value.endedAt && value.endedAt <= value.startedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Endzeit muss nach der Startzeit liegen.' })
 })
 
@@ -932,8 +932,8 @@ const visitUpdateSchema = z.object({
 }).superRefine((value, context) => {
   const hasStartedAt = value.startedAt !== undefined
   const hasEndedAt = value.endedAt !== undefined
-  if (hasStartedAt !== hasEndedAt || hasStartedAt && Boolean(value.startedAt) !== Boolean(value.endedAt)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Start- und Endzeit müssen zusammen angegeben werden.' })
+  if (hasStartedAt !== hasEndedAt || hasStartedAt && value.endedAt && !value.startedAt) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Für eine Endzeit wird auch eine Startzeit benötigt.' })
   }
   if (value.startedAt && value.endedAt && value.endedAt <= value.startedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Endzeit muss nach der Startzeit liegen.' })
 })
