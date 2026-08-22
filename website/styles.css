@@ -142,12 +142,15 @@ footer nav a {
   color: var(--visited);
 }
 
-.hero h1 {
+.hero__brand-title {
   margin: 0;
-  color: white;
-  font-size: 72px;
-  line-height: 0.95;
-  letter-spacing: 0;
+  line-height: 0;
+}
+
+.hero__brand-title img {
+  width: 420px;
+  height: auto;
+  filter: brightness(0) invert(1);
 }
 
 .hero__lead {
@@ -239,7 +242,7 @@ footer nav a {
 
 .section-heading h2,
 .product-copy h2,
-.privacy-band h2,
+.purpose-band h2,
 .closing-band h2,
 .legal-main h1 {
   margin: 0;
@@ -288,7 +291,6 @@ footer nav a {
 
 .feature-grid p,
 .product-copy > p,
-.privacy-band > p,
 .legal-main p,
 .legal-main li {
   color: var(--ink-soft);
@@ -307,7 +309,7 @@ footer nav a {
 
 .product-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 430px;
   align-items: center;
   gap: 90px;
 }
@@ -330,7 +332,8 @@ footer nav a {
 }
 
 .mobile-product {
-  width: 300px;
+  width: 350px;
+  aspect-ratio: 390 / 844;
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -338,8 +341,14 @@ footer nav a {
   box-shadow: 0 20px 48px rgba(21, 50, 67, 0.18);
 }
 
-.privacy-band {
-  min-height: 360px;
+.mobile-product img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.purpose-band {
+  min-height: 430px;
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   align-items: center;
@@ -349,14 +358,58 @@ footer nav a {
   color: white;
 }
 
-.privacy-band h2 {
+.purpose-band h2 {
   color: white;
 }
 
-.privacy-band > p {
+.purpose-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
   margin: 0;
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 17px;
+  padding: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  list-style: none;
+}
+
+.purpose-list li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+  padding: 20px 18px 20px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.purpose-list li:nth-child(odd) {
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.purpose-list li:nth-child(even) {
+  padding-left: 18px;
+}
+
+.purpose-list span {
+  color: var(--orange);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.purpose-list strong,
+.purpose-list small {
+  display: block;
+}
+
+.purpose-list strong {
+  color: white;
+  font-size: 15px;
+}
+
+.purpose-list small {
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .closing-band {
@@ -465,8 +518,8 @@ a:focus-visible {
     background: linear-gradient(180deg, rgba(11, 32, 44, 0.92) 0%, rgba(21, 50, 67, 0.6) 58%, rgba(21, 50, 67, 0.28) 100%);
   }
 
-  .hero h1 {
-    font-size: 48px;
+  .hero__brand-title img {
+    width: min(290px, 82vw);
   }
 
   .hero__lead {
@@ -502,7 +555,7 @@ a:focus-visible {
 
   .section-heading h2,
   .product-copy h2,
-  .privacy-band h2,
+  .purpose-band h2,
   .closing-band h2,
   .legal-main h1 {
     font-size: 31px;
@@ -545,13 +598,24 @@ a:focus-visible {
   }
 
   .mobile-product {
-    width: min(280px, 86vw);
+    width: min(330px, 88vw);
   }
 
-  .privacy-band {
+  .purpose-band {
     grid-template-columns: 1fr;
     gap: 30px;
     padding: 68px 20px;
+  }
+
+  .purpose-list {
+    grid-template-columns: 1fr;
+  }
+
+  .purpose-list li,
+  .purpose-list li:nth-child(even),
+  .purpose-list li:nth-child(odd) {
+    padding: 18px 0;
+    border-right: 0;
   }
 
   footer {
