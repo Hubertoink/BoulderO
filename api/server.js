@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import crypto from 'node:crypto'
+import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -20,6 +21,7 @@ import { areMutualFollowers, isEntryVisible } from './visibility.js'
 const port = Number(process.env.PORT ?? 3001)
 const uploadRoot = process.env.UPLOAD_DIR ?? '/app/uploads'
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+const execFileAsync = promisify(execFile)
 
 const demoMode = process.env.DEMO_MODE === 'true'
 const superAdminEmail = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase()
@@ -783,6 +785,55 @@ const imageUpload = multer({
   fileFilter: (_req, file, callback) => callback(null, /^image\/(jpeg|png|webp|heic)$/.test(file.mimetype)),
 })
 
+const maxJournalMedia = 6
+const maxJournalVideoBytes = 50 * 1024 * 1024
+const maxJournalImageBytes = 10 * 1024 * 1024
+const maxJournalVideoSeconds = 30
+const journalVideoTypes = new Set(['video/mp4', 'video/webm', 'video/quicktime'])
+const journalImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
+
+const journalMediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (req, _file, callback) => {
+      try {
+        const directory = path.join(uploadRoot, req.user.id)
+        await fs.mkdir(directory, { recursive: true })
+        callback(null, directory)
+      } catch (error) {
+        callback(error)
+      }
+    },
+    filename: (_req, file, callback) => {
+      const extension = path.extname(file.originalname).toLowerCase() || (journalVideoTypes.has(file.mimetype) ? '.mp4' : '.jpg')
+      callback(null, `${crypto.randomUUID()}${extension}`)
+    },
+  }),
+  limits: { fileSize: maxJournalVideoBytes, files: maxJournalMedia },
+  fileFilter: (_req, file, callback) => callback(null, journalImageTypes.has(file.mimetype) || journalVideoTypes.has(file.mimetype)),
+})
+
+async function normalizeJournalMedia(file) {
+  if (journalImageTypes.has(file.mimetype)) {
+    if (file.size > maxJournalImageBytes) throw Object.assign(new Error('image_too_large'), { status: 400 })
+    return { filePath: file.path, storageKey: path.relative(uploadRoot, file.path).split(path.sep).join('/'), contentType: file.mimetype, byteSize: file.size, originalName: file.originalname }
+  }
+
+  const outputPath = path.join(path.dirname(file.path), `${crypto.randomUUID()}.mp4`)
+  try {
+    const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file.path])
+    const duration = Number.parseFloat(stdout.trim())
+    if (!Number.isFinite(duration) || duration <= 0 || duration > maxJournalVideoSeconds) throw Object.assign(new Error('video_duration_invalid'), { status: 400 })
+    await execFileAsync('ffmpeg', ['-y', '-i', file.path, '-map', '0:v:0', '-map', '0:a?', '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath])
+    const stat = await fs.stat(outputPath)
+    await fs.unlink(file.path).catch(() => undefined)
+    return { filePath: outputPath, storageKey: path.relative(uploadRoot, outputPath).split(path.sep).join('/'), contentType: 'video/mp4', byteSize: stat.size, originalName: file.originalname }
+  } catch (error) {
+    await fs.unlink(outputPath).catch(() => undefined)
+    if (error?.status) throw error
+    throw Object.assign(new Error('video_conversion_failed'), { status: 400 })
+  }
+}
+
 const spotImageUpload = multer({
   storage: multer.diskStorage({
     destination: async (_req, _file, callback) => {
@@ -869,6 +920,21 @@ const visitInputSchema = z.object({
   visibility: z.enum(['private', 'friends', 'followers', 'public']).default('private'),
 }).superRefine((value, context) => {
   if (Boolean(value.startedAt) !== Boolean(value.endedAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Start- und Endzeit müssen zusammen angegeben werden.' })
+  if (value.startedAt && value.endedAt && value.endedAt <= value.startedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Endzeit muss nach der Startzeit liegen.' })
+})
+
+const visitUpdateSchema = z.object({
+  body: z.string().trim().max(4000).optional(),
+  visibility: z.enum(['private', 'friends', 'followers', 'public']).optional(),
+  visitedAt: z.string().date().optional(),
+  startedAt: timeSchema.optional().or(z.literal('')),
+  endedAt: timeSchema.optional().or(z.literal('')),
+}).superRefine((value, context) => {
+  const hasStartedAt = value.startedAt !== undefined
+  const hasEndedAt = value.endedAt !== undefined
+  if (hasStartedAt !== hasEndedAt || hasStartedAt && Boolean(value.startedAt) !== Boolean(value.endedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Start- und Endzeit müssen zusammen angegeben werden.' })
+  }
   if (value.startedAt && value.endedAt && value.endedAt <= value.startedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Endzeit muss nach der Startzeit liegen.' })
 })
 
@@ -2494,8 +2560,22 @@ app.post('/social/friend-requests/:requestId/decline', requireUser, asyncRoute(a
 }))
 
 app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
+  const { cursor: rawCursor, limit, entry } = z.object({
+    cursor: z.string().max(500).optional(),
+    limit: z.coerce.number().int().min(1).max(30).default(20),
+    entry: z.string().uuid().optional(),
+  }).parse(req.query)
+  let cursor = null
+  if (rawCursor) {
+    try {
+      cursor = z.object({ visitedAt: z.string().datetime(), createdAt: z.string().datetime(), id: z.string().uuid() })
+        .parse(JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')))
+    } catch {
+      return res.status(400).json({ error: 'invalid_feed_cursor' })
+    }
+  }
   const result = await pool.query(`
-    SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, v.spot_id, s.name AS spot_name, s.district,
+    SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, v.started_at, v.ended_at, v.spot_id, s.name AS spot_name, s.district,
            u.id AS user_id, u.name AS user_name, u.username, u.image AS user_image,
            (j.user_id = $1) AS is_owner,
            (SELECT COUNT(DISTINCT pv.spot_id)::int FROM visits pv WHERE pv.user_id = u.id) AS author_unique_spots,
@@ -2510,18 +2590,27 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
       JOIN spots s ON s.id = v.spot_id
       JOIN users u ON u.id = j.user_id
       LEFT JOIN media m ON m.journal_entry_id = j.id
-     WHERE j.user_id = $1
+     WHERE (
+          j.user_id = $1
         OR (
           j.visibility = 'public'
           OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted'))
           OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted'))
         )
+       )
        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = j.user_id) OR (b.blocker_id = j.user_id AND b.blocked_id = $1))
+       AND ($2::timestamptz IS NULL OR (v.visited_at, j.created_at, j.id) < ($2::timestamptz, $3::timestamptz, $4::uuid))
+       AND ($6::uuid IS NULL OR j.id = $6)
      GROUP BY j.id, v.id, s.id, u.id
      ORDER BY v.visited_at DESC, j.created_at DESC, j.id DESC
-     LIMIT 30
-  `, [req.user.id])
-  res.json({ entries: result.rows })
+     LIMIT $5
+  `, [req.user.id, cursor?.visitedAt ?? null, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1, entry ?? null])
+  const entries = result.rows.slice(0, limit)
+  const last = entries.at(-1)
+  const nextCursor = result.rows.length > limit && last
+    ? Buffer.from(JSON.stringify({ visitedAt: new Date(last.visited_at).toISOString(), createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
+    : null
+  res.json({ entries, nextCursor })
 }))
 
 app.get('/social/map-activity', requireUser, asyncRoute(async (req, res) => {
@@ -3561,11 +3650,7 @@ app.post('/visits', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.patch('/journal/:entryId', requireUser, asyncRoute(async (req, res) => {
-  const input = z.object({
-    body: z.string().trim().max(4000).optional(),
-    visibility: z.enum(['private', 'friends', 'followers', 'public']).optional(),
-    visitedAt: z.string().date().optional(),
-  }).parse(req.body)
+  const input = visitUpdateSchema.parse(req.body)
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -3581,8 +3666,16 @@ app.patch('/journal/:entryId', requireUser, asyncRoute(async (req, res) => {
       await client.query('ROLLBACK')
       return res.status(404).json({ error: 'journal_entry_not_found' })
     }
-    if (input.visitedAt) {
-      await client.query('UPDATE visits SET visited_at = $2::date WHERE id = $1', [entry.rows[0].visit_id, input.visitedAt])
+    const updateTimes = input.startedAt !== undefined && input.endedAt !== undefined
+    if (input.visitedAt || updateTimes) {
+      await client.query(
+        `UPDATE visits
+            SET visited_at = COALESCE($2::date, visited_at),
+                started_at = CASE WHEN $3::boolean THEN NULLIF($4::text, '')::time ELSE started_at END,
+                ended_at = CASE WHEN $3::boolean THEN NULLIF($5::text, '')::time ELSE ended_at END
+          WHERE id = $1`,
+        [entry.rows[0].visit_id, input.visitedAt ?? null, updateTimes, input.startedAt ?? '', input.endedAt ?? ''],
+      )
     }
     const result = await client.query(
       `UPDATE journal_entries
@@ -3633,26 +3726,48 @@ app.delete('/visits/:visitId', requireUser, asyncRoute(async (req, res) => {
   res.status(204).end()
 }))
 
-app.post('/journal/:entryId/photos', requireUser, imageUpload.array('photos', 6), asyncRoute(async (req, res) => {
+async function uploadJournalMedia(req, res) {
   const entry = await pool.query(
     'SELECT id FROM journal_entries WHERE id = $1 AND user_id = $2',
     [req.params.entryId, req.user.id],
   )
-  if (!entry.rowCount) return res.status(404).json({ error: 'journal_entry_not_found' })
   const files = req.files ?? []
-  if (!files.length) return res.status(400).json({ error: 'no_valid_photos' })
-  const media = await Promise.all(files.map(async (file) => {
-    const storageKey = path.relative(uploadRoot, file.path).split(path.sep).join('/')
-    const result = await pool.query(
-      `INSERT INTO media (journal_entry_id, owner_id, storage_key, original_name, content_type, byte_size)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, content_type, byte_size, created_at`,
-      [entry.rows[0].id, req.user.id, storageKey, file.originalname, file.mimetype, file.size],
-    )
-    return result.rows[0]
-  }))
-  res.status(201).json({ media })
-}))
+  if (!entry.rowCount) {
+    await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => undefined)))
+    return res.status(404).json({ error: 'journal_entry_not_found' })
+  }
+  if (!files.length) return res.status(400).json({ error: 'no_valid_media' })
+  const totals = await pool.query(
+    `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE content_type LIKE 'video/%')::int AS videos
+       FROM media WHERE journal_entry_id = $1`,
+    [entry.rows[0].id],
+  )
+  if (totals.rows[0].total + files.length > maxJournalMedia || totals.rows[0].videos + files.filter((file) => journalVideoTypes.has(file.mimetype)).length > 1) {
+    await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => undefined)))
+    return res.status(400).json({ error: 'journal_media_limit_reached' })
+  }
+
+  const normalized = []
+  try {
+    for (const file of files) normalized.push(await normalizeJournalMedia(file))
+    const media = await Promise.all(normalized.map(async (item) => {
+      const result = await pool.query(
+        `INSERT INTO media (journal_entry_id, owner_id, storage_key, original_name, content_type, byte_size)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, content_type AS "contentType", byte_size AS "byteSize", created_at`,
+        [entry.rows[0].id, req.user.id, item.storageKey, item.originalName, item.contentType, item.byteSize],
+      )
+      return result.rows[0]
+    }))
+    res.status(201).json({ media })
+  } catch (error) {
+    await Promise.all([...files.map((file) => file.path), ...normalized.map((item) => item.filePath)].map((filePath) => fs.unlink(filePath).catch(() => undefined)))
+    throw error
+  }
+}
+
+app.post('/journal/:entryId/media', requireUser, journalMediaUpload.array('media', maxJournalMedia), asyncRoute(uploadJournalMedia))
+app.post('/journal/:entryId/photos', requireUser, journalMediaUpload.array('photos', maxJournalMedia), asyncRoute(uploadJournalMedia))
 
 app.get('/media/:mediaId', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
@@ -3718,6 +3833,7 @@ app.use((error, _req, res, _next) => {
   if (error instanceof z.ZodError) return res.status(400).json({ error: 'invalid_input', details: error.flatten() })
   if (error?.code === '23505') return res.status(409).json({ error: 'conflict' })
   if (error instanceof multer.MulterError) return res.status(400).json({ error: error.code })
+  if (error?.status === 400) return res.status(400).json({ error: error.message || 'invalid_upload' })
   console.error(error)
   res.status(500).json({ error: 'internal_error' })
 })

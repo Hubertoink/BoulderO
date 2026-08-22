@@ -14,8 +14,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'BoulderO'
   const options = {
     body: payload.body || 'Du hast eine neue Benachrichtigung.',
-    icon: '/BoulderO_Logo.ico',
-    badge: '/BoulderO_Logo.ico',
+    icon: '/Logo_Boulder_Icon.png',
+    badge: '/Logo_Boulder_Icon.png',
     tag: payload.tag || `bouldero-${payload.targetUrl || 'notification'}`,
     renotify: false,
     data: { targetUrl: payload.targetUrl || '/notifications' },

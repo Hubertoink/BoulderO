@@ -594,9 +594,9 @@ function App() {
     const { journalEntry } = await response.json()
     if (entry.files.length) {
       const formData = new FormData()
-      entry.files.forEach((file) => formData.append('photos', file))
-      const upload = await fetch(`/api/journal/${journalEntry.id}/photos`, { method: 'POST', body: formData })
-      if (!upload.ok) throw new Error('Der Text wurde gespeichert, aber mindestens ein Foto konnte nicht hochgeladen werden.')
+      entry.files.forEach((file) => formData.append('media', file))
+      const upload = await fetch(`/api/journal/${journalEntry.id}/media`, { method: 'POST', body: formData })
+      if (!upload.ok) throw new Error('Der Text wurde gespeichert, aber mindestens ein Foto oder Clip konnte nicht hochgeladen werden.')
     }
     if (entry.plannedVisitId) {
       const completion = await fetch(`/api/planned-visits/${entry.plannedVisitId}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journalEntryId: journalEntry.id }) })
@@ -607,7 +607,7 @@ function App() {
   }
 
   async function updateJournalEntry(id, patch) {
-    const response = await fetch(`/api/journal/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: patch.body, visibility: patch.visibility, visitedAt: patch.visitedAt }) })
+    const response = await fetch(`/api/journal/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: patch.body, visibility: patch.visibility, visitedAt: patch.visitedAt, startedAt: patch.startedAt, endedAt: patch.endedAt }) })
     if (!response.ok) throw new Error('Der Eintrag konnte nicht aktualisiert werden.')
     for (const mediaId of patch.removedMediaIds) {
       const removeResponse = await fetch(`/api/media/${mediaId}`, { method: 'DELETE' })
@@ -615,9 +615,9 @@ function App() {
     }
     if (patch.files.length) {
       const formData = new FormData()
-      patch.files.forEach((file) => formData.append('photos', file))
-      const upload = await fetch(`/api/journal/${id}/photos`, { method: 'POST', body: formData })
-      if (!upload.ok) throw new Error('Der Eintrag wurde gespeichert, aber ein Foto konnte nicht hochgeladen werden.')
+      patch.files.forEach((file) => formData.append('media', file))
+      const upload = await fetch(`/api/journal/${id}/media`, { method: 'POST', body: formData })
+      if (!upload.ok) throw new Error('Der Eintrag wurde gespeichert, aber ein Foto oder Clip konnte nicht hochgeladen werden.')
     }
     await loadPrivateData()
     showToast('Tagebucheintrag aktualisiert')
@@ -633,10 +633,10 @@ function App() {
 
   async function deletePhoto(id) {
     const response = await fetch(`/api/media/${id}`, { method: 'DELETE' })
-    if (!response.ok) throw new Error('Das Foto konnte nicht entfernt werden.')
+    if (!response.ok) throw new Error('Das Medium konnte nicht entfernt werden.')
     await loadPrivateData()
     setSelectedEntry((entry) => entry ? { ...entry, media: entry.media.filter((media) => media.id !== id) } : null)
-    showToast('Foto entfernt')
+    showToast('Medium entfernt')
   }
 
   async function uploadAvatar(file) {
@@ -775,13 +775,13 @@ function App() {
   return (
     <div className={`app-shell${activeView === 'map' ? ' app-shell--map' : ''}`}>
       <header className="app-header">
-        <button className="brand" onClick={() => navigate('map')} aria-label="Zur Karte"><img className="brand-logo" src="/BoulderO_Logo.ico" alt="" /><span>Boulder<span>O</span></span></button>
+        <button className="brand" onClick={() => navigate('map')} aria-label="Zur Karte"><picture><source media="(min-width: 800px)" srcSet="/BoulderO_Logo_Desktop.png" /><img className="brand-logo" src="/Logo_Boulder_Icon.png" alt="" /></picture></button>
         <div className="header-progress"><span><b>{uniqueVisited}</b>/10 Hallen</span><i><em style={{ width: `${uniqueVisited * 10}%` }} /></i></div>
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
-      {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/BoulderO_Logo.ico" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
+      {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/Logo_Boulder_Icon.png" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
       {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} onOpenPlanFeed={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} onOpenMessage={setMessageUser} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
-      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
+      {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenFeedEntry={(entry) => { setFeedAuthorFilter(null); setFeedPlanFocus(null); navigate('social'); window.history.replaceState(window.history.state, '', `/social?entry=${encodeURIComponent(entry.journal_entry_id)}`) }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenNotifications={() => navigate('notifications')} notificationCount={notificationSummary.unread_count} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
       {activeView === 'notifications' && currentUser && <NotificationSettingsView currentUser={currentUser} onBack={() => goBack('profile')} onUnreadChange={() => void loadNotificationSummary()} onOpenTarget={openNotificationTarget} onMessage={showToast} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}

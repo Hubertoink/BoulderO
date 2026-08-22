@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
+RUN apk add --no-cache ffmpeg
 
 COPY api ./api
 COPY scripts ./scripts

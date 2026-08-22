@@ -11,9 +11,9 @@
   "theme_color": "#153243",
   "icons": [
     {
-      "src": "/BoulderO_Logo.ico",
-      "sizes": "any",
-      "type": "image/x-icon",
+      "src": "/Logo_Boulder_Icon.png",
+      "sizes": "500x500",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

@@ -52,7 +52,7 @@ function activityIcon(activity, index, offset, isPreview) {
   if (cached) return cached
   const initials = activity.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)
   const description = (activity.body || `war bei ${activity.spot_name}`).replace(/\s+/g, ' ').slice(0, 150)
-  const imageId = activity.media?.[0]?.id
+  const imageId = activity.media?.find((media) => !String(media.contentType ?? '').startsWith('video/'))?.id
   const preview = isPreview ? `<span class="map-activity-preview${imageId ? ' has-photo' : ' is-text-only'}">${imageId ? `<img src="/api/media/${imageId}" alt="" />` : ''}<span><b>${escapeMarkerText(activity.user_name)}</b><small>${escapeMarkerText(description)}</small></span></span>` : ''
   const avatar = activity.user_image ? `<img src="/api/avatars/${encodeURIComponent(activity.user_id)}" alt="" onerror="this.remove()" />` : ''
   const icon = L.divIcon({
