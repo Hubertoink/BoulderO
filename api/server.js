@@ -518,6 +518,7 @@ async function createNotifications(client, { recipientIds, actorId = null, type,
 
 async function notifyPlanUsers(client, planId, actorId, type, payload, recipientIds) {
   const presentation = {
+    plan_created: { title: 'Neue Planung', body: `${payload.actorName} plant einen Besuch bei ${payload.spotName}.` },
     plan_rsvp: { title: 'Neue Zusage', body: `Es gibt eine neue Rückmeldung für ${payload.spotName}.` },
     plan_updated: { title: 'Planung geändert', body: `Die Planung für ${payload.spotName} wurde geändert.` },
     plan_cancelled: { title: 'Planung abgesagt', body: `Die Planung für ${payload.spotName} wurde abgesagt.` },
@@ -534,6 +535,26 @@ async function notifyPlanUsers(client, planId, actorId, type, payload, recipient
     body: presentation.body,
     targetUrl: `/social?section=plans&plan=${encodeURIComponent(planId)}`,
   })
+}
+
+async function planFriendsForNotification(client, userId, visibility) {
+  if (visibility === 'private') return []
+  const result = await client.query(`
+    SELECT outgoing.followed_id AS user_id
+      FROM follows outgoing
+      JOIN follows incoming
+        ON incoming.follower_id = outgoing.followed_id
+       AND incoming.followed_id = outgoing.follower_id
+       AND incoming.status = 'accepted'
+     WHERE outgoing.follower_id = $1
+       AND outgoing.status = 'accepted'
+       AND NOT EXISTS (
+         SELECT 1 FROM blocks block
+          WHERE (block.blocker_id = $1 AND block.blocked_id = outgoing.followed_id)
+             OR (block.blocker_id = outgoing.followed_id AND block.blocked_id = $1)
+       )
+  `, [userId])
+  return result.rows.map((row) => row.user_id)
 }
 
 function isGroupManager(membership) {
@@ -571,7 +592,7 @@ async function notifyGroupMembers(client, { groupId, actorId = null, type, title
     type,
     category: 'groups',
     plannedVisitId,
-    payload: { groupId, ...payload },
+    payload: { groupId, targetTab, ...payload },
     title,
     body,
     targetUrl: `/groups?group=${encodeURIComponent(groupId)}&tab=${encodeURIComponent(targetTab)}`,
@@ -1442,7 +1463,6 @@ app.get('/community/groups', requireUser, asyncRoute(async (req, res) => {
                AND notification.category = 'groups'
                AND notification.in_app_visible
                AND notification.read_at IS NULL
-               AND notification.type <> 'group_join_request'
                AND notification.payload->>'groupId' = g.id::text) AS unread_notifications,
            (SELECT COUNT(*)::int
               FROM community_group_members pending
@@ -1528,6 +1548,11 @@ app.get('/community/groups/:groupId', requireUser, asyncRoute(async (req, res) =
            CASE WHEN g.image IS NULL THEN NULL ELSE '/api/group-images/' || g.id END AS image_url,
            membership.role AS my_role, membership.status AS membership_status, membership.notification_level,
            (SELECT COUNT(*)::int FROM community_group_members members WHERE members.group_id = g.id AND members.status = 'active') AS member_count,
+           (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $2 AND n.category = 'groups' AND n.in_app_visible AND n.read_at IS NULL AND n.payload->>'groupId' = g.id::text AND n.type IN ('group_invitation', 'group_joined')) AS unread_overview,
+           (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $2 AND n.category = 'groups' AND n.in_app_visible AND n.read_at IS NULL AND n.payload->>'groupId' = g.id::text AND n.type = 'group_message') AS unread_chat,
+           (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $2 AND n.category = 'groups' AND n.in_app_visible AND n.read_at IS NULL AND n.payload->>'groupId' = g.id::text AND n.type IN ('group_event_created', 'group_event_updated', 'group_event_cancelled')) AS unread_events,
+           (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $2 AND n.category = 'groups' AND n.in_app_visible AND n.read_at IS NULL AND n.payload->>'groupId' = g.id::text AND n.type IN ('group_poll_created', 'group_poll_closed')) AS unread_polls,
+           (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $2 AND n.category = 'groups' AND n.in_app_visible AND n.read_at IS NULL AND n.payload->>'groupId' = g.id::text AND n.type = 'group_join_request') AS unread_members,
            COALESCE((SELECT json_agg(json_build_object('id', s.id, 'name', s.name, 'district', s.district) ORDER BY mapping.position, s.name)
               FROM community_group_spots mapping JOIN spots s ON s.id = mapping.spot_id WHERE mapping.group_id = g.id), '[]'::json) AS spots
       FROM community_groups g
@@ -1795,8 +1820,16 @@ app.patch('/community/groups/:groupId/notifications', requireUser, asyncRoute(as
 
 app.post('/community/groups/:groupId/notifications/read', requireUser, asyncRoute(async (req, res) => {
   const groupId = z.string().uuid().parse(req.params.groupId)
+  const { tab } = z.object({ tab: z.enum(['overview', 'chat', 'events', 'polls', 'members']).optional() }).parse(req.body ?? {})
   const membership = await groupMembership(pool, groupId, req.user.id)
-  if (!membership || membership.status !== 'active') return res.status(403).json({ error: 'group_membership_required' })
+  if (!membership || !['active', 'invited'].includes(membership.status)) return res.status(403).json({ error: 'group_membership_required' })
+  const tabTypes = {
+    overview: ['group_invitation', 'group_joined'],
+    chat: ['group_message'],
+    events: ['group_event_created', 'group_event_updated', 'group_event_cancelled'],
+    polls: ['group_poll_created', 'group_poll_closed'],
+    members: ['group_join_request'],
+  }
   await pool.query(
     `UPDATE notifications
         SET read_at = NOW()
@@ -1804,8 +1837,9 @@ app.post('/community/groups/:groupId/notifications/read', requireUser, asyncRout
         AND category = 'groups'
         AND in_app_visible
         AND read_at IS NULL
-        AND payload->>'groupId' = $2`,
-    [req.user.id, groupId],
+        AND payload->>'groupId' = $2
+        AND ($3::text[] IS NULL OR type = ANY($3::text[]))`,
+    [req.user.id, groupId, tab ? tabTypes[tab] : null],
   )
   res.status(204).end()
 }))
@@ -1982,11 +2016,13 @@ app.post('/community/groups/:groupId/events/:eventId/cancel', requireUser, async
     if (!isGroupManager(membership)) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'group_manager_required' }) }
     const event = await client.query(`SELECT p.starts_at, s.name AS spot_name FROM planned_visits p JOIN spots s ON s.id = p.spot_id WHERE p.id = $1 AND p.group_id = $2 AND p.status = 'scheduled' FOR UPDATE`, [eventId, groupId])
     if (!event.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'group_event_not_found' }) }
+    const rsvpRecipients = await planRsvpUsers(client, eventId)
     await client.query("UPDATE planned_visits SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = $3, updated_at = NOW() WHERE id = $1 AND group_id = $2", [eventId, groupId, reason])
     await notifyGroupMembers(client, {
       groupId, actorId: req.user.id, type: 'group_event_cancelled', title: 'Gruppentermin abgesagt',
       body: `${event.rows[0].spot_name} wurde abgesagt.`, targetTab: 'events', plannedVisitId: eventId,
       payload: { spotName: event.rows[0].spot_name, reason },
+      recipientIds: rsvpRecipients,
     })
     await client.query('COMMIT')
     void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
@@ -2013,6 +2049,12 @@ app.post('/community/groups/:groupId/event-series/:seriesId/cancel', requireUser
        WHERE p.group_id = $1 AND p.group_event_series_id = $2
        ORDER BY p.starts_at ASC
        LIMIT 1`, [groupId, seriesId])
+    const rsvpRecipients = await client.query(`
+      SELECT DISTINCT response.user_id
+        FROM planned_visit_rsvps response
+        JOIN planned_visits visit ON visit.id = response.planned_visit_id
+       WHERE visit.group_id = $1 AND visit.group_event_series_id = $2
+    `, [groupId, seriesId])
     await client.query(`
       UPDATE planned_visits
          SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'Terminserie abgesagt', updated_at = NOW()
@@ -2021,6 +2063,7 @@ app.post('/community/groups/:groupId/event-series/:seriesId/cancel', requireUser
     await notifyGroupMembers(client, {
       groupId, actorId: req.user.id, type: 'group_event_cancelled', title: 'Terminserie abgesagt',
       body: `Die Terminserie bei ${spot.rows[0]?.name ?? 'der Boulderhalle'} wurde abgesagt.`, targetTab: 'events',
+      recipientIds: rsvpRecipients.rows.map((row) => row.user_id),
     })
     await client.query('COMMIT')
     void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
@@ -2575,7 +2618,7 @@ app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
   const to = filters.to ?? new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
   if (to <= from || to.getTime() - from.getTime() > 370 * 24 * 60 * 60 * 1000) return res.status(400).json({ error: 'invalid_plan_range' })
   const result = await pool.query(`
-    SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.created_at, p.user_id, p.group_id, p.capacity,
+    SELECT p.id, p.starts_at, p.ends_at, p.note, p.visibility, p.status, p.created_at, p.user_id, p.group_id, p.group_event_series_id, p.capacity, p.past_seen_at,
            s.id AS spot_id, s.name AS spot_name, s.district, s.address,
            u.name AS user_name, u.username, u.image AS user_image,
            group_record.name AS group_name,
@@ -2590,9 +2633,16 @@ app.get('/social/planned-visits', requireUser, asyncRoute(async (req, res) => {
       JOIN spots s ON s.id = p.spot_id
       JOIN users u ON u.id = p.user_id
       LEFT JOIN community_groups group_record ON group_record.id = p.group_id
-     WHERE p.status = 'scheduled'
-       AND p.starts_at >= $2
+     WHERE p.starts_at >= $2
        AND p.starts_at < $3
+       AND (
+         p.status = 'scheduled'
+         OR (
+           p.status = 'cancelled'
+           AND EXISTS (SELECT 1 FROM planned_visit_rsvps r WHERE r.planned_visit_id = p.id AND r.user_id = $1 AND r.response IN ('going', 'interested', 'waitlisted'))
+           AND NOT EXISTS (SELECT 1 FROM planned_visit_dismissals dismissal WHERE dismissal.planned_visit_id = p.id AND dismissal.user_id = $1)
+         )
+       )
        AND (
          (p.group_id IS NOT NULL AND EXISTS (SELECT 1 FROM community_group_members membership WHERE membership.group_id = p.group_id AND membership.user_id = $1 AND membership.status = 'active'))
          OR (p.group_id IS NULL AND (
@@ -2676,7 +2726,16 @@ app.get('/notifications', requireUser, asyncRoute(async (req, res) => {
 
 app.get('/notifications/summary', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(
-    `SELECT COUNT(*)::int AS unread_count
+    `SELECT COUNT(*)::int AS unread_count,
+            COUNT(*) FILTER (WHERE category IN ('comments', 'reactions'))::int AS unread_feed,
+            COUNT(*) FILTER (WHERE category IN ('plans', 'reminders'))::int AS unread_plans,
+            COUNT(*) FILTER (WHERE category = 'messages')::int AS unread_messages,
+            COUNT(*) FILTER (WHERE category = 'friendships')::int AS unread_friendships,
+            COUNT(*) FILTER (WHERE type = 'friend_request')::int AS unread_friend_requests,
+            COUNT(*) FILTER (WHERE type = 'friend_accepted')::int AS unread_friend_acceptances,
+            COUNT(*) FILTER (WHERE category IN ('messages', 'friendships'))::int AS unread_friends,
+            COUNT(*) FILTER (WHERE category = 'groups')::int AS unread_groups,
+            COUNT(*) FILTER (WHERE type = 'group_invitation')::int AS unread_group_invitations
        FROM notifications
       WHERE user_id = $1 AND in_app_visible AND read_at IS NULL`,
     [req.user.id],
@@ -2685,17 +2744,26 @@ app.get('/notifications/summary', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.post('/notifications/read', requireUser, asyncRoute(async (req, res) => {
-  const { plannedOnly, ids } = z.object({
+  const { plannedOnly, ids, types } = z.object({
     plannedOnly: z.boolean().optional(),
     ids: z.array(z.string().uuid()).min(1).max(40).optional(),
+    types: z.array(z.enum([
+      'direct_message', 'friend_request', 'friend_accepted', 'entry_comment', 'entry_like',
+      'plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder',
+      'group_invitation', 'group_join_request', 'group_joined', 'group_message',
+      'group_event_created', 'group_event_updated', 'group_event_cancelled',
+      'group_poll_created', 'group_poll_closed',
+    ])).min(1).max(20).optional(),
   }).parse(req.body ?? {})
-  if (plannedOnly && ids) return res.status(400).json({ error: 'invalid_notification_read_scope' })
+  if ([plannedOnly, Boolean(ids), Boolean(types)].filter(Boolean).length > 1) return res.status(400).json({ error: 'invalid_notification_read_scope' })
   const scope = plannedOnly
-    ? " AND type IN ('plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder')"
+    ? " AND type IN ('plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder')"
     : ids
       ? ' AND id = ANY($2::uuid[])'
-      : ''
-  const parameters = ids ? [req.user.id, ids] : [req.user.id]
+      : types
+        ? ' AND type = ANY($2::text[])'
+        : ''
+  const parameters = ids ? [req.user.id, ids] : types ? [req.user.id, types] : [req.user.id]
   await pool.query(`UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND in_app_visible AND read_at IS NULL${scope}`, parameters)
   res.status(204).end()
 }))
@@ -2738,15 +2806,39 @@ app.get('/planned-visits/mine', requireUser, asyncRoute(async (req, res) => {
 
 app.post('/planned-visits', requireUser, asyncRoute(async (req, res) => {
   const input = plannedVisitInputSchema.parse(req.body)
-  const spot = await pool.query('SELECT id FROM spots WHERE id = $1 AND status = \'active\'', [input.spotId])
-  if (!spot.rowCount) return res.status(404).json({ error: 'spot_not_found' })
-  const result = await pool.query(
-    `INSERT INTO planned_visits (user_id, spot_id, starts_at, ends_at, note, visibility)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, spot_id, starts_at, ends_at, note, visibility, status, created_at`,
-    [req.user.id, input.spotId, input.startsAt, input.endsAt ?? null, input.note, input.visibility],
-  )
-  res.status(201).json({ plannedVisit: result.rows[0] })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const spot = await client.query('SELECT id, name FROM spots WHERE id = $1 AND status = \'active\'', [input.spotId])
+    if (!spot.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'spot_not_found' }) }
+    const result = await client.query(
+      `INSERT INTO planned_visits (user_id, spot_id, starts_at, ends_at, note, visibility)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, spot_id, starts_at, ends_at, note, visibility, status, created_at`,
+      [req.user.id, input.spotId, input.startsAt, input.endsAt ?? null, input.note, input.visibility],
+    )
+    const plannedVisit = result.rows[0]
+    await notifyPlanUsers(client, plannedVisit.id, req.user.id, 'plan_created', {
+      actorName: req.user.name,
+      spotName: spot.rows[0].name,
+      startsAt: plannedVisit.starts_at,
+    }, await planFriendsForNotification(client, req.user.id, input.visibility))
+    await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+    res.status(201).json({ plannedVisit })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally { client.release() }
+}))
+
+app.post('/planned-visits/past/seen', requireUser, asyncRoute(async (req, res) => {
+  await pool.query(`
+    UPDATE planned_visits
+       SET past_seen_at = COALESCE(past_seen_at, NOW())
+     WHERE user_id = $1 AND group_id IS NULL AND status = 'scheduled' AND starts_at < NOW()
+  `, [req.user.id])
+  res.status(204).end()
 }))
 
 app.patch('/planned-visits/:planId', requireUser, asyncRoute(async (req, res) => {
@@ -2819,6 +2911,28 @@ app.post('/planned-visits/:planId/cancel', requireUser, asyncRoute(async (req, r
     await client.query('ROLLBACK')
     throw error
   } finally { client.release() }
+}))
+
+app.post('/planned-visits/:planId/dismiss', requireUser, asyncRoute(async (req, res) => {
+  const planId = z.string().uuid().parse(req.params.planId)
+  const plan = await pool.query('SELECT id, user_id, visibility, status, group_id FROM planned_visits WHERE id = $1', [planId])
+  const item = plan.rows[0]
+  if (!item || item.status !== 'cancelled') return res.status(404).json({ error: 'planned_visit_not_found' })
+  const canView = item.group_id
+    ? (await groupMembership(pool, item.group_id, req.user.id))?.status === 'active'
+    : await canViewEntry(req.user.id, item.user_id, item.visibility)
+  if (!canView) return res.status(404).json({ error: 'planned_visit_not_found' })
+  const response = await pool.query(`
+    SELECT 1 FROM planned_visit_rsvps
+     WHERE planned_visit_id = $1 AND user_id = $2 AND response IN ('going', 'interested', 'waitlisted')
+  `, [planId, req.user.id])
+  if (!response.rowCount) return res.status(404).json({ error: 'planned_visit_not_found' })
+  await pool.query(`
+    INSERT INTO planned_visit_dismissals (planned_visit_id, user_id)
+    VALUES ($1, $2)
+    ON CONFLICT (planned_visit_id, user_id) DO NOTHING
+  `, [planId, req.user.id])
+  res.status(204).end()
 }))
 
 app.post('/planned-visits/:planId/complete', requireUser, asyncRoute(async (req, res) => {
@@ -2958,7 +3072,10 @@ app.delete('/social/entries/:entryId/like', requireUser, asyncRoute(async (req, 
 
 app.get('/messages/:userId', requireUser, asyncRoute(async (req, res) => {
   if (!await areFriends(req.user.id, req.params.userId)) return res.status(403).json({ error: 'friends_required' })
-  await pool.query('UPDATE direct_messages SET read_at = NOW() WHERE sender_id = $1 AND recipient_id = $2 AND read_at IS NULL', [req.params.userId, req.user.id])
+  await Promise.all([
+    pool.query('UPDATE direct_messages SET read_at = NOW() WHERE sender_id = $1 AND recipient_id = $2 AND read_at IS NULL', [req.params.userId, req.user.id]),
+    pool.query("UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND actor_id = $2 AND type = 'direct_message' AND in_app_visible AND read_at IS NULL", [req.user.id, req.params.userId]),
+  ])
   const result = await pool.query(`
     SELECT m.id, m.body, m.created_at, m.read_at, m.sender_id, m.recipient_id, u.name AS sender_name
       FROM direct_messages m JOIN users u ON u.id = m.sender_id

@@ -109,7 +109,7 @@ function App() {
   const [lightboxImage, setLightboxImage] = useState(null)
   const [friendSummary, setFriendSummary] = useState({ unread_messages: 0, pending_requests: 0 })
   const [feedSummary, setFeedSummary] = useState({ unread_feed: 0 })
-  const [notificationSummary, setNotificationSummary] = useState({ unread_count: 0 })
+  const [notificationSummary, setNotificationSummary] = useState({ unread_count: 0, unread_feed: 0, unread_plans: 0, unread_messages: 0, unread_friendships: 0, unread_friend_requests: 0, unread_friend_acceptances: 0, unread_friends: 0, unread_groups: 0, unread_group_invitations: 0 })
   const [feedAuthorFilter, setFeedAuthorFilter] = useState(null)
   const [feedPlanFocus, setFeedPlanFocus] = useState(null)
   const [spotSuggestions, setSpotSuggestions] = useState([])
@@ -122,6 +122,7 @@ function App() {
   const [adminUsersLoading, setAdminUsersLoading] = useState(false)
   const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false)
   const [planDialogSpotId, setPlanDialogSpotId] = useState(null)
+  const [planRefreshKey, setPlanRefreshKey] = useState(0)
   const [correctionDialogSpotId, setCorrectionDialogSpotId] = useState(null)
   const [legalDialog, setLegalDialog] = useState(null)
 
@@ -260,6 +261,16 @@ function App() {
   async function loadNotificationSummary() {
     const response = await fetch('/api/notifications/summary')
     if (response.ok) setNotificationSummary(await response.json())
+  }
+  async function markNotificationTypesRead(types) {
+    const response = await fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ types }) })
+    if (response.ok) await Promise.all([loadNotificationSummary(), loadFeedSummary()])
+  }
+  async function markFeedSectionRead(section) {
+    const types = section === 'plans'
+      ? ['plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder']
+      : ['entry_comment', 'entry_like']
+    await markNotificationTypesRead(types)
   }
   async function loadSpotCorrectionReports(user = currentUser) {
     if (user?.role !== 'superadmin') { setSpotCorrectionReports([]); return }
@@ -730,6 +741,7 @@ function App() {
   async function createPlannedVisit(input) {
     const response = await fetch('/api/planned-visits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
     if (!response.ok) throw new Error('Bitte prüfe Datum und Uhrzeit.')
+    setPlanRefreshKey((current) => current + 1)
     showToast('Geplanter Besuch wurde im Feed veröffentlicht')
   }
 
@@ -771,15 +783,15 @@ function App() {
       {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} onOpenPlanFeed={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} onOpenMessage={setMessageUser} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
       {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenNotifications={() => navigate('notifications')} notificationCount={notificationSummary.unread_count} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
-      {activeView === 'notifications' && currentUser && <NotificationSettingsView currentUser={currentUser} onBack={() => goBack('profile')} onUnreadChange={(unreadCount) => setNotificationSummary({ unread_count: unreadCount })} onOpenTarget={openNotificationTarget} onMessage={showToast} />}
+      {activeView === 'notifications' && currentUser && <NotificationSettingsView currentUser={currentUser} onBack={() => goBack('profile')} onUnreadChange={() => void loadNotificationSummary()} onOpenTarget={openNotificationTarget} onMessage={showToast} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} onOpenUsers={openRegisteredUsers} />}
-      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} onFeedRead={(options = {}) => setFeedSummary((current) => ({ ...current, unread_feed: options.plans ? current.unread_feed : 0, unread_plans: options.plans ? 0 : current.unread_plans }))} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} />}
-      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} />}
-      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onOpenSpot={openSpotOnMap} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onSummaryChange={setFriendSummary} />}
+      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} notificationCounts={notificationSummary} onSectionRead={markFeedSectionRead} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} planRefreshKey={planRefreshKey} />}
+      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} notificationCounts={notificationSummary} onNotificationsRead={markNotificationTypesRead} />}
+      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onOpenSpot={openSpotOnMap} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onSummaryChange={setFriendSummary} notificationCounts={notificationSummary} onNotificationsRead={loadNotificationSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
-        {navItems.map(({ id, label, icon: Icon }) => { const notifications = friendSummary.unread_messages + friendSummary.pending_requests + (friendSummary.unread_groups ?? 0); const feedNotifications = feedSummary.unread_feed + (feedSummary.unread_plans ?? 0); const active = id === 'friends' ? ['friends', 'groups', 'connections'].includes(activeView) : activeView === id; return <button key={id} className={active ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && notifications > 0 && <b className="nav-badge">{notifications > 9 ? '9+' : notifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
+        {navItems.map(({ id, label, icon: Icon }) => { const communityNotifications = Number(notificationSummary.unread_friends) + Number(notificationSummary.unread_groups); const feedNotifications = Number(notificationSummary.unread_feed) + Number(notificationSummary.unread_plans); const active = id === 'friends' ? ['friends', 'groups', 'connections'].includes(activeView) : activeView === id; return <button key={id} className={active ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={20} />{id === 'friends' && communityNotifications > 0 && <b className="nav-badge">{communityNotifications > 9 ? '9+' : communityNotifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>
       {toast && <div className="toast"><IconCheck size={17} />{toast}</div>}
       {composerOpen && <JournalComposer key={composerPlan?.id ?? composerSpotId ?? 'new'} spot={spots.find((spot) => spot.id === composerSpotId)} onClose={closeComposer} onSave={createJournalEntry} onChooseOnMap={chooseSpotOnMap} surface={composerSurface} plannedVisit={composerPlan} />}
@@ -791,7 +803,7 @@ function App() {
       {adminUsersOpen && <RegisteredUsersDialog users={adminUsers} total={adminUsersTotal} loading={adminUsersLoading} onClose={() => setAdminUsersOpen(false)} />}
       {suggestionDialogOpen && <SpotSuggestionDialog onSubmit={submitSpotSuggestion} onClose={() => setSuggestionDialogOpen(false)} />}
       {legalDialog && <LegalDialog kind={legalDialog} onClose={() => setLegalDialog(null)} />}
-      {messageUser && <MessageDialog user={messageUser} onClose={() => setMessageUser(null)} onRead={async () => { const response = await fetch('/api/social/friends/summary'); if (response.ok) setFriendSummary(await response.json()) }} />}
+      {messageUser && <MessageDialog user={messageUser} onClose={() => setMessageUser(null)} onRead={async () => { const response = await fetch('/api/social/friends/summary'); if (response.ok) setFriendSummary(await response.json()); await loadNotificationSummary() }} />}
       {lightboxImage && <Lightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />}
     </div>
   )

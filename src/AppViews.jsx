@@ -3,7 +3,7 @@ import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet'
 import {
   IconAdjustmentsHorizontal, IconArrowsMaximize, IconBookmark, IconCalendarEvent, IconCheck,
-  IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload,
+  IconChevronDown, IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload,
   IconBell, IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2,
   IconLogout, IconPhoto, IconPlus, IconSearch, IconSparkles, IconTrophy, IconTrash, IconUserCircle,
   IconUserCheck, IconUserPlus, IconUsers, IconWorld, IconX,
@@ -119,7 +119,8 @@ function PastPlanDecisionDialog({ plan, onLogPlan, onMarkMissed, onClose }) {
 
 function JournalUpcomingPlans({ onLogPlan, onMarkMissed, onOpenPlan }) {
   const [plans, setPlans] = useState([])
-  const [mode, setMode] = useState('upcoming')
+  const initialMode = new URLSearchParams(window.location.search).get('plans')
+  const [mode, setMode] = useState(['upcoming', 'interested', 'mine', 'past'].includes(initialMode) ? initialMode : 'upcoming')
   const [decisionPlan, setDecisionPlan] = useState(null)
   useEffect(() => {
     const from = new Date(Date.now() - 270 * 24 * 60 * 60 * 1000).toISOString()
@@ -127,9 +128,25 @@ function JournalUpcomingPlans({ onLogPlan, onMarkMissed, onOpenPlan }) {
     fetch(`/api/social/planned-visits?scope=all&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((response) => response.ok ? response.json() : { plannedVisits: [] }).then((payload) => setPlans(payload.plannedVisits)).catch(() => setPlans([]))
   }, [])
   const pastPlans = plans.filter((plan) => plan.is_owner && new Date(plan.starts_at) < new Date())
+  const unseenPastPlans = pastPlans.filter((plan) => !plan.past_seen_at)
   const visible = plans.filter((plan) => mode === 'past' ? plan.is_owner && new Date(plan.starts_at) < new Date() : mode === 'mine' ? plan.is_owner && new Date(plan.starts_at) >= new Date() : mode === 'interested' ? plan.my_response === 'interested' && new Date(plan.starts_at) >= new Date() : (plan.is_owner || plan.my_response === 'going') && new Date(plan.starts_at) >= new Date())
+  useEffect(() => {
+    if (mode !== 'past' || !unseenPastPlans.length) return undefined
+    const timer = window.setTimeout(async () => {
+      const response = await fetch('/api/planned-visits/past/seen', { method: 'POST' })
+      if (response.ok) setPlans((current) => current.map((plan) => plan.is_owner && new Date(plan.starts_at) < new Date() ? { ...plan, past_seen_at: new Date().toISOString() } : plan))
+    }, 1000)
+    return () => window.clearTimeout(timer)
+  }, [mode, unseenPastPlans.length])
+  function selectMode(nextMode) {
+    setMode(nextMode)
+    const parameters = new URLSearchParams(window.location.search)
+    if (nextMode === 'upcoming') parameters.delete('plans')
+    else parameters.set('plans', nextMode)
+    window.history.replaceState(window.history.state, '', `/journal${parameters.size ? `?${parameters}` : ''}`)
+  }
   if (!plans.length) return null
-  return <><section className="journal-plans"><div className="section-heading"><h2>{mode === 'past' ? 'Vergangene Planungen' : 'Deine nächsten Besuche'}</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => setMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => setMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => setMode('mine')}>Von mir</button><button className={mode === 'past' ? 'is-active' : ''} onClick={() => setMode('past')}>Vergangen{pastPlans.length > 0 && <b>{pastPlans.length}</b>}</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{mode === 'past' ? 'Bitte Status festlegen' : plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{mode === 'past' ? <button type="button" onClick={() => setDecisionPlan(plan)}><IconCheck size={16} />Status wählen</button> : null}<button type="button" className="journal-plan-open" onClick={() => onOpenPlan(plan)} aria-label={`${plan.spot_name} im Planungsfeed öffnen`} title="Im Planungsfeed öffnen"><IconChevronRight size={18} /></button></article>)}</div></section>{decisionPlan && <PastPlanDecisionDialog plan={decisionPlan} onLogPlan={onLogPlan} onMarkMissed={async (plan) => { await onMarkMissed(plan); setPlans((current) => current.filter((item) => item.id !== plan.id)) }} onClose={() => setDecisionPlan(null)} />}</>
+  return <><section className="journal-plans"><div className="section-heading"><h2>{mode === 'past' ? 'Vergangene Planungen' : 'Deine nächsten Besuche'}</h2><span>{visible.length}</span></div><div className="plan-filters"><button className={mode === 'upcoming' ? 'is-active' : ''} onClick={() => selectMode('upcoming')}>Anstehend</button><button className={mode === 'interested' ? 'is-active' : ''} onClick={() => selectMode('interested')}>Interessiert</button><button className={mode === 'mine' ? 'is-active' : ''} onClick={() => selectMode('mine')}>Von mir</button><button className={mode === 'past' ? 'is-active' : ''} onClick={() => selectMode('past')}>Vergangen{unseenPastPlans.length > 0 && <b>{unseenPastPlans.length}</b>}</button></div>{!visible.length && <p className="journal-empty">Für diesen Filter gibt es keine geplanten Besuche.</p>}<div>{visible.slice(0, 6).map((plan) => <article key={plan.id}><time>{formatPlanDate(plan.starts_at)}</time><div><b>{plan.spot_name}</b><small>{mode === 'past' ? 'Bitte Status festlegen' : plan.is_owner ? 'Deine Planung' : plan.my_response === 'going' ? 'Du hast zugesagt' : 'Du bist interessiert'}</small></div>{mode === 'past' ? <button type="button" onClick={() => setDecisionPlan(plan)}><IconCheck size={16} />Status wählen</button> : null}<button type="button" className="journal-plan-open" onClick={() => onOpenPlan(plan)} aria-label={`${plan.spot_name} im Planungsfeed öffnen`} title="Im Planungsfeed öffnen"><IconChevronRight size={18} /></button></article>)}</div></section>{decisionPlan && <PastPlanDecisionDialog plan={decisionPlan} onLogPlan={onLogPlan} onMarkMissed={async (plan) => { await onMarkMissed(plan); setPlans((current) => current.filter((item) => item.id !== plan.id)) }} onClose={() => setDecisionPlan(null)} />}</>
 }
 
 function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenComposer, onOpenEntry, onOpenImage, onLogPlan, onMarkPlanMissed, onOpenPlan }) {
@@ -1095,17 +1112,54 @@ function Lightbox({ image, onClose }) {
   return <div className="lightbox" role="dialog" aria-modal="true" aria-label={image.alt} onClick={onClose}><button className="lightbox__close" onClick={onClose} aria-label="Bild schließen"><IconX size={21} /></button><img src={image.src} alt={image.alt} onClick={(event) => event.stopPropagation()} /></div>
 }
 
-function PlannedVisitCard({ plan, onRsvp, onEdit, onCancel, onLogVisit }) {
+function PlannedVisitCard({ plan, onRsvp, onEdit, onCancel, onLogVisit, onDismiss, dismissState = false }) {
   const rsvp = plan.my_response
   const groupEvent = Boolean(plan.group_id)
   const isPersonalOwner = plan.is_owner && !groupEvent
+  const isCancelled = plan.status === 'cancelled'
   const [people, setPeople] = useState([])
   const [peopleOpen, setPeopleOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const peopleRef = useOutsideDismiss(peopleOpen, () => setPeopleOpen(false))
   const menuRef = useOutsideDismiss(menuOpen, () => setMenuOpen(false))
   async function togglePeople() { if (!peopleOpen) { const url = groupEvent ? `/api/community/groups/${plan.group_id}/events/${plan.id}/rsvps` : `/api/planned-visits/${plan.id}/rsvps`; const response = await fetch(url); if (response.ok) setPeople((await response.json()).rsvps) }; setMenuOpen(false); setPeopleOpen((value) => !value) }
-  return <article className="planned-visit-card"><div className="planned-visit-card__top"><span className="eyebrow">{groupEvent ? 'Gruppentermin' : isPersonalOwner ? 'Deine Planung' : 'Geplant'}</span><time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{groupEvent ? plan.group_name : plan.user_name}</b><small>{groupEvent ? `organisiert von ${plan.user_name}` : isPersonalOwner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{isPersonalOwner && <div className="plan-card-menu" ref={menuRef}><button type="button" className="friend-more-button" onClick={() => { setPeopleOpen(false); setMenuOpen((value) => !value) }} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${groupEvent ? plan.group_name : plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people" ref={peopleRef}><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}{plan.waitlisted_count > 0 ? ` · ${plan.waitlisted_count} Warteliste` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : person.response === 'waitlisted' ? 'Warteliste' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{isPersonalOwner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!isPersonalOwner && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' || rsvp === 'waitlisted' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' || rsvp === 'waitlisted' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : rsvp === 'waitlisted' ? 'Warteliste' : 'Zusagen'}</button></div>}</div></article>
+  return <article className={`planned-visit-card${isCancelled ? ' planned-visit-card--cancelled' : ''}${dismissState ? ' is-dismissing' : ''}`}><div className="planned-visit-card__top"><span className="eyebrow">{groupEvent ? 'Gruppentermin' : isPersonalOwner ? 'Deine Planung' : 'Geplant'}</span>{isCancelled && <span className="planned-visit-card__cancelled">Abgesagt</span>}<time>{formatPlanDate(plan.starts_at)}</time></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{groupEvent ? plan.group_name : plan.user_name}</b><small>{groupEvent ? `organisiert von ${plan.user_name}` : isPersonalOwner ? 'organisierst diesen Besuch' : 'plant einen Besuch'}</small></span>{isPersonalOwner && <div className="plan-card-menu" ref={menuRef}><button type="button" className="friend-more-button" onClick={() => { setPeopleOpen(false); setMenuOpen((value) => !value) }} aria-label="Planung verwalten"><IconDots size={18} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setMenuOpen(false); onEdit?.(plan) }}>Bearbeiten</button><button type="button" className="danger" onClick={() => { setMenuOpen(false); onCancel?.(plan) }}>Absagen</button></div>}</div>}</div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p><p className="planned-visit-card__note">{plan.note || `${groupEvent ? plan.group_name : plan.user_name} plant eine Boulder-Session.`}</p><div className="planned-visit-card__footer"><div className="planned-people" ref={peopleRef}><button type="button" onClick={togglePeople}><IconUsers size={16} />{plan.going_count} dabei{plan.interested_count > 0 ? ` · ${plan.interested_count} interessiert` : ''}{plan.waitlisted_count > 0 ? ` · ${plan.waitlisted_count} Warteliste` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : person.response === 'waitlisted' ? 'Warteliste' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div>{isPersonalOwner && new Date(plan.starts_at) <= new Date() && <button type="button" className="plan-log-button" onClick={() => onLogVisit?.(plan)}><IconBookmark size={16} />Besuch festhalten</button>}{!isPersonalOwner && !isCancelled && <div className="planned-rsvp-actions"><button className={rsvp === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'interested' ? null : 'interested')}>Interessiert</button><button className={rsvp === 'going' || rsvp === 'waitlisted' ? 'is-active' : ''} onClick={() => onRsvp(plan, rsvp === 'going' || rsvp === 'waitlisted' ? null : 'going')}>{rsvp === 'going' ? 'Zugesagt' : rsvp === 'waitlisted' ? 'Warteliste' : 'Zusagen'}</button></div>}</div>{isCancelled && <button type="button" className="planned-visit-card__dismiss" onClick={() => onDismiss?.(plan)} disabled={dismissState}>Aus Ansicht entfernen <IconX size={15} /></button>}</article>
+}
+
+function PlannedVisitSeriesOccurrence({ plan, onRsvp }) {
+  const [people, setPeople] = useState([])
+  const [peopleOpen, setPeopleOpen] = useState(false)
+  const peopleRef = useOutsideDismiss(peopleOpen, () => setPeopleOpen(false))
+  async function togglePeople() {
+    if (!peopleOpen) {
+      const response = await fetch(`/api/community/groups/${plan.group_id}/events/${plan.id}/rsvps`)
+      if (response.ok) setPeople((await response.json()).rsvps)
+    }
+    setPeopleOpen((current) => !current)
+  }
+  return <article className="group-event-series__occurrence"><time>{formatPlanDate(plan.starts_at)}</time><div className="group-event-series__occurrence-actions"><div className="planned-people" ref={peopleRef}><button type="button" onClick={() => void togglePeople()}><IconUsers size={16} />{plan.going_count} dabei{plan.capacity ? ` / ${plan.capacity}` : ''}{plan.waitlisted_count > 0 ? ` · ${plan.waitlisted_count} Warteliste` : ''}</button>{peopleOpen && <div className="planned-people__popover">{people.length ? people.map((person) => <div key={person.id}><span className="person-avatar">{person.image ? <img src={`/api/avatars/${person.id}`} alt="" /> : person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{person.name}</b><small>{person.response === 'going' ? 'Dabei' : person.response === 'waitlisted' ? 'Warteliste' : 'Interessiert'}</small></span></div>) : <small>Noch keine Zusagen.</small>}</div>}</div><div className="planned-rsvp-actions"><button className={plan.my_response === 'interested' ? 'is-active' : ''} onClick={() => onRsvp(plan, plan.my_response === 'interested' ? null : 'interested')}>Interessiert</button><button className={plan.my_response === 'going' || plan.my_response === 'waitlisted' ? 'is-active' : ''} onClick={() => onRsvp(plan, plan.my_response === 'going' || plan.my_response === 'waitlisted' ? null : 'going')}>{plan.my_response === 'going' ? 'Zugesagt' : plan.my_response === 'waitlisted' ? 'Warteliste' : 'Zusagen'}</button></div></div></article>
+}
+
+function PlannedVisitSeriesCard({ plans, onRsvp }) {
+  const [expanded, setExpanded] = useState(false)
+  const plan = plans[0]
+  return <article className="planned-visit-card group-event-series"><div className="planned-visit-card__top"><span className="eyebrow">Terminserie</span><span className="group-event-series__count">{plans.length} Termin{plans.length === 1 ? '' : 'e'}</span></div><div className="planned-visit-author"><span className="person-avatar">{plan.user_image ? <img src={`/api/avatars/${plan.user_id}`} alt="" /> : plan.user_name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{plan.group_name}</b><small>organisiert von {plan.user_name}</small></span></div><h3>{plan.spot_name}</h3><p>{plan.district} · {plan.address}</p>{plan.note && <p className="planned-visit-card__note">{plan.note}</p>}<button type="button" className="group-event-series__toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}><span>{expanded ? 'Termine ausblenden' : `Termine anzeigen · ${plans.length}`}</span><IconChevronDown size={18} /></button><div className={`ui-collapse group-event-series__collapse${expanded ? ' is-open' : ''}`} aria-hidden={!expanded}><div className="ui-collapse__content"><div className="group-event-series__occurrences">{plans.map((occurrence) => <PlannedVisitSeriesOccurrence key={occurrence.id} plan={occurrence} onRsvp={onRsvp} />)}</div></div></div></article>
+}
+
+function PlannedVisitList({ plans, onRsvp, onEdit, onCancel, onLogVisit, onDismiss, dismissingPlanIds }) {
+  const items = []
+  const series = new Map()
+  for (const plan of plans) {
+    if (!plan.group_event_series_id || plan.status === 'cancelled') { items.push({ kind: 'single', plan }); continue }
+    const existing = series.get(plan.group_event_series_id)
+    if (existing) existing.plans.push(plan)
+    else {
+      const item = { kind: 'series', id: plan.group_event_series_id, plans: [plan] }
+      series.set(plan.group_event_series_id, item)
+      items.push(item)
+    }
+  }
+  return <div className="planned-visit-list">{items.map((item) => item.kind === 'series' ? <PlannedVisitSeriesCard key={item.id} plans={item.plans} onRsvp={onRsvp} /> : <PlannedVisitCard key={item.plan.id} plan={item.plan} onRsvp={onRsvp} onEdit={onEdit} onCancel={onCancel} onLogVisit={onLogVisit} onDismiss={onDismiss} dismissState={dismissingPlanIds?.has(item.plan.id)} />)}</div>
 }
 
 function planDayKey(value) {
@@ -1156,29 +1210,25 @@ function PlanCancelDialog({ plan, onCancel, onClose }) {
   return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Planung absagen</span><h2>{plan.spot_name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Zugesagte und interessierte Personen werden benachrichtigt.</p><form onSubmit={submit}><label className="form-field"><span>Grund <small>optional</small></span><textarea value={reason} maxLength="1000" onChange={(event) => setReason(event.target.value)} /></label><div className="plan-dialog-actions"><button type="button" className="message-button" onClick={onClose}>Zurück</button><button className="danger" disabled={saving}>{saving ? 'Wird abgesagt …' : 'Planung absagen'}</button></div></form></section></div>
 }
 
-function PlanNotifications({ notifications, onRead }) {
-  if (!notifications.length) return null
-  return <section className="plan-notifications"><div className="section-heading"><h3>Neu für dich</h3><button type="button" onClick={onRead}>Als gelesen markieren</button></div>{notifications.map((notification) => { const payload = notification.payload ?? {}; const spotName = payload.spotName || notification.spot_name || 'dieser Planung'; const actorName = notification.actor_name ?? 'Jemand'; const copy = notification.type === 'plan_cancelled' ? `${actorName} hat ${spotName} abgesagt.` : notification.type === 'plan_updated' ? `${actorName} hat ${spotName} geändert.` : notification.type === 'plan_reminder' ? `Deine Planung bei ${spotName} beginnt bald.` : notification.type === 'plan_rsvp' && payload.response === 'going' ? `${actorName} ist bei ${spotName} dabei.` : notification.type === 'plan_rsvp' && payload.response === 'interested' ? `${actorName} ist an ${spotName} interessiert.` : notification.body || 'Es gibt eine neue Rückmeldung zu einer Planung.'; return <article key={notification.id}><b>{copy}</b>{payload.reason && <small>{payload.reason}</small>}<time>{formatFeedDate(notification.created_at)}</time></article> })}</section>
-}
-
-function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, onFeedRead, spots, onLogPlan, planFocus, onPlanFocusConsumed }) {
+function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, notificationCounts = {}, onSectionRead = async () => {}, spots, onLogPlan, planFocus, onPlanFocusConsumed, planRefreshKey = 0 }) {
+  const initialParameters = new URLSearchParams(window.location.search)
   const [entries, setEntries] = useState([])
   const [entryFocusId, setEntryFocusId] = useState(() => new URLSearchParams(window.location.search).get('entry'))
   const [plannedVisits, setPlannedVisits] = useState([])
   const [calendarDays, setCalendarDays] = useState([])
-  const [notifications, setNotifications] = useState([])
   const [error, setError] = useState('')
   const [comments, setComments] = useState({})
   const [expanded, setExpanded] = useState(null)
   const [commentDraft, setCommentDraft] = useState('')
-  const [feedMode, setFeedMode] = useState('all')
-  const [section, setSection] = useState(() => new URLSearchParams(window.location.search).get('section') === 'plans' ? 'plans' : 'feed')
-  const [planScope, setPlanScope] = useState('all')
-  const [planResponse, setPlanResponse] = useState('all')
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
-  const [selectedDay, setSelectedDay] = useState(null)
+  const [feedMode, setFeedMode] = useState(initialParameters.get('feed') === 'friends' ? 'friends' : 'all')
+  const [section, setSection] = useState(initialParameters.get('section') === 'plans' ? 'plans' : 'feed')
+  const [planScope, setPlanScope] = useState(['all', 'friends', 'mine', 'groups'].includes(initialParameters.get('scope')) ? initialParameters.get('scope') : 'all')
+  const [planResponse, setPlanResponse] = useState(['all', 'going', 'interested'].includes(initialParameters.get('response')) ? initialParameters.get('response') : 'all')
+  const [calendarMonth, setCalendarMonth] = useState(() => /^\d{4}-\d{2}$/.test(initialParameters.get('month') ?? '') ? new Date(`${initialParameters.get('month')}-01T12:00:00`) : new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+  const [selectedDay, setSelectedDay] = useState(() => /^\d{4}-\d{2}-\d{2}$/.test(initialParameters.get('day') ?? '') ? initialParameters.get('day') : null)
   const [editingPlan, setEditingPlan] = useState(null)
   const [cancellingPlan, setCancellingPlan] = useState(null)
+  const [dismissingPlanIds, setDismissingPlanIds] = useState(() => new Set())
   const loadRequest = useRef(0)
 
   async function load() {
@@ -1189,17 +1239,21 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
       if (requestId !== loadRequest.current) return
       setEntries((await feedResponse.json()).entries)
       setPlannedVisits((await plansResponse.json()).plannedVisits)
-      await fetch('/api/social/feed/seen', { method: 'POST' })
-      onFeedRead()
     } catch (loadError) { if (requestId === loadRequest.current) setError(loadError.message) }
   }
   useEffect(() => {
     load()
     const interval = window.setInterval(load, 30000)
     return () => window.clearInterval(interval)
-  }, [selectedDay])
+  }, [selectedDay, planRefreshKey])
   useEffect(() => { fetch(`/api/social/planned-visits/calendar?month=${planMonthKey(calendarMonth)}`).then((response) => response.ok ? response.json() : { days: [] }).then((payload) => setCalendarDays(payload.days)).catch(() => setCalendarDays([])) }, [calendarMonth])
-  useEffect(() => { if (section !== 'plans') return; fetch('/api/notifications?unreadOnly=true').then((response) => response.ok ? response.json() : { notifications: [] }).then((payload) => setNotifications(payload.notifications)).catch(() => setNotifications([])) }, [section])
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      if (section === 'feed') await fetch('/api/social/feed/seen', { method: 'POST' })
+      await onSectionRead(section)
+    }, 1000)
+    return () => window.clearTimeout(timer)
+  }, [section])
   useEffect(() => {
     if (!entryFocusId) return
     setSection('feed')
@@ -1222,8 +1276,24 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
     setPlanResponse('all')
     setCalendarMonth(new Date(date.getFullYear(), date.getMonth(), 1))
     setSelectedDay(planDayKey(planFocus.starts_at))
+    updateLocation({ section: 'plans', plan: planFocus.id, month: planMonthKey(date), day: planDayKey(planFocus.starts_at), scope: 'all', response: 'all' })
     onPlanFocusConsumed()
   }, [planFocus, onPlanFocusConsumed])
+
+  function updateLocation(next) {
+    const parameters = new URLSearchParams(window.location.search)
+    for (const [key, value] of Object.entries(next)) {
+      if (value === null || value === undefined || value === '' || value === 'all' || key === 'section' && value === 'feed') parameters.delete(key)
+      else parameters.set(key, value)
+    }
+    window.history.replaceState(window.history.state, '', `/social${parameters.size ? `?${parameters}` : ''}`)
+  }
+  function selectSection(nextSection) { setSection(nextSection); updateLocation({ section: nextSection, entry: null, plan: null }) }
+  function selectFeedMode(nextMode) { setFeedMode(nextMode); updateLocation({ feed: nextMode }) }
+  function selectPlanScope(nextScope) { setPlanScope(nextScope); updateLocation({ scope: nextScope }) }
+  function selectPlanResponse(nextResponse) { setPlanResponse(nextResponse); updateLocation({ response: nextResponse }) }
+  function selectDay(nextDay) { setSelectedDay(nextDay); updateLocation({ day: nextDay }) }
+  function selectMonth(nextMonth) { setCalendarMonth(nextMonth); setSelectedDay(null); updateLocation({ month: planMonthKey(nextMonth), day: null }) }
 
   async function toggleLike(entry) {
     await fetch(`/api/social/entries/${entry.id}/like`, { method: entry.liked_by_me ? 'DELETE' : 'POST' })
@@ -1258,10 +1328,24 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
     await load()
   }
 
+  async function dismissCancelledPlan(plan) {
+    setDismissingPlanIds((current) => new Set([...current, plan.id]))
+    try {
+      const [response] = await Promise.all([
+        fetch(`/api/planned-visits/${plan.id}/dismiss`, { method: 'POST' }),
+        new Promise((resolve) => window.setTimeout(resolve, 280)),
+      ])
+      if (!response.ok) throw new Error()
+      setPlannedVisits((current) => current.filter((item) => item.id !== plan.id))
+    } catch {
+      setError('Der abgesagte Termin konnte nicht ausgeblendet werden.')
+    } finally {
+      setDismissingPlanIds((current) => { const next = new Set(current); next.delete(plan.id); return next })
+    }
+  }
+
   async function updatePlan(id, patch) { const response = await fetch(`/api/planned-visits/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); if (!response.ok) throw new Error('Die Planung konnte nicht aktualisiert werden.'); await load() }
   async function cancelPlan(id, reason) { const response = await fetch(`/api/planned-visits/${id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }); if (!response.ok) throw new Error('Die Planung konnte nicht abgesagt werden.'); await load() }
-  async function readPlanNotifications() { await fetch('/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plannedOnly: true }) }); setNotifications([]); onFeedRead({ plans: true }) }
-
   const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id || entry.id === entryFocusId)
   const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'groups' || plan.group_id) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
   activePlanningAuthorFilter = section === 'plans' && authorFilter ? { author: authorFilter, onClear: onClearAuthorFilter } : null
@@ -1274,14 +1358,14 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
           {authorFilter && section === 'feed' && <button type="button" className="text-back" onClick={onClearAuthorFilter}>Gesamten Feed zeigen</button>}
         </div>
         <div className="feed-toggle">
-          <button className={section === 'feed' ? 'is-active' : ''} onClick={() => setSection('feed')}>Feed</button>
-          <button className={section === 'plans' ? 'is-active' : ''} onClick={() => setSection('plans')}>Planung{notifications.length > 0 && <b>{notifications.length}</b>}</button>
+          <button className={section === 'feed' ? 'is-active' : ''} onClick={() => selectSection('feed')}>Feed{Number(notificationCounts.unread_feed) > 0 && <b>{Number(notificationCounts.unread_feed) > 9 ? '9+' : notificationCounts.unread_feed}</b>}</button>
+          <button className={section === 'plans' ? 'is-active' : ''} onClick={() => selectSection('plans')}>Planung{Number(notificationCounts.unread_plans) > 0 && <b>{Number(notificationCounts.unread_plans) > 9 ? '9+' : notificationCounts.unread_plans}</b>}</button>
         </div>
       </div>
       {section === 'feed' ? <>
         <div className="feed-filter-row"><div className="feed-toggle feed-toggle--secondary">
-          <button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => setFeedMode('all')}>Aktuell</button>
-          <button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => setFeedMode('friends')}>Freunde</button>
+          <button className={feedMode === 'all' ? 'is-active' : ''} onClick={() => selectFeedMode('all')}>Aktuell</button>
+          <button className={feedMode === 'friends' ? 'is-active' : ''} onClick={() => selectFeedMode('friends')}>Freunde</button>
         </div></div>
         {!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}
         <div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}>
@@ -1292,24 +1376,23 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
           {expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}
         </article>)}</div>
       </> : <>
-        <PlanNotifications notifications={notifications} onRead={readPlanNotifications} />
         <div className="planning-layout">
-          <PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={(month) => { setCalendarMonth(month); setSelectedDay(null) }} onDayChange={setSelectedDay} />
+          <PlanCalendar month={calendarMonth} days={calendarDays} selectedDay={selectedDay} onMonthChange={selectMonth} onDayChange={selectDay} />
           <div className="planning-list">
             <div className="plan-filters">
-              <button className={planScope === 'all' ? 'is-active' : ''} onClick={() => setPlanScope('all')}>Alle</button>
-              <button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => setPlanScope('friends')}>Freunde</button>
-              <button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => setPlanScope('mine')}>Meine</button>
-              <button className={planScope === 'groups' ? 'is-active' : ''} onClick={() => setPlanScope('groups')}>Gruppen</button>
+              <button className={planScope === 'all' ? 'is-active' : ''} onClick={() => selectPlanScope('all')}>Alle</button>
+              <button className={planScope === 'friends' ? 'is-active' : ''} onClick={() => selectPlanScope('friends')}>Freunde</button>
+              <button className={planScope === 'mine' ? 'is-active' : ''} onClick={() => selectPlanScope('mine')}>Meine</button>
+              <button className={planScope === 'groups' ? 'is-active' : ''} onClick={() => selectPlanScope('groups')}>Gruppen</button>
             </div>
             <div className="plan-filters plan-filters--response">
-              <button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => setPlanResponse('all')}>Alle</button>
-              <button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => setPlanResponse('going')}>Zugesagt</button>
-              <button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => setPlanResponse('interested')}>Interessiert</button>
+              <button className={planResponse === 'all' ? 'is-active' : ''} onClick={() => selectPlanResponse('all')}>Alle</button>
+              <button className={planResponse === 'going' ? 'is-active' : ''} onClick={() => selectPlanResponse('going')}>Zugesagt</button>
+              <button className={planResponse === 'interested' ? 'is-active' : ''} onClick={() => selectPlanResponse('interested')}>Interessiert</button>
             </div>
-            {selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => setSelectedDay(null)}>Tagesauswahl aufheben</button>}
+            {selectedDay && <button type="button" className="text-back plan-clear-day" onClick={() => selectDay(null)}>Tagesauswahl aufheben</button>}
             {!visiblePlans.length && <p className="journal-empty">Für diese Auswahl gibt es keine geplanten Besuche.</p>}
-            <div className="planned-visit-list">{visiblePlans.map((plan) => <PlannedVisitCard key={plan.id} plan={plan} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} />)}</div>
+            <PlannedVisitList plans={visiblePlans} onRsvp={rsvp} onEdit={setEditingPlan} onCancel={setCancellingPlan} onLogVisit={onLogPlan} onDismiss={dismissCancelledPlan} dismissingPlanIds={dismissingPlanIds} />
           </div>
         </div>
       </>}
@@ -1327,10 +1410,10 @@ function UserAvatar({ user, onOpenImage }) {
   return <span className="person-avatar social-avatar social-avatar--ranked">{avatar}</span>
 }
 
-function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUserFeed, onOpenImage }) {
+function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUserFeed, onOpenImage, notificationCounts = {}, onNotificationsRead = async () => {} }) {
   const initialDiscoverUsername = new URLSearchParams(window.location.search).get('discover')?.replace(/^@+/, '') ?? ''
-  const initialRequests = new URLSearchParams(window.location.search).get('tab') === 'requests'
-  const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : initialRequests ? 'requests' : 'friends')
+  const initialTab = new URLSearchParams(window.location.search).get('tab')
+  const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : ['friends', 'requests', 'discover'].includes(initialTab) ? initialTab : 'friends')
   const [friends, setFriends] = useState([])
   const [friendSuggestions, setFriendSuggestions] = useState([])
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] })
@@ -1359,6 +1442,12 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
     return () => window.clearInterval(interval)
   }, [])
   useEffect(() => {
+    const types = tab === 'requests' ? ['friend_request'] : tab === 'friends' ? ['friend_accepted'] : []
+    if (!types.length) return undefined
+    const timer = window.setTimeout(() => void onNotificationsRead(types), 1000)
+    return () => window.clearTimeout(timer)
+  }, [tab])
+  useEffect(() => {
     const searchQuery = query.trim().replace(/^@+/, '')
     if (searchQuery.length < 2) { setResults([]); return undefined }
     const timer = window.setTimeout(async () => {
@@ -1384,18 +1473,26 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
     if (!response.ok) return setError('Die Vorschau konnte nicht geladen werden.')
     setPreview(await response.json())
   }
+  function selectTab(nextTab) {
+    setTab(nextTab)
+    const parameters = new URLSearchParams(window.location.search)
+    parameters.delete('discover')
+    if (nextTab === 'friends') parameters.delete('tab')
+    else parameters.set('tab', nextTab)
+    window.history.replaceState(window.history.state, '', `/friends${parameters.size ? `?${parameters}` : ''}`)
+  }
   return (
     <main className="view content-view compact-view social-view">
       <section className="social-section friends-section">
         <div className="section-heading community-heading">
           <h2>Community</h2>
-          <div className="friends-tabs community-switch"><button className="is-active">Freunde</button><button type="button" onClick={onOpenGroups}>Gruppen{summary.unread_groups > 0 && <b>{summary.unread_groups > 9 ? '9+' : summary.unread_groups}</b>}</button></div>
+          <div className="friends-tabs community-switch"><button className="is-active">Freunde{Number(notificationCounts.unread_friends) > 0 && <b>{Number(notificationCounts.unread_friends) > 9 ? '9+' : notificationCounts.unread_friends}</b>}</button><button type="button" onClick={onOpenGroups}>Gruppen{Number(notificationCounts.unread_groups) > 0 && <b>{Number(notificationCounts.unread_groups) > 9 ? '9+' : notificationCounts.unread_groups}</b>}</button></div>
         </div>
         <div className="community-subnav">
           <div className="friends-tabs">
-            <button className={tab === 'friends' ? 'is-active' : ''} onClick={() => setTab('friends')}>Freunde</button>
-            <button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => setTab('requests')}>Anfragen{requests.incoming.length > 0 && <b>{requests.incoming.length}</b>}</button>
-            <button className={tab === 'discover' ? 'is-active' : ''} onClick={() => setTab('discover')}>Entdecken</button>
+            <button className={tab === 'friends' ? 'is-active' : ''} onClick={() => selectTab('friends')}>Freunde{Number(notificationCounts.unread_messages) + Number(notificationCounts.unread_friend_acceptances) > 0 && <b>{Math.min(9, Number(notificationCounts.unread_messages) + Number(notificationCounts.unread_friend_acceptances))}{Number(notificationCounts.unread_messages) + Number(notificationCounts.unread_friend_acceptances) > 9 ? '+' : ''}</b>}</button>
+            <button className={`${tab === 'requests' ? 'is-active ' : ''}has-badge`} onClick={() => selectTab('requests')}>Anfragen{Number(notificationCounts.unread_friend_requests) > 0 && <b>{Number(notificationCounts.unread_friend_requests) > 9 ? '9+' : notificationCounts.unread_friend_requests}</b>}</button>
+            <button className={tab === 'discover' ? 'is-active' : ''} onClick={() => selectTab('discover')}>Entdecken</button>
           </div>
         </div>
         {error && <p className="form-error">{error}</p>}
