@@ -1301,11 +1301,23 @@ app.get('/me', requireUser, (req, res) => res.json({ user: req.user }))
 
 app.get('/notification-preferences', requireUser, asyncRoute(async (req, res) => {
   const preferences = await preferencesForUser(pool, req.user.id)
+  const subscriptionId = typeof req.query.subscriptionId === 'string'
+    ? z.string().uuid().parse(req.query.subscriptionId)
+    : null
+  const deviceResult = subscriptionId
+    ? await pool.query(
+        `SELECT id, content_preview_enabled AS "contentPreviewEnabled", badge_enabled AS "badgeEnabled"
+           FROM push_subscriptions
+          WHERE id = $1 AND user_id = $2`,
+        [subscriptionId, req.user.id],
+      )
+    : null
   res.json({
     preferences: notificationCategories.map((category) => ({ category, ...preferences[category] })),
     push: {
       configured: pushConfigured,
       publicKey: pushConfigured ? vapidPublicKey : null,
+      device: deviceResult?.rows[0] ?? null,
     },
   })
 }))

@@ -403,8 +403,9 @@ function NotificationSettingsView({ currentUser, onBack, onUnreadChange, onOpenT
   async function load() {
     setLoading(true); setError('')
     try {
+      const subscriptionId = window.localStorage.getItem(`bouldero-push-subscription:${currentUser?.id}`)
       const [preferenceResponse, notificationResponse] = await Promise.all([
-        fetch('/api/notification-preferences'),
+        fetch(`/api/notification-preferences${subscriptionId ? `?subscriptionId=${encodeURIComponent(subscriptionId)}` : ''}`),
         fetch('/api/notifications'),
       ])
       if (!preferenceResponse.ok || !notificationResponse.ok) throw new Error('Die Benachrichtigungseinstellungen konnten nicht geladen werden.')
@@ -412,6 +413,10 @@ function NotificationSettingsView({ currentUser, onBack, onUnreadChange, onOpenT
       const notificationPayload = await notificationResponse.json()
       setPreferences(preferencePayload.preferences)
       setPush(preferencePayload.push)
+      if (preferencePayload.push.device) {
+        setContentPreviewEnabled(preferencePayload.push.device.contentPreviewEnabled)
+        setBadgeEnabled(preferencePayload.push.device.badgeEnabled)
+      }
       setNotifications(notificationPayload.notifications)
       onUnreadChange(notificationPayload.notifications.filter((item) => !item.read_at).length)
     } catch (loadError) {
