@@ -10,3 +10,14 @@ export function dialogViewportHeight(visualViewportHeight, layoutViewportHeight)
   const browserControlsHeight = layoutHeight - visualHeight
   return browserControlsHeight > 0 && browserControlsHeight <= 120 ? layoutHeight : visualHeight
 }
+
+export function visualViewportBottomOffset(visualViewportHeight, layoutViewportHeight, visualViewportOffsetTop = 0) {
+  const visualHeight = Number.isFinite(visualViewportHeight) && visualViewportHeight > 0 ? visualViewportHeight : 0
+  const layoutHeight = Number.isFinite(layoutViewportHeight) && layoutViewportHeight > 0 ? layoutViewportHeight : 0
+  const offsetTop = Number.isFinite(visualViewportOffsetTop) ? visualViewportOffsetTop : 0
+  if (!visualHeight || !layoutHeight) return 0
+
+  // Fixed elements use the layout viewport. Translate the bottom navigation
+  // by the delta so it is fixed to the actually visible viewport instead.
+  return Math.round(visualHeight - layoutHeight + offsetTop)
+}

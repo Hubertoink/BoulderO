@@ -59,6 +59,15 @@ test('does not scroll short mobile content views', async ({ page }) => {
   }
 })
 
+test('extends the mobile navigation into a browser-controls inset', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Karte entdecken' }).click()
+  await page.evaluate(() => document.documentElement.style.setProperty('--visual-viewport-bottom-offset', '64px'))
+
+  await expect.poll(() => page.locator('.bottom-nav').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(908)
+})
+
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')

@@ -466,6 +466,7 @@ body.map-dialog-open {
   --app-viewport-height: 100vh;
   --dialog-viewport-height: 100vh;
   --dialog-viewport-top: 0px;
+  --visual-viewport-bottom-offset: 0px;
 }
 
 @supports (height: 100dvh) {
@@ -606,6 +607,7 @@ body.modal-open {
     border-top: 1px solid var(--line);
     border-right: 0;
     padding-top: 0;
+    transform: translateY(var(--visual-viewport-bottom-offset));
   }
 
   .bottom-nav button {
