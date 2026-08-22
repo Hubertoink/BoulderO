@@ -64,7 +64,7 @@ import {
   optimizePhoto,
 } from './AppViews.jsx'
 import { registerServiceWorker, updateAppBadge } from './shared/pushNotifications.js'
-import { dialogViewportHeight, keyboardViewportOpen } from './shared/viewport.js'
+import { appViewportHeight, dialogViewportHeight, keyboardViewportOpen } from './shared/viewport.js'
 
 const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
@@ -195,11 +195,12 @@ function App() {
   useEffect(() => {
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      const height = `${Math.round(dialogViewportHeight(viewport?.height, window.innerHeight))}px`
-      const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
       const keyboardOpen = keyboardViewportOpen(viewport?.height, window.innerHeight, hasTextEntryFocus())
+      const height = `${Math.round(appViewportHeight(viewport?.height, window.innerHeight, viewport?.offsetTop, keyboardOpen))}px`
+      const dialogHeight = `${Math.round(dialogViewportHeight(viewport?.height, window.innerHeight))}px`
+      const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
       document.documentElement.style.setProperty('--app-viewport-height', height)
-      document.documentElement.style.setProperty('--dialog-viewport-height', height)
+      document.documentElement.style.setProperty('--dialog-viewport-height', dialogHeight)
       document.documentElement.style.setProperty('--dialog-viewport-top', offsetTop)
       document.documentElement.classList.toggle('keyboard-open', keyboardOpen)
     }

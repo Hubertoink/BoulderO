@@ -21,3 +21,13 @@ export function keyboardViewportOpen(visualViewportHeight, layoutViewportHeight,
   const coveredHeight = layoutHeight - visualHeight
   return coveredHeight > Math.max(120, layoutHeight * 0.15)
 }
+
+export function appViewportHeight(visualViewportHeight, layoutViewportHeight, visualViewportOffsetTop, keyboardOpen) {
+  const baseHeight = dialogViewportHeight(visualViewportHeight, layoutViewportHeight)
+  if (!keyboardOpen) return baseHeight
+
+  const layoutHeight = Number.isFinite(layoutViewportHeight) && layoutViewportHeight > 0 ? layoutViewportHeight : 0
+  const offsetTop = Number.isFinite(visualViewportOffsetTop) && visualViewportOffsetTop > 0 ? visualViewportOffsetTop : 0
+  const visibleBottom = baseHeight + offsetTop
+  return layoutHeight ? Math.min(layoutHeight, visibleBottom) : visibleBottom
+}

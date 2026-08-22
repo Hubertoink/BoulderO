@@ -66,9 +66,11 @@ test('hides the mobile navigation and lets the map fill the viewport while typin
     viewport.height = 844
     viewport.offsetTop = 0
     viewport.scale = 1
-    window.__setVisualViewportHeight = (height) => {
+    window.__setVisualViewport = (height, offsetTop = 0) => {
       viewport.height = height
+      viewport.offsetTop = offsetTop
       viewport.dispatchEvent(new Event('resize'))
+      viewport.dispatchEvent(new Event('scroll'))
     }
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
   })
@@ -77,11 +79,16 @@ test('hides the mobile navigation and lets the map fill the viewport while typin
 
   await expect(page.locator('.bottom-nav')).toHaveCSS('position', 'fixed')
   await page.getByPlaceholder('Hallen in Mannheim suchen').focus()
-  await page.evaluate(() => window.__setVisualViewportHeight(460))
+  await page.evaluate(() => window.__setVisualViewport(520, 96))
   await expect(page.locator('.bottom-nav')).toBeHidden()
-  await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(460)
+  await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(616)
+  await expect.poll(() => page.evaluate(() => ({
+    appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-height').trim(),
+    dialogHeight: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-height').trim(),
+    dialogTop: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-top').trim(),
+  }))).toEqual({ appHeight: '616px', dialogHeight: '520px', dialogTop: '96px' })
 
-  await page.evaluate(() => window.__setVisualViewportHeight(844))
+  await page.evaluate(() => window.__setVisualViewport(844, 0))
   await expect(page.getByPlaceholder('Hallen in Mannheim suchen')).toBeFocused()
   await expect(page.locator('.bottom-nav')).toBeVisible()
 })

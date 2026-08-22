@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { dialogViewportHeight, keyboardViewportOpen } from '../src/shared/viewport.js'
+import { appViewportHeight, dialogViewportHeight, keyboardViewportOpen } from '../src/shared/viewport.js'
 
 test('fills a small Android browser-controls inset below a dialog', () => {
   assert.equal(dialogViewportHeight(640, 704), 704)
@@ -22,4 +22,13 @@ test('detects a keyboard only for a focused text entry and a large viewport redu
 test('does not mistake Android browser controls for the keyboard', () => {
   assert.equal(keyboardViewportOpen(780, 844, true), false)
   assert.equal(keyboardViewportOpen(844, 844, true), false)
+})
+
+test('extends the app to the bottom of an offset keyboard viewport', () => {
+  assert.equal(appViewportHeight(520, 844, 96, true), 616)
+  assert.equal(appViewportHeight(520, 844, 400, true), 844)
+})
+
+test('does not apply the visual viewport offset without a keyboard', () => {
+  assert.equal(appViewportHeight(520, 844, 96, false), 520)
 })
