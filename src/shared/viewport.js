@@ -10,24 +10,3 @@ export function dialogViewportHeight(visualViewportHeight, layoutViewportHeight)
   const browserControlsHeight = layoutHeight - visualHeight
   return browserControlsHeight > 0 && browserControlsHeight <= 120 ? layoutHeight : visualHeight
 }
-
-export function keyboardViewportOpen(visualViewportHeight, layoutViewportHeight, hasTextEntryFocus) {
-  if (!hasTextEntryFocus) return false
-
-  const visualHeight = Number.isFinite(visualViewportHeight) && visualViewportHeight > 0 ? visualViewportHeight : 0
-  const layoutHeight = Number.isFinite(layoutViewportHeight) && layoutViewportHeight > 0 ? layoutViewportHeight : 0
-  if (!visualHeight || !layoutHeight) return false
-
-  const coveredHeight = layoutHeight - visualHeight
-  return coveredHeight > Math.max(120, layoutHeight * 0.15)
-}
-
-export function appViewportHeight(visualViewportHeight, layoutViewportHeight, visualViewportOffsetTop, keyboardOpen) {
-  const baseHeight = dialogViewportHeight(visualViewportHeight, layoutViewportHeight)
-  if (!keyboardOpen) return baseHeight
-
-  const layoutHeight = Number.isFinite(layoutViewportHeight) && layoutViewportHeight > 0 ? layoutViewportHeight : 0
-  const offsetTop = Number.isFinite(visualViewportOffsetTop) && visualViewportOffsetTop > 0 ? visualViewportOffsetTop : 0
-  const visibleBottom = baseHeight + offsetTop
-  return layoutHeight ? Math.min(layoutHeight, visibleBottom) : visibleBottom
-}
