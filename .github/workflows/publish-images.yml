@@ -43,3 +43,5 @@ jobs:
           docker push ghcr.io/hubertoink/bouldero-api:$TAG
           docker build --file db/Dockerfile --tag ghcr.io/hubertoink/bouldero-db:$TAG db
           docker push ghcr.io/hubertoink/bouldero-db:$TAG
+          docker build --file website/Dockerfile --tag ghcr.io/hubertoink/bouldero-site:$TAG website
+          docker push ghcr.io/hubertoink/bouldero-site:$TAG

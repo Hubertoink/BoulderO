@@ -1,0 +1,10 @@
+services:
+  website:
+    image: ghcr.io/hubertoink/bouldero-site:latest
+    ports:
+      - "80:80/tcp"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 64m

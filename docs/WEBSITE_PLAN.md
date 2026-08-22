@@ -12,12 +12,12 @@ Die Website wird statisch und ohne Laufzeit-Backend gebaut. "Headless" bedeutet 
 
 - Eigener Quellordner `website/` im vorhandenen Repository
 - Schlanker statischer Build mit lokal eingebundenem CSS und moglichst ohne Client-JavaScript
-- Build-Ausgabe nach `website/dist/`
-- Native Mittwald Static Site im Projekt `BoulderO` (`p-bjne4n`)
-- Bestehender, TLS-aktiver Virtualhost `www.bouldero.de` wird nach Abnahme von der Mittwald-Standardseite auf die neue Static Site umgestellt
+- Eigenes minimales Nginx-Image `ghcr.io/hubertoink/bouldero-site:latest`
+- Separater Mittwald-Container-Stack im Projekt `BoulderO` (`p-bjne4n`)
+- Bestehender, TLS-aktiver Virtualhost `www.bouldero.de` wird nach Abnahme von der Mittwald-Standardseite auf den Website-Container umgestellt
 - Keine Anderung am bestehenden Container-Stack oder an `bouldero.de`
 
-Diese Losung ist gegenuber einem weiteren Container einfacher, ressourcenschonender und entkoppelt die Website vollstandig von App, API und Datenbank.
+Der Website-Container hat keine Laufzeit-Abhangigkeit zu App, API oder Datenbank und kann unabhangig ausgerollt und zuruckgesetzt werden.
 
 ## Inhalt und Seitenstruktur
 
@@ -93,7 +93,6 @@ Die Werte durfen nicht in Tickets, Screenshots, Chat-Nachrichten, Git oder Deplo
 - Texte auf die drei Kernversprechen reduzieren
 - Screenshots zuschneiden und optimieren
 - SEO-Grundlagen: Titel, Description, Canonical, Open-Graph-Bild, `robots.txt`, `sitemap.xml`
-- strukturierte Daten fur `WebApplication` erganzen
 
 ### Phase 2: Qualitat
 
@@ -108,14 +107,14 @@ Die Werte durfen nicht in Tickets, Screenshots, Chat-Nachrichten, Git oder Deplo
 ### Phase 3: Mittwald
 
 1. Secrets rotieren und App-Funktion kurz gegenprufen.
-2. Native Static Site im Projekt `p-bjne4n` anlegen, zum Beispiel mit `mw app create static`.
-3. `website/dist/` per SSH/SFTP in den Installationspfad hochladen.
-4. Die Site zunachst uber die Mittwald-Vorschau beziehungsweise App-Zieladresse testen.
-5. Bestehenden Virtualhost `www.bouldero.de` mit `mw domain virtualhost update <virtualhost-id> --path-to-app /:<app-id>` auf die Static Site umstellen.
+2. GitHub Actions baut und veroffentlicht `ghcr.io/hubertoink/bouldero-site:latest`.
+3. Separaten Stack aus `compose.website.mittwald.yaml` im Projekt `p-bjne4n` deployen.
+4. Die Site zunachst uber das Containerziel testen.
+5. Bestehenden Virtualhost `www.bouldero.de` mit `mw domain virtualhost update <virtualhost-id> --path-to-container /:<container-id>:80/tcp` auf den Website-Container umstellen.
 6. TLS, Canonical URL, Security Headers und alle Links in Produktion prufen.
 7. Erst danach Caches aktivieren und den Build als freigegebene Version markieren.
 
-Der bestehende Root-Virtualhost `bouldero.de` bleibt dabei auf dem BoulderO-Webcontainer. Ein Rollback betrifft nur `www.bouldero.de`: Virtualhost auf die vorherige Zielversion beziehungsweise die Mittwald-Standardseite zuruckstellen.
+Der bestehende Root-Virtualhost `bouldero.de` bleibt dabei auf dem BoulderO-Webcontainer. Ein Rollback betrifft nur `www.bouldero.de`: Virtualhost auf die vorherige Website-Version beziehungsweise die Mittwald-Standardseite zuruckstellen.
 
 ## Abnahmekriterien
 
