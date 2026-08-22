@@ -1105,17 +1105,12 @@ function AdminSpotsView({
 function FeedAuthor({ entry }) {
   const [expanded, setExpanded] = useState(false)
   const authorRef = useOutsideDismiss(expanded, () => setExpanded(false))
-  function openSpotOnMap() {
-    const current = window.history.state
-    window.history.pushState({ boulderO: true, view: 'map', position: (current?.position ?? 0) + 1 }, '', `/map?spot=${encodeURIComponent(entry.spot_id)}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }
   function openDiscover() {
     const current = window.history.state
     window.history.pushState({ boulderO: true, view: 'friends', position: (current?.position ?? 0) + 1 }, '', `/friends?discover=${encodeURIComponent(entry.username)}`)
     window.dispatchEvent(new PopStateEvent('popstate'))
   }
-  return <div className="feed-author" id={`feed-entry-${entry.id}`} ref={authorRef}><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><b>{entry.user_name}</b><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}<button type="button" className="ui-icon-button feed-author__map-link" onClick={openSpotOnMap} aria-label={`${entry.spot_name} auf der Karte öffnen`} title="Auf Karte anzeigen"><IconMapPin size={17} /></button>{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small>{!entry.is_owner && <button type="button" onClick={openDiscover}>In Freunde öffnen</button>}</div>}</div>
+  return <div className="feed-author" id={`feed-entry-${entry.id}`} ref={authorRef}><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><b>{entry.user_name}</b><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small>{!entry.is_owner && <button type="button" onClick={openDiscover}>In Freunde öffnen</button>}</div>}</div>
 }
 
 function FeedMediaCarousel({ entry, onOpenImage }) {
@@ -1444,7 +1439,7 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
         </div></div>
         {!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}
         <div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}>
-          <FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei {entry.spot_name}</h3>
+          <FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei <button type="button" className="feed-entry__spot-link" onClick={() => onOpenSpot?.(entry.spot_id)}>{entry.spot_name}</button></h3>
           {formatVisitTimeRange(entry.started_at, entry.ended_at) && <p className="feed-entry__time"><IconClock size={14} />{formatVisitTimeRange(entry.started_at, entry.ended_at)}</p>}
           {entry.body && <p className="feed-body">{entry.body}</p>}
           {entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}
