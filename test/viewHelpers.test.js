@@ -1,10 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatPlanDateRange, formatVisitTimeRange, timeInputValue } from '../src/shared/viewHelpers.ts'
+import { dateInputValue, formatPlanDateRange, formatVisitTimeRange, timeInputValue } from '../src/shared/viewHelpers.ts'
 
 test('normalizes database times for time inputs', () => {
   assert.equal(timeInputValue('18:05:00'), '18:05')
+  assert.equal(timeInputValue(new Date(2026, 7, 22, 0, 0)), '00:00')
   assert.equal(timeInputValue(null), '')
+})
+
+test('formats dates for local date inputs', () => {
+  assert.equal(dateInputValue(new Date(2026, 7, 22)), '2026-08-22')
 })
 
 test('formats visit time ranges for journal and feed', () => {

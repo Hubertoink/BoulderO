@@ -72,10 +72,10 @@ export function VisibilityPicker({ value, onChange }) {
 
 export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface, plannedVisit }) {
   const plannedDate = plannedVisit ? new Date(plannedVisit.starts_at) : null
-  const [visitedAt, setVisitedAt] = useState(plannedDate ? plannedDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10))
+  const [visitedAt, setVisitedAt] = useState(plannedDate ? dateInputValue(plannedDate) : dateInputValue())
   const [timesOpen, setTimesOpen] = useState(false)
-  const [startedAt, setStartedAt] = useState(plannedDate ? plannedDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '')
-  const [endedAt, setEndedAt] = useState(plannedVisit?.ends_at ? new Date(plannedVisit.ends_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '')
+  const [startedAt, setStartedAt] = useState(plannedDate ? timeInputValue(plannedDate) : '')
+  const [endedAt, setEndedAt] = useState(plannedVisit?.ends_at ? timeInputValue(plannedVisit.ends_at) : '')
   const [body, setBody] = useState('')
   const [visibility, setVisibility] = useState('followers')
   const [files, setFiles] = useState([])
