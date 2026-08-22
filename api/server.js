@@ -789,7 +789,7 @@ const maxJournalMedia = 6
 const maxJournalVideoBytes = 50 * 1024 * 1024
 const maxJournalImageBytes = 10 * 1024 * 1024
 const maxJournalVideoSeconds = 30
-const journalVideoTypes = new Set(['video/mp4', 'video/webm', 'video/quicktime'])
+const journalVideoTypes = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/3gpp', 'video/x-m4v'])
 const journalImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 
 const journalMediaUpload = multer({

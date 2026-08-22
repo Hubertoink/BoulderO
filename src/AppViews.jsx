@@ -1266,7 +1266,10 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
       setEntries(focusedEntry && !feed.entries.some((entry) => entry.id === focusedEntry.id) ? [focusedEntry, ...feed.entries] : feed.entries)
       setNextFeedCursor(feed.nextCursor)
       setPlannedVisits((await plansResponse.json()).plannedVisits)
-    } catch (loadError) { if (requestId === loadRequest.current) setError(loadError.message) }
+    } catch {
+      // A mobile browser may briefly drop in-flight requests while resuming the app.
+      // Keep existing feed content and retry on the next foreground event instead of showing a raw browser error.
+    }
   }
 
   async function loadPlans() {
@@ -1274,7 +1277,9 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
       const response = await fetch(`/api/social/planned-visits?${planListRange(selectedDay)}`)
       if (!response.ok) throw new Error('Planungen konnten nicht geladen werden.')
       setPlannedVisits((await response.json()).plannedVisits)
-    } catch (loadError) { setError(loadError.message) }
+    } catch {
+      // Planned visits refresh in the background; a transient failure must not interrupt the feed.
+    }
   }
 
   async function refreshFeedHead() {
@@ -1297,7 +1302,9 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
       const feed = await response.json()
       setEntries((current) => [...current, ...feed.entries.filter((entry) => !current.some((existing) => existing.id === entry.id))])
       setNextFeedCursor(feed.nextCursor)
-    } catch (loadError) { setError(loadError.message) } finally { setLoadingMoreEntries(false) }
+    } catch {
+      // Infinite scrolling is automatic, so a temporary connection loss should not surface as a raw error.
+    } finally { setLoadingMoreEntries(false) }
   }
 
   useEffect(() => {
@@ -1309,6 +1316,19 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   useEffect(() => {
     const interval = window.setInterval(() => void loadPlans(), 15000)
     return () => window.clearInterval(interval)
+  }, [selectedDay])
+  useEffect(() => {
+    function refreshAfterResume() {
+      if (document.visibilityState !== 'visible') return
+      void loadInitial()
+      void loadPlans()
+    }
+    window.addEventListener('focus', refreshAfterResume)
+    document.addEventListener('visibilitychange', refreshAfterResume)
+    return () => {
+      window.removeEventListener('focus', refreshAfterResume)
+      document.removeEventListener('visibilitychange', refreshAfterResume)
+    }
   }, [selectedDay])
   useEffect(() => {
     if (section !== 'feed' || !nextFeedCursor || loadingMoreEntries || !feedLoadMoreRef.current) return undefined

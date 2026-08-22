@@ -28,14 +28,16 @@ export function isVideoMedia(item) {
 async function videoDuration(file) {
   const source = URL.createObjectURL(file)
   try {
-    const duration = await new Promise((resolve, reject) => {
+    const duration = await new Promise((resolve) => {
       const video = document.createElement('video')
       video.preload = 'metadata'
       video.onloadedmetadata = () => resolve(video.duration)
-      video.onerror = () => reject(new Error('Das Video konnte nicht gelesen werden.'))
+      // Some mobile browsers cannot inspect the codec of a freshly recorded clip,
+      // even though the server can normalize it with FFmpeg after upload.
+      video.onerror = () => resolve(null)
       video.src = source
     })
-    if (!Number.isFinite(duration) || duration <= 0 || duration > 30) throw new Error('Videos dürfen höchstens 30 Sekunden lang sein.')
+    if (duration !== null && (!Number.isFinite(duration) || duration <= 0 || duration > 30)) throw new Error('Videos dürfen höchstens 30 Sekunden lang sein.')
   } finally {
     URL.revokeObjectURL(source)
   }
@@ -48,7 +50,7 @@ export async function prepareVisitMedia(incoming, { availableSlots, hasVideo }) 
   const items = []
   for (const file of selected) {
     if (isVideoMedia(file)) {
-      if (!/^video\/(mp4|webm|quicktime)$/.test(file.type)) throw new Error('Bitte wähle ein MP4-, WebM- oder MOV-Video aus.')
+      if (!/^video\/(mp4|webm|quicktime|3gpp|x-m4v)$/.test(file.type)) throw new Error('Bitte wähle ein MP4-, WebM- oder MOV-Video aus.')
       if (file.size > 50 * 1024 * 1024) throw new Error('Video-Clips dürfen maximal 50 MB groß sein.')
       await videoDuration(file)
       items.push({ file, preview: URL.createObjectURL(file), kind: 'video' })
@@ -152,7 +154,7 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
         <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} required /></label>
         <section className="visit-time-picker"><button type="button" className={timesOpen ? 'is-open' : ''} onClick={() => setTimesOpen((value) => !value)}><IconClock size={18} /><span>Uhrzeit hinzufügen <small>optional</small></span><IconChevronRight size={17} /></button>{timesOpen && <div className="visit-time-picker__fields"><label className="form-field"><span>Von</span><input type="time" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} /></label><label className="form-field"><span>Bis</span><input type="time" value={endedAt} onChange={(event) => setEndedAt(event.target.value)} /></label></div>}</section>
         <label className="form-field"><span>Erfahrungsbericht</span><textarea value={body} onChange={(event) => setBody(event.target.value)} onFocus={revealExperienceField} onBlur={clearViewportReveal} maxLength="4000" placeholder="Wie war deine Session? Was möchtest du später noch wissen?" /></label>
-        <div className="photo-field"><div className="photo-selection">{files.map((item, index) => <figure key={item.preview} className={item.kind === 'video' ? 'is-video' : ''}>{item.kind === 'video' ? <video src={item.preview} muted playsInline preload="metadata" /> : <img src={item.preview} alt={`Ausgewähltes Foto ${index + 1}`} />}{item.kind === 'video' && <span className="media-video-label"><IconVideo size={13} />Clip</span>}<button type="button" onClick={() => removePhoto(index)} aria-label={`${item.kind === 'video' ? 'Clip' : 'Foto'} ${index + 1} entfernen`}><IconX size={15} /></button></figure>)}</div><label className="photo-picker"><IconPhoto size={19} /><span>{files.length ? `${files.length} Medium${files.length > 1 ? 's' : ''} ausgewählt` : 'Fotos oder Clip hinzufügen'}</span><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/webm,video/quicktime" multiple onChange={addMedia} /></label><small className="field-help">Maximal 6 Medien, darunter ein Clip bis 30 Sek. und 50 MB.</small>{files.length > 0 && files.length < 6 && <button type="button" className="add-photo" onClick={() => fileInput.current?.click()}><IconPlus size={16} />Weiteres Medium</button>}</div>
+        <div className="photo-field"><div className="photo-selection">{files.map((item, index) => <figure key={item.preview} className={item.kind === 'video' ? 'is-video' : ''}>{item.kind === 'video' ? <video src={item.preview} muted playsInline preload="metadata" /> : <img src={item.preview} alt={`Ausgewähltes Foto ${index + 1}`} />}{item.kind === 'video' && <span className="media-video-label"><IconVideo size={13} />Clip</span>}<button type="button" onClick={() => removePhoto(index)} aria-label={`${item.kind === 'video' ? 'Clip' : 'Foto'} ${index + 1} entfernen`}><IconX size={15} /></button></figure>)}</div><label className="photo-picker"><IconPhoto size={19} /><span>{files.length ? `${files.length} Medium${files.length > 1 ? 's' : ''} ausgewählt` : 'Fotos oder Clip hinzufügen'}</span><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/webm,video/quicktime,video/3gpp,video/x-m4v" multiple onChange={addMedia} /></label><small className="field-help">Maximal 6 Medien, darunter ein Clip bis 30 Sek. und 50 MB.</small>{files.length > 0 && files.length < 6 && <button type="button" className="add-photo" onClick={() => fileInput.current?.click()}><IconPlus size={16} />Weiteres Medium</button>}</div>
         <VisibilityPicker value={visibility} onChange={setVisibility} />
         {error && <p className="form-error">{error}</p>}
         <button className="visit-button" disabled={isSaving || !spot}>{isSaving ? 'Wird gespeichert …' : visibility === 'private' ? 'Privaten Eintrag speichern' : 'Eintrag speichern'}</button>
