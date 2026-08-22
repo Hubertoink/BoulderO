@@ -946,6 +946,7 @@ const plannedVisitInputSchema = z.object({
   visibility: z.enum(['private', 'friends', 'followers', 'public']).default('friends'),
 }).superRefine((value, context) => {
   if (value.endsAt && new Date(value.endsAt) <= new Date(value.startsAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Das Ende muss nach dem Beginn liegen.' })
+  if (new Date(value.startsAt) <= new Date()) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Eine Planung muss in der Zukunft liegen.' })
 })
 
 const plannedVisitUpdateSchema = z.object({
@@ -989,6 +990,7 @@ const groupEventInputSchema = z.object({
 
 const groupEventSchema = groupEventInputSchema.superRefine((value, context) => {
   if (value.endsAt && new Date(value.endsAt) <= new Date(value.startsAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Endzeit muss nach dem Beginn liegen.' })
+  if (new Date(value.startsAt) <= new Date()) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Ein Gruppentermin muss in der Zukunft liegen.' })
   if (value.recurrence && new Date(`${value.recurrence.repeatUntil}T23:59:59`) < new Date(value.startsAt)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Die Terminserie muss nach dem ersten Termin enden.' })
 })
 

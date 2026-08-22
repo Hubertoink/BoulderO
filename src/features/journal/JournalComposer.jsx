@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconAdjustmentsHorizontal, IconArrowsMaximize, IconBookmark, IconCalendarEvent, IconCheck, IconChevronLeft, IconChevronRight, IconCompass, IconClock, IconCurrentLocation, IconDownload, IconDots, IconEye, IconFlag, IconLock, IconMapPin, IconMedal, IconMessageCircle, IconLogin2, IconLogout, IconPhoto, IconPlus, IconSearch, IconSparkles, IconTrophy, IconTrash, IconUserCircle, IconUserCheck, IconUserPlus, IconUsers, IconVideo, IconWorld, IconX } from '@tabler/icons-react'
-import { formatJournalDate, formatPlanDate } from '../../shared/viewHelpers.ts'
+import { dateInputValue, formatJournalDate, formatPlanDate, timeInputValue } from '../../shared/viewHelpers.ts'
 
 export async function optimizePhoto(file) {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size <= 1_500_000) return file
@@ -163,7 +163,7 @@ export function JournalComposer({ spot, onClose, onSave, onChooseOnMap, surface,
 
 export function PlannedVisitDialog({ spot, onSave, onClose, surface = 'dialog' }) {
   const initial = new Date(Date.now() + 24 * 60 * 60 * 1000)
-  const [date, setDate] = useState(initial.toISOString().slice(0, 10))
+  const [date, setDate] = useState(dateInputValue(initial))
   const [time, setTime] = useState('18:00')
   const [endTime, setEndTime] = useState('')
   const [note, setNote] = useState('')
@@ -172,14 +172,17 @@ export function PlannedVisitDialog({ spot, onSave, onClose, surface = 'dialog' }
   const [error, setError] = useState('')
   async function submit(event) {
     event.preventDefault()
-    setSaving(true)
     setError('')
+    const start = new Date(`${date}T${time}:00`)
+    if (!Number.isFinite(start.getTime()) || start <= new Date()) return setError('Der geplante Besuch muss in der Zukunft liegen.')
+    setSaving(true)
     try {
-      const startsAt = new Date(`${date}T${time}:00`).toISOString()
+      const startsAt = start.toISOString()
       const endsAt = endTime ? new Date(`${date}T${endTime}:00`).toISOString() : null
       await onSave({ spotId: spot.id, startsAt, endsAt, note, visibility })
       onClose()
     } catch (saveError) { setError(saveError.message || 'Der geplante Besuch konnte nicht gespeichert werden.') } finally { setSaving(false) }
   }
-  return <div className={`composer-backdrop ${surface === 'map' ? 'composer-backdrop--map' : ''}`}><section className={`journal-composer ${surface === 'map' ? 'journal-composer--map' : ''}`} role="dialog" aria-modal="true" aria-label="Besuch planen"><div className="composer-header"><div><h2>Besuch planen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(event) => setDate(event.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(event) => setNote(event.target.value)} placeholder="Zum Beispiel: Ich möchte neue Leute zum Bouldern treffen." /></label><VisibilityPicker value={visibility} onChange={setVisibility} />{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird geplant …' : 'Besuch planen'}</button></form></section></div>
+  const minimumStartTime = date === dateInputValue() ? timeInputValue(new Date()) : undefined
+  return <div className={`composer-backdrop ${surface === 'map' ? 'composer-backdrop--map' : ''}`}><section className={`journal-composer ${surface === 'map' ? 'journal-composer--map' : ''}`} role="dialog" aria-modal="true" aria-label="Besuch planen"><div className="composer-header"><div><h2>Besuch planen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><div className="chosen-spot"><IconMapPin size={18} /><span><b>{spot.name}</b><small>{spot.district} · {spot.address}</small></span></div><form onSubmit={submit}><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} min={dateInputValue()} onChange={(event) => setDate(event.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} min={minimumStartTime} onChange={(event) => setTime(event.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(event) => setNote(event.target.value)} placeholder="Zum Beispiel: Ich möchte neue Leute zum Bouldern treffen." /></label><VisibilityPicker value={visibility} onChange={setVisibility} />{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving}>{saving ? 'Wird geplant …' : 'Besuch planen'}</button></form></section></div>
 }

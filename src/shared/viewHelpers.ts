@@ -39,9 +39,18 @@ export function formatJournalDate(value: string | number | Date): { day: string,
   }
 }
 
-export function timeInputValue(value: string | null | undefined): string {
+export function timeInputValue(value: string | Date | null | undefined): string {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return ''
+    return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
+  }
   const match = String(value ?? '').match(/^([01]\d|2[0-3]):([0-5]\d)/)
   return match ? `${match[1]}:${match[2]}` : ''
+}
+
+export function dateInputValue(value: string | number | Date = new Date()): string {
+  const date = new Date(value)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 export function formatVisitTimeRange(startedAt: string | null | undefined, endedAt: string | null | undefined): string {

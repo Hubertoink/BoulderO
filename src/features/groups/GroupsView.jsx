@@ -7,7 +7,7 @@ import {
 import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet'
 import { markerIcon } from '../map/MapView.jsx'
 import { mannheimCenter } from '../../data/spots'
-import { formatFeedDate, formatPlanDate, useOutsideDismiss } from '../../shared/viewHelpers.ts'
+import { dateInputValue, formatFeedDate, formatPlanDate, timeInputValue, useOutsideDismiss } from '../../shared/viewHelpers.ts'
 import { optimizePhoto } from '../journal/JournalComposer.jsx'
 
 const accessCopy = {
@@ -150,7 +150,7 @@ function GroupEditorDialog({ group = null, spots, onClose, onSaved }) {
 function GroupEventDialog({ groupId, spots, event = null, onClose, onSaved }) {
   const start = event ? new Date(event.starts_at) : new Date(Date.now() + 24 * 60 * 60 * 1000)
   const [spotId, setSpotId] = useState(event?.spot_id ?? spots[0]?.id ?? '')
-  const [date, setDate] = useState(start.toISOString().slice(0, 10))
+  const [date, setDate] = useState(dateInputValue(start))
   const [time, setTime] = useState(start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }))
   const [endTime, setEndTime] = useState(event?.ends_at ? new Date(event.ends_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '')
   const [note, setNote] = useState(event?.note ?? '')
@@ -162,11 +162,14 @@ function GroupEventDialog({ groupId, spots, event = null, onClose, onSaved }) {
   const [spotMapOpen, setSpotMapOpen] = useState(false)
   const [error, setError] = useState('')
   async function submit(eventSubmit) {
-    eventSubmit.preventDefault(); setSaving(true); setError('')
+    eventSubmit.preventDefault(); setError('')
+    const startAt = new Date(`${date}T${time}:00`)
+    if (!Number.isFinite(startAt.getTime()) || startAt <= new Date()) return setError('Der Termin muss in der Zukunft liegen.')
+    setSaving(true)
     try {
       const payload = {
         spotId,
-        startsAt: new Date(`${date}T${time}:00`).toISOString(),
+        startsAt: startAt.toISOString(),
         endsAt: endTime ? new Date(`${date}T${endTime}:00`).toISOString() : null,
         note,
         capacity: capacity ? Number(capacity) : null,
@@ -176,7 +179,8 @@ function GroupEventDialog({ groupId, spots, event = null, onClose, onSaved }) {
       await onSaved()
     } catch (saveError) { setError(saveError.message || 'Der Termin konnte nicht gespeichert werden.') } finally { setSaving(false) }
   }
-  return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true" aria-label={event ? 'Gruppentermin bearbeiten' : 'Gruppentermin erstellen'}><div className="composer-header"><div><span className="eyebrow">Gruppentermine</span><h2>{event ? 'Termin bearbeiten' : 'Neuer Termin'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><form onSubmit={submit}><div className="form-field group-event-spot-field"><span>Halle</span><button type="button" className="message-button group-poll-spot-picker group-event-spot-picker" onClick={() => setSpotMapOpen(true)}><IconMapPin size={16} /><span>{spots.find((spot) => spot.id === spotId)?.name ?? "Halle auf Karte wählen"}</span><IconChevronRight size={16} /></button></div><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} onChange={(eventInput) => setDate(eventInput.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} onChange={(eventInput) => setTime(eventInput.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(eventInput) => setEndTime(eventInput.target.value)} /></label><label className="form-field"><span>Teilnehmerlimit <small>optional</small></span><input type="number" min="1" max="500" value={capacity} onChange={(eventInput) => setCapacity(eventInput.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(eventInput) => setNote(eventInput.target.value)} placeholder="Was steht an?" /></label>{!event && <label className="notification-switch"><span><b>Wiederkehrender Termin</b><small>Erstellt die nächsten Termine einer Serie</small></span><input type="checkbox" checked={recurring} onChange={(eventInput) => setRecurring(eventInput.target.checked)} /><i /></label>}{recurring && !event && <div className="admin-form-grid"><label className="form-field"><span>Rhythmus</span><select value={frequency} onChange={(eventInput) => setFrequency(eventInput.target.value)}><option value="weekly">Wöchentlich</option><option value="biweekly">Alle zwei Wochen</option><option value="monthly">Monatlich</option></select></label><label className="form-field"><span>Bis</span><input type="date" value={repeatUntil} onChange={(eventInput) => setRepeatUntil(eventInput.target.value)} /></label></div>}{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving || !spotId}>{saving ? 'Wird gespeichert …' : event ? 'Termin speichern' : 'Termin erstellen'}</button></form></section>{spotMapOpen && <GroupSpotMapPicker spots={spots} selectedIds={spotId ? [spotId] : []} maxSelection={1} title="Halle für Termin wählen" onApply={(selectedIds) => setSpotId(selectedIds[0] ?? "")} onClose={() => setSpotMapOpen(false)} />}</div>
+  const minimumStartTime = date === dateInputValue() ? timeInputValue(new Date()) : undefined
+  return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true" aria-label={event ? 'Gruppentermin bearbeiten' : 'Gruppentermin erstellen'}><div className="composer-header"><div><span className="eyebrow">Gruppentermine</span><h2>{event ? 'Termin bearbeiten' : 'Neuer Termin'}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><form onSubmit={submit}><div className="form-field group-event-spot-field"><span>Halle</span><button type="button" className="message-button group-poll-spot-picker group-event-spot-picker" onClick={() => setSpotMapOpen(true)}><IconMapPin size={16} /><span>{spots.find((spot) => spot.id === spotId)?.name ?? "Halle auf Karte wählen"}</span><IconChevronRight size={16} /></button></div><div className="admin-form-grid"><label className="form-field"><span>Datum</span><input required type="date" value={date} min={dateInputValue()} onChange={(eventInput) => setDate(eventInput.target.value)} /></label><label className="form-field"><span>Beginn</span><input required type="time" value={time} min={minimumStartTime} onChange={(eventInput) => setTime(eventInput.target.value)} /></label></div><label className="form-field"><span>Ende <small>optional</small></span><input type="time" value={endTime} onChange={(eventInput) => setEndTime(eventInput.target.value)} /></label><label className="form-field"><span>Teilnehmerlimit <small>optional</small></span><input type="number" min="1" max="500" value={capacity} onChange={(eventInput) => setCapacity(eventInput.target.value)} /></label><label className="form-field"><span>Notiz</span><textarea value={note} maxLength="2000" onChange={(eventInput) => setNote(eventInput.target.value)} placeholder="Was steht an?" /></label>{!event && <label className="notification-switch"><span><b>Wiederkehrender Termin</b><small>Erstellt die nächsten Termine einer Serie</small></span><input type="checkbox" checked={recurring} onChange={(eventInput) => setRecurring(eventInput.target.checked)} /><i /></label>}{recurring && !event && <div className="admin-form-grid"><label className="form-field"><span>Rhythmus</span><select value={frequency} onChange={(eventInput) => setFrequency(eventInput.target.value)}><option value="weekly">Wöchentlich</option><option value="biweekly">Alle zwei Wochen</option><option value="monthly">Monatlich</option></select></label><label className="form-field"><span>Bis</span><input type="date" min={dateInputValue()} value={repeatUntil} onChange={(eventInput) => setRepeatUntil(eventInput.target.value)} /></label></div>}{error && <p className="form-error">{error}</p>}<button className="visit-button" disabled={saving || !spotId}>{saving ? 'Wird gespeichert …' : event ? 'Termin speichern' : 'Termin erstellen'}</button></form></section>{spotMapOpen && <GroupSpotMapPicker spots={spots} selectedIds={spotId ? [spotId] : []} maxSelection={1} title="Halle für Termin wählen" onApply={(selectedIds) => setSpotId(selectedIds[0] ?? "")} onClose={() => setSpotMapOpen(false)} />}</div>
 }
 
 function GroupPollDialog({ groupId, spots, onClose, onSaved }) {
