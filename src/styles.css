@@ -466,7 +466,6 @@ body.map-dialog-open {
   --app-viewport-height: 100vh;
   --dialog-viewport-height: 100vh;
   --dialog-viewport-top: 0px;
-  --visual-viewport-bottom-offset: 0px;
 }
 
 @supports (height: 100dvh) {
@@ -584,9 +583,22 @@ body.modal-open {
 }
 
 @media (max-width: 799px), (max-height: 599px) and (orientation: landscape) {
+  html,
+  body,
+  #root {
+    height: var(--app-viewport-height);
+    min-height: var(--app-viewport-height);
+    background: var(--paper);
+  }
+
   .app-shell {
+    height: var(--app-viewport-height);
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     padding-top: calc(62px + env(safe-area-inset-top, 0px));
-    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: 0;
   }
 
   .app-header {
@@ -595,10 +607,9 @@ body.modal-open {
   }
 
   .bottom-nav {
-    top: auto;
-    right: 0;
-    bottom: 0;
-    left: 0;
+    position: relative;
+    inset: auto;
+    flex: 0 0 calc(76px + env(safe-area-inset-bottom, 0px));
     width: 100%;
     height: calc(76px + env(safe-area-inset-bottom, 0px));
     flex-direction: row;
@@ -607,7 +618,7 @@ body.modal-open {
     border-top: 1px solid var(--line);
     border-right: 0;
     padding-top: 0;
-    transform: translateY(var(--visual-viewport-bottom-offset));
+    transform: none;
   }
 
   .bottom-nav button {
@@ -619,8 +630,12 @@ body.modal-open {
 
   .view {
     width: 100%;
-    min-height: calc(var(--app-viewport-height) - 138px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+    flex: 1 1 auto;
     margin-left: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .map-view,

@@ -59,13 +59,13 @@ test('does not scroll short mobile content views', async ({ page }) => {
   }
 })
 
-test('extends the mobile navigation into a browser-controls inset', async ({ page }) => {
+test('keeps the mobile navigation inside the app instead of fixing it to the browser viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   await page.getByRole('button', { name: 'Karte entdecken' }).click()
-  await page.evaluate(() => document.documentElement.style.setProperty('--visual-viewport-bottom-offset', '64px'))
 
-  await expect.poll(() => page.locator('.bottom-nav').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(908)
+  await expect(page.locator('.bottom-nav')).toHaveCSS('position', 'relative')
+  await expect.poll(() => page.locator('.bottom-nav').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(844)
 })
 
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {
