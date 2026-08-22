@@ -22,10 +22,10 @@ function savedMapView() {
   }
   return null
 }
-export function markerIcon(visited, selected) {
+export function markerIcon(visited, selected, animateSelection = false) {
   return L.divIcon({
     className: 'spot-marker-wrapper',
-    html: `<span class="spot-marker ${visited ? 'is-visited' : ''} ${selected ? 'is-selected' : ''}">${visited ? '<span>✓</span>' : ''}</span>`,
+    html: `<span class="spot-marker ${visited ? 'is-visited' : ''} ${selected ? 'is-selected' : ''} ${animateSelection ? 'is-selection-animated' : ''}">${visited ? '<span>✓</span>' : ''}</span>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   })
@@ -276,6 +276,14 @@ function MobileMapDismiss({ onDismiss }) {
 function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, spotCenterRequest, activities, plans, showVisitMarkers, onSelectPlan, onActivityBoundsChange }) {
   const [initialView] = useState(savedMapView)
   const [spotFocusRequest, setSpotFocusRequest] = useState(0)
+  const [animatedSpotId, setAnimatedSpotId] = useState(null)
+  const animationTimer = useRef(null)
+  useEffect(() => () => window.clearTimeout(animationTimer.current), [])
+  function animateSpotSelection(spotId) {
+    window.clearTimeout(animationTimer.current)
+    setAnimatedSpotId(spotId)
+    animationTimer.current = window.setTimeout(() => setAnimatedSpotId(null), 280)
+  }
   return (
     <div className="map-frame">
       <MapContainer center={initialView ? [initialView.latitude, initialView.longitude] : mannheimCenter} zoom={initialView?.zoom ?? 13} zoomControl={false} scrollWheelZoom className="map-canvas">
@@ -296,9 +304,10 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
           <Marker
             key={spot.id}
             position={spot.position}
-            icon={markerIcon(spot.visits > 0, selectedSpot?.id === spot.id)}
+            icon={markerIcon(spot.visits > 0, selectedSpot?.id === spot.id, animatedSpotId === spot.id)}
             eventHandlers={{ click: (event) => {
               if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent)
+              animateSpotSelection(spot.id)
               if (selectedSpot?.id === spot.id) setSpotFocusRequest((current) => current + 1)
               else onSelect(spot.id)
             } }}
