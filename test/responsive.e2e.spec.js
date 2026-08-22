@@ -133,6 +133,34 @@ test('keeps a mobile map composer flush with the resized keyboard viewport', asy
   })).toEqual({ bottom: 520, marginBottom: '0px', viewportHeight: 520 })
 })
 
+test('keeps a mobile map composer above Android bottom browser controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.addInitScript(() => {
+    const viewport = new EventTarget()
+    viewport.height = 779
+    viewport.offsetTop = 0
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+  })
+  await page.goto('/')
+  await page.evaluate(() => {
+    const backdrop = document.createElement('div')
+    backdrop.className = 'composer-backdrop composer-backdrop--map keyboard-test-browser-controls'
+    backdrop.innerHTML = '<section class="journal-composer journal-composer--map"><div style="height: 800px"></div></section>'
+    document.body.append(backdrop)
+  })
+
+  await expect.poll(() => page.locator('.keyboard-test-browser-controls').evaluate((element) => {
+    const dialog = element.querySelector('.journal-composer')
+    const backdropBounds = element.getBoundingClientRect()
+    const dialogBounds = dialog.getBoundingClientRect()
+    return {
+      viewportVariable: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-height').trim(),
+      backdropBottom: Math.round(backdropBounds.bottom),
+      dialogBottom: Math.round(dialogBounds.bottom),
+    }
+  })).toEqual({ viewportVariable: '779px', backdropBottom: 779, dialogBottom: 779 })
+})
+
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
