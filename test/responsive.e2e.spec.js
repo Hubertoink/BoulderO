@@ -61,13 +61,29 @@ test('does not scroll short mobile content views', async ({ page }) => {
 
 test('hides the mobile navigation and lets the map fill the viewport while typing', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.addInitScript(() => {
+    const viewport = new EventTarget()
+    viewport.height = 844
+    viewport.offsetTop = 0
+    viewport.scale = 1
+    window.__setVisualViewportHeight = (height) => {
+      viewport.height = height
+      viewport.dispatchEvent(new Event('resize'))
+    }
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+  })
   await page.goto('/')
   await page.getByRole('button', { name: 'Karte entdecken' }).click()
 
   await expect(page.locator('.bottom-nav')).toHaveCSS('position', 'fixed')
   await page.getByPlaceholder('Hallen in Mannheim suchen').focus()
+  await page.evaluate(() => window.__setVisualViewportHeight(460))
   await expect(page.locator('.bottom-nav')).toBeHidden()
-  await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(844)
+  await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(460)
+
+  await page.evaluate(() => window.__setVisualViewportHeight(844))
+  await expect(page.getByPlaceholder('Hallen in Mannheim suchen')).toBeFocused()
+  await expect(page.locator('.bottom-nav')).toBeVisible()
 })
 
 test('marks the map field as a search instead of an autofill field', async ({ page }) => {

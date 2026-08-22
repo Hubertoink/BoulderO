@@ -64,7 +64,7 @@ import {
   optimizePhoto,
 } from './AppViews.jsx'
 import { registerServiceWorker, updateAppBadge } from './shared/pushNotifications.js'
-import { dialogViewportHeight } from './shared/viewport.js'
+import { dialogViewportHeight, keyboardViewportOpen } from './shared/viewport.js'
 
 const navItems = [
   { id: 'map', label: 'Karte', icon: IconMapPin },
@@ -73,6 +73,15 @@ const navItems = [
   { id: 'friends', label: 'Community', icon: IconUsers },
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
+
+const nonKeyboardInputTypes = new Set(['button', 'checkbox', 'color', 'date', 'file', 'hidden', 'image', 'month', 'radio', 'range', 'reset', 'submit', 'time', 'week'])
+
+function hasTextEntryFocus() {
+  const element = document.activeElement
+  if (element instanceof HTMLTextAreaElement) return true
+  if (element instanceof HTMLInputElement) return !nonKeyboardInputTypes.has(element.type)
+  return element instanceof HTMLElement && element.isContentEditable
+}
 
 const appViews = new Set(['map', 'journal', 'social', 'friends', 'groups', 'profile', 'notifications', 'badges', 'connections', 'admin', 'audit'])
 
@@ -188,18 +197,25 @@ function App() {
     function updateViewportHeight() {
       const height = `${Math.round(dialogViewportHeight(viewport?.height, window.innerHeight))}px`
       const offsetTop = `${Math.round(viewport?.offsetTop || 0)}px`
+      const keyboardOpen = keyboardViewportOpen(viewport?.height, window.innerHeight, hasTextEntryFocus())
       document.documentElement.style.setProperty('--app-viewport-height', height)
       document.documentElement.style.setProperty('--dialog-viewport-height', height)
       document.documentElement.style.setProperty('--dialog-viewport-top', offsetTop)
+      document.documentElement.classList.toggle('keyboard-open', keyboardOpen)
     }
     updateViewportHeight()
     viewport?.addEventListener('resize', updateViewportHeight)
     viewport?.addEventListener('scroll', updateViewportHeight)
     window.addEventListener('resize', updateViewportHeight)
+    document.addEventListener('focusin', updateViewportHeight)
+    document.addEventListener('focusout', updateViewportHeight)
     return () => {
       viewport?.removeEventListener('resize', updateViewportHeight)
       viewport?.removeEventListener('scroll', updateViewportHeight)
       window.removeEventListener('resize', updateViewportHeight)
+      document.removeEventListener('focusin', updateViewportHeight)
+      document.removeEventListener('focusout', updateViewportHeight)
+      document.documentElement.classList.remove('keyboard-open')
     }
   }, [])
 

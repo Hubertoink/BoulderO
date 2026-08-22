@@ -635,21 +635,21 @@ body.modal-open {
   /* A mobile keyboard needs the whole visible viewport. The global navigation
      is not useful while text is being entered, so remove it instead of
      reserving a browser-dependent area beneath it. */
-  .app-shell:has(input:focus, textarea:focus, select:focus) {
+  html.keyboard-open .app-shell {
     padding-bottom: 0;
   }
 
-  .app-shell:has(input:focus, textarea:focus, select:focus) .bottom-nav {
+  html.keyboard-open .bottom-nav {
     display: none;
   }
 
-  .app-shell:has(input:focus, textarea:focus, select:focus) .view,
-  .app-shell:has(input:focus, textarea:focus, select:focus) .content-view {
+  html.keyboard-open .view,
+  html.keyboard-open .content-view {
     min-height: calc(var(--app-viewport-height) - 62px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
 
-  .app-shell:has(input:focus, textarea:focus, select:focus) .map-view,
-  .app-shell:has(input:focus, textarea:focus, select:focus) .map-frame {
+  html.keyboard-open .map-view,
+  html.keyboard-open .map-frame {
     height: calc(var(--app-viewport-height) - 62px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
 
