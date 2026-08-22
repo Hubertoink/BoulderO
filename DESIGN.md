@@ -77,7 +77,7 @@ Bevor ein neuer Stil ergänzt wird, wird geprüft, ob einer dieser Bausteine ode
 
 ## Überschriften
 
-Über-Überschriften (Eyebrows) werden nicht als dekorative Einleitung verwendet. Überschriften stehen direkt für sich. Ein `.eyebrow` ist ausschließlich zulässig, wenn er eine eigenständige, relevante Metainformation vermittelt, etwa einen Status, eine Kategorie oder einen Zeitpunkt. Dialoge und Formulare verwenden grundsätzlich nur ihre Hauptüberschrift.
+Über-Überschriften (Eyebrows) werden nicht als dekorative Einleitung verwendet. Überschriften stehen direkt für sich; Navigationskontext wie „Profil“ oder „Community“ wird nicht zusätzlich über dem Seitentitel wiederholt. Ein `.eyebrow` ist ausschließlich zulässig, wenn er eine eigenständige, relevante Metainformation vermittelt, etwa einen Status, eine Kategorie oder einen Zeitpunkt. Dialoge und Formulare verwenden grundsätzlich nur ihre Hauptüberschrift.
 
 ## Bildsprache
 

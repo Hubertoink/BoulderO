@@ -301,6 +301,19 @@ button { cursor: pointer; }
 
 .feed-author__dropdown button { min-height: 29px; margin-top: 8px; padding: 0; border: 0; background: transparent; color: var(--yale-blue); font-size: 11px; font-weight: 750; }
 
+/* Keep the main content close to the app bar on compact screens. */
+@media (max-width: 560px) {
+  .content-view,
+  .journal-view,
+  .compact-view { padding-top: 18px; }
+
+  .social-section,
+  .feed-section { margin-top: 12px; }
+}
+
+/* Page titles stand on their own; profile is navigation context, not title content. */
+.notification-settings-view .page-intro > div > .eyebrow { display: none; }
+
 /* Map dialogs own the mobile viewport and prevent gesture chaining to Leaflet. */
 html.map-dialog-open,
 body.map-dialog-open {
@@ -593,7 +606,7 @@ body.modal-open {
 
   .content-view {
     min-height: calc(var(--app-viewport-height) - 138px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    padding: 33px max(20px, env(safe-area-inset-right, 0px)) 30px max(20px, env(safe-area-inset-left, 0px));
+    padding: 0 max(20px, env(safe-area-inset-right, 0px)) 30px max(20px, env(safe-area-inset-left, 0px));
   }
 
   .composer-backdrop {
