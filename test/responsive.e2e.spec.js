@@ -45,3 +45,16 @@ test('extends the desktop map to the viewport bottom', async ({ page }) => {
   await expect.poll(() => page.locator('.map-frame').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(768)
   await expect.poll(() => page.locator('.map-view').evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBe(768)
 })
+
+test('does not scroll short mobile content views', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Karte entdecken' }).click()
+  await page.addStyleTag({ content: 'main.view > * { display: none !important; }' })
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-height'))).toBe('844px')
+
+  for (const name of ['Tagebuch', 'Feed', 'Community']) {
+    await page.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name }).click()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBe(844)
+  }
+})

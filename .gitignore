@@ -2,6 +2,7 @@
 node_modules/
 dist/
 .vite/
+test-results/
 
 # Local configuration and secrets
 .env
@@ -15,6 +16,7 @@ Thumbs.db
 
 # Lokale Hallenexporte und persönliche Arbeitsmappen.
 assets/*.xlsx
+assets/BoulderO_B.af
 
 # Local uploads and database data
 uploads/

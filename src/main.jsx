@@ -182,10 +182,9 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (window.CSS?.supports?.('height: 100dvh')) return undefined
     const viewport = window.visualViewport
     function updateViewportHeight() {
-      const height = `${Math.round(viewport?.height || window.innerHeight)}px`
+      const height = `${viewport?.height || window.innerHeight}px`
       document.documentElement.style.setProperty('--app-viewport-height', height)
       document.documentElement.style.setProperty('--dialog-viewport-height', height)
     }
