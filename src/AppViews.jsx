@@ -1170,7 +1170,8 @@ function AdminSpotsView({
 
 
 function FeedAuthor({ entry, onOpenProfile }) {
-  return <div className="feed-author" id={`feed-entry-${entry.id}`}><button className="person-avatar feed-avatar" onClick={() => onOpenProfile?.({ id: entry.user_id, name: entry.user_name, username: entry.username, image: entry.user_image })} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><button type="button" className="feed-author__name-link" onClick={() => onOpenProfile?.({ id: entry.user_id, name: entry.user_name, username: entry.username, image: entry.user_image })}>{entry.user_name}</button><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}</div>
+  const user = { id: entry.user_id, name: entry.user_name, username: entry.username, image: entry.user_image, unique_spots: entry.author_unique_spots }
+  return <div className="feed-author" id={`feed-entry-${entry.id}`}><UserAvatar user={user} className="feed-avatar" onOpenProfile={onOpenProfile} /><span className="feed-author__identity"><button type="button" className="feed-author__name-link" onClick={() => onOpenProfile?.(user)}>{entry.user_name}</button><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}</div>
 }
 
 function FeedParticipants({ participants, onOpenProfile }) {
@@ -1711,12 +1712,13 @@ function PublicProfileView({ userId, currentUser, onOpenProfile, onOpenImage, on
   </main>
 }
 
-function UserAvatar({ user, onOpenImage, onOpenProfile }) {
+function UserAvatar({ user, onOpenImage, onOpenProfile, className = '' }) {
   const initials = user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)
   const avatar = <>{user.image ? <img src={`/api/avatars/${user.id ?? user.user_id}`} alt="" /> : initials}<RankBadge uniqueSpots={user.unique_spots} /></>
-  if (onOpenProfile) return <button type="button" className="person-avatar social-avatar social-avatar--ranked" onClick={() => onOpenProfile({ ...user, id: user.id ?? user.user_id })} aria-label={`Profil von ${user.name} öffnen`}>{avatar}</button>
-  if (user.image && onOpenImage) return <button type="button" className="person-avatar social-avatar social-avatar--ranked social-avatar--zoomable" onClick={() => onOpenImage(`/api/avatars/${user.id ?? user.user_id}`, `Profilbild von ${user.name}`)} aria-label={`Profilbild von ${user.name} vergrößern`}>{avatar}</button>
-  return <span className="person-avatar social-avatar social-avatar--ranked">{avatar}</span>
+  const classes = `person-avatar social-avatar social-avatar--ranked${className ? ` ${className}` : ''}`
+  if (onOpenProfile) return <button type="button" className={classes} onClick={() => onOpenProfile({ ...user, id: user.id ?? user.user_id })} aria-label={`Profil von ${user.name} öffnen`}>{avatar}</button>
+  if (user.image && onOpenImage) return <button type="button" className={`${classes} social-avatar--zoomable`} onClick={() => onOpenImage(`/api/avatars/${user.id ?? user.user_id}`, `Profilbild von ${user.name}`)} aria-label={`Profilbild von ${user.name} vergrößern`}>{avatar}</button>
+  return <span className={classes}>{avatar}</span>
 }
 
 function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUserFeed, onOpenProfile, onOpenImage, notificationCounts = {}, onNotificationsRead = async () => {} }) {
