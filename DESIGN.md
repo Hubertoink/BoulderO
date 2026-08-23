@@ -35,6 +35,7 @@ Alle Produkt-Icons stammen aus [Tabler Icons](https://tablericons.com/) über `@
 - Standard-Innenabstand: 16 oder 20 px
 - Karten und Bottom Sheets: 12 px Radius
 - Buttons und Inputs: 8 px Radius
+- Beitragsflächen im globalen Feed, persönlichen Feed und Tagebuch: eckige 1-px-Rahmen ohne Rundung (`--radius-content: 0px`)
 - Keine Pillen als Standardcontainer; Pillen ausschließlich für kleine Filter oder Status
 - Dünne Linien: `rgba(21, 50, 67, 0.12)`
 
@@ -86,3 +87,5 @@ Die vorhandenen Bergbilder tragen die emotionale Seite der Anwendung und werden 
 ## Privatsphäre
 
 Sichtbarkeit wird als klarer Text statt nur über ein Symbol ausgewiesen: Privat, Freunde, Follower oder Öffentlich. Diese Auswahl gehört direkt zum Tagebucheintrag und gilt ebenfalls für seine Fotos. Die soziale Ansicht zeigt keine privaten Inhalte.
+
+Profilbild und Profilbanner sind identitätsbezogene Metadaten und bleiben für angemeldete Nutzer:innen sichtbar. Die Profilsichtbarkeit schützt weiterhin Username, KPIs und persönliche/profilbezogene Einträge – nicht die Wiedererkennung eines Beitrags im Feed.

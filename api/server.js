@@ -32,7 +32,7 @@ const passwordScryptCost = 4096
 const legacyPasswordScryptCost = 16384
 const passwordScryptOptions = (cost) => ({ N: cost, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
 const appOrigin = process.env.APP_ORIGIN?.replace(/\/$/, '')
-const notificationCategories = ['messages', 'friendships', 'comments', 'reactions', 'plans', 'reminders', 'groups']
+const notificationCategories = ['messages', 'friendships', 'comments', 'reactions', 'plans', 'reminders', 'groups', 'visits']
 const notificationDefaults = {
   messages: { inAppEnabled: true, pushEnabled: true },
   friendships: { inAppEnabled: true, pushEnabled: true },
@@ -41,6 +41,7 @@ const notificationDefaults = {
   plans: { inAppEnabled: true, pushEnabled: true },
   reminders: { inAppEnabled: true, pushEnabled: true },
   groups: { inAppEnabled: true, pushEnabled: true },
+  visits: { inAppEnabled: true, pushEnabled: true },
 }
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY?.trim()
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY?.trim()
@@ -431,6 +432,27 @@ async function canViewEntry(viewerId, entryUserId, visibility) {
   })
 }
 
+async function profileAccess(viewerId, targetId) {
+  const result = await pool.query(
+    'SELECT id, name, username, image, profile_visibility, banner_image FROM users WHERE id = $1',
+    [targetId],
+  )
+  const target = result.rows[0]
+  if (!target) return null
+  if (viewerId === targetId) return { level: 'full', target, relationship: { blocked: false, first_follows_second: false, second_follows_first: false } }
+  const relationship = await relationshipState(viewerId, targetId)
+  if (relationship.blocked) return { level: 'blocked', target, relationship }
+  const friends = relationship.first_follows_second && relationship.second_follows_first
+  const level = target.profile_visibility === 'public' || target.profile_visibility === 'friends' && friends ? 'full' : 'minimal'
+  return { level, target, relationship }
+}
+
+function profileIdentity(access) {
+  const { target, level } = access
+  if (level === 'minimal') return { id: target.id, name: target.name, image: Boolean(target.image), banner_image: Boolean(target.banner_image) }
+  return { id: target.id, name: target.name, username: target.username, image: Boolean(target.image), banner_image: Boolean(target.banner_image) }
+}
+
 async function getViewableEntry(viewerId, entryId) {
   const result = await pool.query('SELECT id, user_id, visibility FROM journal_entries WHERE id = $1', [entryId])
   const entry = result.rows[0]
@@ -458,7 +480,8 @@ async function ensureNotificationPreferences(client, userId) {
        ($1, 'reactions', TRUE, FALSE),
        ($1, 'plans', TRUE, TRUE),
        ($1, 'reminders', TRUE, TRUE),
-       ($1, 'groups', TRUE, TRUE)
+       ($1, 'groups', TRUE, TRUE),
+       ($1, 'visits', TRUE, TRUE)
      ON CONFLICT (user_id, category) DO NOTHING`,
     [userId],
   )
@@ -747,7 +770,7 @@ async function currentUser(req) {
   const session = await getSession(req, authConfig)
   if (!session?.user?.email) return null
   const result = await pool.query(
-    'SELECT id, name, email, image, username, role FROM users WHERE email = $1',
+    'SELECT id, name, email, image, username, profile_visibility, banner_image, role FROM users WHERE email = $1',
     [session.user.email],
   )
   return result.rows[0] ?? null
@@ -1435,7 +1458,9 @@ app.delete('/me', requireUser, asyncRoute(async (req, res) => {
     const assets = await client.query(
       `SELECT storage_key FROM media WHERE owner_id = $1
        UNION
-       SELECT image AS storage_key FROM users WHERE id = $1 AND image IS NOT NULL`,
+       SELECT image AS storage_key FROM users WHERE id = $1 AND image IS NOT NULL
+       UNION
+       SELECT banner_image AS storage_key FROM users WHERE id = $1 AND banner_image IS NOT NULL`,
       [req.user.id],
     )
     storageKeys = assets.rows.map((row) => row.storage_key).filter(Boolean)
@@ -1463,13 +1488,14 @@ app.patch('/me', requireUser, asyncRoute(async (req, res) => {
   const input = z.object({
     name: z.string().trim().min(1).max(80).optional(),
     username: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,24}$/).optional(),
+    profileVisibility: z.enum(['public', 'friends', 'private']).optional(),
   }).parse(req.body)
   const result = await pool.query(
     `UPDATE users
-       SET name = COALESCE($2, name), username = COALESCE($3, username)
+       SET name = COALESCE($2, name), username = COALESCE($3, username), profile_visibility = COALESCE($4, profile_visibility)
      WHERE id = $1
-       RETURNING id, name, email, image, username, role`,
-    [req.user.id, input.name ?? null, input.username ?? null],
+       RETURNING id, name, email, image, username, profile_visibility, banner_image, role`,
+    [req.user.id, input.name ?? null, input.username ?? null, input.profileVisibility ?? null],
   )
   res.json({ user: result.rows[0] })
 }))
@@ -1493,7 +1519,7 @@ app.post('/me/avatar', requireUser, imageUpload.single('avatar'), asyncRoute(asy
   const storageKey = path.relative(uploadRoot, file.path).split(path.sep).join('/')
   const result = await pool.query(
     `UPDATE users SET image = $2 WHERE id = $1
-    RETURNING id, name, email, image, username, role`,
+    RETURNING id, name, email, image, username, profile_visibility, banner_image, role`,
     [req.user.id, storageKey],
   )
   res.status(201).json({ user: result.rows[0] })
@@ -1506,6 +1532,93 @@ app.get('/avatars/:userId', requireUser, asyncRoute(async (req, res) => {
   const absolutePath = path.resolve(uploadRoot, storageKey)
   if (!absolutePath.startsWith(path.resolve(uploadRoot))) return res.status(400).end()
   res.sendFile(absolutePath)
+}))
+
+app.post('/me/banner', requireUser, imageUpload.single('banner'), asyncRoute(async (req, res) => {
+  const file = req.file
+  if (!file) return res.status(400).json({ error: 'no_valid_banner' })
+  const storageKey = path.relative(uploadRoot, file.path).split(path.sep).join('/')
+  const result = await pool.query(
+    `UPDATE users SET banner_image = $2
+      WHERE id = $1
+      RETURNING id, name, email, image, username, profile_visibility, banner_image, role`,
+    [req.user.id, storageKey],
+  )
+  if (req.user.banner_image && req.user.banner_image !== storageKey) {
+    const oldPath = path.resolve(uploadRoot, req.user.banner_image)
+    if (oldPath.startsWith(path.resolve(uploadRoot))) await fs.unlink(oldPath).catch(() => undefined)
+  }
+  res.status(201).json({ user: result.rows[0] })
+}))
+
+app.delete('/me/banner', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query('UPDATE users SET banner_image = NULL WHERE id = $1 RETURNING banner_image', [req.user.id])
+  const storageKey = req.user.banner_image
+  if (result.rowCount && storageKey) {
+    const absolutePath = path.resolve(uploadRoot, storageKey)
+    if (absolutePath.startsWith(path.resolve(uploadRoot))) await fs.unlink(absolutePath).catch(() => undefined)
+  }
+  res.status(204).end()
+}))
+
+app.get('/profile-banners/:userId', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query('SELECT banner_image FROM users WHERE id = $1', [req.params.userId])
+  const storageKey = result.rows[0]?.banner_image
+  if (!storageKey) return res.status(404).end()
+  const absolutePath = path.resolve(uploadRoot, storageKey)
+  if (!absolutePath.startsWith(path.resolve(uploadRoot))) return res.status(400).end()
+  res.sendFile(absolutePath)
+}))
+
+app.get('/social/users/:userId/profile', requireUser, asyncRoute(async (req, res) => {
+  const userId = z.string().uuid().parse(req.params.userId)
+  const input = z.object({ limit: z.coerce.number().int().min(1).max(30).default(20), cursor: z.string().max(500).optional() }).parse(req.query)
+  let cursor = null
+  if (input.cursor) {
+    try { cursor = z.object({ createdAt: z.string().datetime(), id: z.string().uuid() }).parse(JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8'))) } catch { return res.status(400).json({ error: 'invalid_profile_cursor' }) }
+  }
+  const access = await profileAccess(req.user.id, userId)
+  if (!access || access.level === 'blocked') return res.status(404).json({ error: 'profile_not_found' })
+  const relationship = access.relationship
+  const profile = profileIdentity(access)
+  profile.is_friend = Boolean(relationship.first_follows_second && relationship.second_follows_first)
+  profile.following = Boolean(relationship.first_follows_second)
+  profile.follows_you = Boolean(relationship.second_follows_first)
+  profile.request_sent = Boolean((await pool.query("SELECT 1 FROM friend_requests WHERE sender_id = $1 AND recipient_id = $2 AND status = 'pending'", [req.user.id, userId])).rowCount)
+  profile.request_received = Boolean((await pool.query("SELECT 1 FROM friend_requests WHERE sender_id = $1 AND recipient_id = $2 AND status = 'pending'", [userId, req.user.id])).rowCount)
+  if (access.level !== 'full') return res.json({ access: 'minimal', user: profile, entries: [], stats: null, nextCursor: null })
+
+  const [stats, result] = await Promise.all([
+    pool.query(`WITH profile_visits AS (
+      SELECT v.id, v.spot_id FROM visits v WHERE v.user_id = $1
+      UNION
+      SELECT v.id, v.spot_id FROM visit_participants participant JOIN visits v ON v.id = participant.visit_id WHERE participant.user_id = $1 AND participant.status = 'approved'
+    ) SELECT (SELECT COUNT(*)::int FROM profile_visits) AS total_visits,
+             (SELECT COUNT(DISTINCT spot_id)::int FROM profile_visits) AS unique_spots,
+             (SELECT COUNT(*)::int FROM spots WHERE status = 'active') AS active_spots`, [userId]),
+    pool.query(`
+      SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, v.started_at, v.ended_at, v.spot_id, s.name AS spot_name, s.district,
+             u.id AS user_id, u.name AS user_name, u.username, u.image AS user_image,
+             (SELECT COUNT(*)::int FROM entry_likes l WHERE l.journal_entry_id = j.id) AS like_count,
+             EXISTS(SELECT 1 FROM entry_likes l WHERE l.journal_entry_id = j.id AND l.user_id = $2) AS liked_by_me,
+             (SELECT COUNT(*)::int FROM entry_comments c WHERE c.journal_entry_id = j.id) AS comment_count,
+             COALESCE((SELECT json_agg(json_build_object('id', participant_user.id, 'name', participant_user.name, 'username', participant_user.username, 'image', participant_user.image) ORDER BY participant_user.name)
+                         FROM visit_participants participant JOIN users participant_user ON participant_user.id = participant.user_id
+                        WHERE participant.visit_id = v.id AND participant.status = 'approved'), '[]') AS participants,
+             COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type)) FILTER (WHERE m.id IS NOT NULL), '[]') AS media
+        FROM journal_entries j JOIN visits v ON v.id = j.visit_id JOIN spots s ON s.id = v.spot_id JOIN users u ON u.id = j.user_id
+        LEFT JOIN media m ON m.journal_entry_id = j.id
+       WHERE j.user_id = $1 AND j.visibility <> 'private'
+         AND (j.visibility = 'public' OR (j.visibility = 'followers' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.followed_id = j.user_id AND f.status = 'accepted')) OR (j.visibility = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $2 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $2 AND f.status = 'accepted')))
+         AND ($3::timestamptz IS NULL OR (j.created_at, j.id) < ($3::timestamptz, $4::uuid))
+       GROUP BY j.id, v.id, s.id, u.id ORDER BY j.created_at DESC, j.id DESC LIMIT $5`,
+      [userId, req.user.id, cursor?.createdAt ?? null, cursor?.id ?? null, input.limit + 1]),
+  ])
+  const entries = result.rows.slice(0, input.limit)
+  const last = entries.at(-1)
+  const nextCursor = result.rows.length > input.limit && last ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url') : null
+  const counts = stats.rows[0]
+  res.json({ access: 'full', user: profile, stats: { total_visits: counts.total_visits, unique_spots: counts.unique_spots, discovery_percent: counts.active_spots ? Math.min(100, Math.round(counts.unique_spots / counts.active_spots * 100)) : 0 }, entries, nextCursor })
 }))
 
 app.get('/group-images/:groupId', requireUser, asyncRoute(async (req, res) => {
@@ -1779,7 +1892,11 @@ app.get('/community/groups/:groupId/members', requireUser, asyncRoute(async (req
   }
   const members = await pool.query(`
     SELECT m.user_id, m.role, m.status, m.request_note, m.joined_at, m.created_at, u.name, u.username, u.image,
-           (SELECT COUNT(DISTINCT v.spot_id)::int FROM visits v WHERE v.user_id = m.user_id) AS unique_spots
+           (SELECT COUNT(DISTINCT recorded_visit.spot_id)::int FROM (
+              SELECT v.spot_id FROM visits v WHERE v.user_id = m.user_id
+              UNION
+              SELECT shared_visit.spot_id FROM visit_participants participant JOIN visits shared_visit ON shared_visit.id = participant.visit_id WHERE participant.user_id = m.user_id AND participant.status = 'approved'
+            ) recorded_visit) AS unique_spots
       FROM community_group_members m JOIN users u ON u.id = m.user_id
      WHERE m.group_id = $1 AND (m.status = 'active' OR ($2::boolean AND m.status IN ('requested', 'invited')))
      ORDER BY CASE m.status WHEN 'requested' THEN 0 WHEN 'invited' THEN 1 ELSE 2 END, CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.name`, [groupId, isGroupManager(membership)])
@@ -2367,8 +2484,12 @@ app.get('/social/friends/summary', requireUser, asyncRoute(async (req, res) => {
 
 app.get('/social/friends', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
-    SELECT u.id, u.name, u.username, u.image,
-      (SELECT COUNT(DISTINCT v.spot_id)::int FROM visits v WHERE v.user_id = u.id) AS unique_spots,
+    SELECT u.id, u.name, CASE WHEN u.profile_visibility = 'private' THEN NULL ELSE u.username END AS username, u.image AS image,
+      CASE WHEN u.profile_visibility = 'private' THEN NULL ELSE (SELECT COUNT(DISTINCT recorded_visit.spot_id)::int FROM (
+         SELECT v.spot_id FROM visits v WHERE v.user_id = u.id
+         UNION
+         SELECT shared_visit.spot_id FROM visit_participants participant JOIN visits shared_visit ON shared_visit.id = participant.visit_id WHERE participant.user_id = u.id AND participant.status = 'approved'
+       ) recorded_visit) END AS unique_spots,
       (SELECT MAX(v.visited_at) FROM visits v WHERE v.user_id = u.id) AS last_visit_at,
       (SELECT MAX(m.created_at) FROM direct_messages m
         WHERE (m.sender_id = $1 AND m.recipient_id = u.id) OR (m.sender_id = u.id AND m.recipient_id = $1)) AS last_message_at,
@@ -2399,7 +2520,11 @@ app.get('/social/friend-suggestions', requireUser, asyncRoute(async (req, res) =
              candidate.name,
              candidate.username,
              candidate.image,
-             (SELECT COUNT(DISTINCT visit.spot_id)::int FROM visits visit WHERE visit.user_id = candidate.id) AS unique_spots,
+             (SELECT COUNT(DISTINCT recorded_visit.spot_id)::int FROM (
+                SELECT visit.spot_id FROM visits visit WHERE visit.user_id = candidate.id
+                UNION
+                SELECT shared_visit.spot_id FROM visit_participants participant JOIN visits shared_visit ON shared_visit.id = participant.visit_id WHERE participant.user_id = candidate.id AND participant.status = 'approved'
+              ) recorded_visit) AS unique_spots,
              COUNT(DISTINCT my_friends.friend_id)::int AS mutual_friend_count
         FROM my_friends
         JOIN follows from_friend
@@ -2475,7 +2600,7 @@ app.get('/social/discover', requireUser, asyncRoute(async (req, res) => {
   if (query.length < 2) return res.status(400).json({ error: 'search_query_too_short' })
   const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`
   const result = await pool.query(`
-    SELECT u.id, u.name, u.username, u.image,
+    SELECT u.id, u.name, u.username, u.image, u.profile_visibility,
       EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = u.id AND f.status = 'accepted') AS following,
       EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = u.id AND f.followed_id = $1 AND f.status = 'accepted') AS follows_you,
       (EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = u.id AND f.status = 'accepted') AND EXISTS(SELECT 1 FROM follows f WHERE f.follower_id = u.id AND f.followed_id = $1 AND f.status = 'accepted')) AS is_friend,
@@ -2488,7 +2613,7 @@ app.get('/social/discover', requireUser, asyncRoute(async (req, res) => {
       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = $1))
     ORDER BY u.name LIMIT 20
   `, [req.user.id, pattern])
-  res.json({ users: result.rows })
+  res.json({ users: result.rows.map((user) => user.profile_visibility === 'public' || user.is_friend ? user : { ...user, username: null, unique_spots: null }) })
 }))
 
 app.post('/social/friend-requests/:userId', requireUser, asyncRoute(async (req, res) => {
@@ -2590,13 +2715,36 @@ app.get('/social/feed', requireUser, asyncRoute(async (req, res) => {
   }
   const result = await pool.query(`
     SELECT j.id, j.body, j.visibility, j.created_at, v.visited_at, v.started_at, v.ended_at, v.spot_id, s.name AS spot_name, s.district,
-           u.id AS user_id, u.name AS user_name, u.username, u.image AS user_image,
+           u.id AS user_id, u.name AS user_name,
+           CASE WHEN j.user_id = $1 OR u.profile_visibility = 'public' OR (u.profile_visibility = 'friends' AND EXISTS (SELECT 1 FROM follows profile_out WHERE profile_out.follower_id = $1 AND profile_out.followed_id = u.id AND profile_out.status = 'accepted') AND EXISTS (SELECT 1 FROM follows profile_in WHERE profile_in.follower_id = u.id AND profile_in.followed_id = $1 AND profile_in.status = 'accepted')) THEN u.username ELSE NULL END AS username,
+           u.image AS user_image,
            (j.user_id = $1) AS is_owner,
-           (SELECT COUNT(DISTINCT pv.spot_id)::int FROM visits pv WHERE pv.user_id = u.id) AS author_unique_spots,
+           CASE WHEN j.user_id = $1 OR u.profile_visibility = 'public' OR (u.profile_visibility = 'friends' AND EXISTS (SELECT 1 FROM follows profile_out WHERE profile_out.follower_id = $1 AND profile_out.followed_id = u.id AND profile_out.status = 'accepted') AND EXISTS (SELECT 1 FROM follows profile_in WHERE profile_in.follower_id = u.id AND profile_in.followed_id = $1 AND profile_in.status = 'accepted')) THEN (SELECT COUNT(DISTINCT completed_visit.spot_id)::int FROM (
+              SELECT pv.spot_id FROM visits pv WHERE pv.user_id = u.id
+              UNION
+              SELECT participant_visit.spot_id
+                FROM visit_participants participant
+                JOIN visits participant_visit ON participant_visit.id = participant.visit_id
+               WHERE participant.user_id = u.id AND participant.status = 'approved'
+            ) completed_visit) ELSE NULL END AS author_unique_spots,
            (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followed_id = j.user_id AND f.status = 'accepted') AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = j.user_id AND f.followed_id = $1 AND f.status = 'accepted')) AS is_friend,
            (SELECT COUNT(*)::int FROM entry_likes l WHERE l.journal_entry_id = j.id) AS like_count,
            EXISTS(SELECT 1 FROM entry_likes l WHERE l.journal_entry_id = j.id AND l.user_id = $1) AS liked_by_me,
            (SELECT COUNT(*)::int FROM entry_comments c WHERE c.journal_entry_id = j.id) AS comment_count,
+           (SELECT COUNT(*)::int FROM visit_participants participant WHERE participant.visit_id = v.id AND participant.status = 'pending') AS pending_participant_count,
+           COALESCE((SELECT json_agg(json_build_object('id', participant_user.id, 'name', participant_user.name,
+                                                        'username', CASE WHEN participant_user.id = $1 OR participant_user.profile_visibility = 'public' OR (participant_user.profile_visibility = 'friends' AND EXISTS (SELECT 1 FROM follows profile_out WHERE profile_out.follower_id = $1 AND profile_out.followed_id = participant_user.id AND profile_out.status = 'accepted') AND EXISTS (SELECT 1 FROM follows profile_in WHERE profile_in.follower_id = participant_user.id AND profile_in.followed_id = $1 AND profile_in.status = 'accepted')) THEN participant_user.username ELSE NULL END,
+                                                         'image', participant_user.image) ORDER BY participant.requested_at)
+                       FROM visit_participants participant
+                       JOIN users participant_user ON participant_user.id = participant.user_id
+                      WHERE participant.visit_id = v.id AND participant.status = 'pending' AND j.user_id = $1), '[]') AS pending_participants,
+           (SELECT participant.status FROM visit_participants participant WHERE participant.visit_id = v.id AND participant.user_id = $1) AS participant_status,
+           COALESCE((SELECT json_agg(json_build_object('id', participant_user.id, 'name', participant_user.name,
+                                                        'username', CASE WHEN participant_user.id = $1 OR participant_user.profile_visibility = 'public' OR (participant_user.profile_visibility = 'friends' AND EXISTS (SELECT 1 FROM follows profile_out WHERE profile_out.follower_id = $1 AND profile_out.followed_id = participant_user.id AND profile_out.status = 'accepted') AND EXISTS (SELECT 1 FROM follows profile_in WHERE profile_in.follower_id = participant_user.id AND profile_in.followed_id = $1 AND profile_in.status = 'accepted')) THEN participant_user.username ELSE NULL END,
+                                                         'image', participant_user.image) ORDER BY participant_user.name)
+                       FROM visit_participants participant
+                       JOIN users participant_user ON participant_user.id = participant.user_id
+                      WHERE participant.visit_id = v.id AND participant.status = 'approved'), '[]') AS participants,
            COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type))
              FILTER (WHERE m.id IS NOT NULL), '[]') AS media
       FROM journal_entries j
@@ -2699,6 +2847,7 @@ app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
     SELECT (
       (SELECT COUNT(*) FROM entry_likes l JOIN journal_entries j ON j.id = l.journal_entry_id, last_seen WHERE j.user_id = $1 AND l.user_id <> $1 AND l.created_at > last_seen.value)
       + (SELECT COUNT(*) FROM entry_comments c JOIN journal_entries j ON j.id = c.journal_entry_id, last_seen WHERE j.user_id = $1 AND c.user_id <> $1 AND c.created_at > last_seen.value)
+      + (SELECT COUNT(*) FROM notifications n WHERE n.user_id = $1 AND n.category = 'visits' AND n.in_app_visible AND n.read_at IS NULL)
     )::int AS unread_feed,
     (SELECT COUNT(*)::int FROM notifications n WHERE n.user_id = $1 AND n.in_app_visible AND n.read_at IS NULL AND n.category IN ('plans', 'reminders')) AS unread_plans
   `, [req.user.id])
@@ -2813,7 +2962,7 @@ app.get('/social/map-plans', requireUser, asyncRoute(async (req, res) => {
 app.get('/notifications', requireUser, asyncRoute(async (req, res) => {
   const { unreadOnly } = z.object({ unreadOnly: z.coerce.boolean().optional() }).parse(req.query)
   const result = await pool.query(`
-    SELECT n.id, n.type, n.category, n.title, n.body, n.target_url, n.payload, n.created_at, n.read_at, n.planned_visit_id,
+    SELECT n.id, n.type, n.category, n.title, n.body, n.target_url, n.payload, n.created_at, n.read_at, n.planned_visit_id, n.actor_id,
            u.name AS actor_name, u.image AS actor_image,
            p.status AS plan_status, p.starts_at, s.name AS spot_name
       FROM notifications n
@@ -2830,7 +2979,7 @@ app.get('/notifications', requireUser, asyncRoute(async (req, res) => {
 app.get('/notifications/summary', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(
     `SELECT COUNT(*)::int AS unread_count,
-            COUNT(*) FILTER (WHERE category IN ('comments', 'reactions'))::int AS unread_feed,
+            COUNT(*) FILTER (WHERE category IN ('comments', 'reactions', 'visits'))::int AS unread_feed,
             COUNT(*) FILTER (WHERE category IN ('plans', 'reminders'))::int AS unread_plans,
             COUNT(*) FILTER (WHERE category = 'messages')::int AS unread_messages,
             COUNT(*) FILTER (WHERE category = 'friendships')::int AS unread_friendships,
@@ -2852,6 +3001,7 @@ app.post('/notifications/read', requireUser, asyncRoute(async (req, res) => {
     ids: z.array(z.string().uuid()).min(1).max(40).optional(),
     types: z.array(z.enum([
       'direct_message', 'friend_request', 'friend_accepted', 'entry_comment', 'entry_like',
+      'visit_participant_request', 'visit_participant_approved', 'visit_participant_declined',
       'plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder',
       'group_invitation', 'group_join_request', 'group_joined', 'group_message',
       'group_event_created', 'group_event_updated', 'group_event_cancelled',
@@ -3106,7 +3256,8 @@ app.get('/planned-visits/:planId/rsvps', requireUser, asyncRoute(async (req, res
 
 app.get('/social/users/:userId/preview', requireUser, asyncRoute(async (req, res) => {
   const userId = z.string().uuid().parse(req.params.userId)
-  if (!await areFriends(req.user.id, userId)) return res.status(403).json({ error: 'friends_required' })
+  const access = await profileAccess(req.user.id, userId)
+  if (!access || access.level !== 'full') return res.status(403).json({ error: 'profile_access_required' })
   const [user, entries, plans] = await Promise.all([
     pool.query('SELECT id, name, username, image FROM users WHERE id = $1', [userId]),
     pool.query(`
@@ -3130,10 +3281,11 @@ app.get('/social/entries/:entryId/comments', requireUser, asyncRoute(async (req,
   const entry = await getViewableEntry(req.user.id, req.params.entryId)
   if (!entry) return res.status(404).json({ error: 'entry_not_found' })
   const result = await pool.query(`
-    SELECT c.id, c.body, c.created_at, u.id AS user_id, u.name AS user_name, u.username
+    SELECT c.id, c.body, c.created_at, u.id AS user_id, u.name AS user_name, u.username,
+           (c.user_id = $2) AS is_owner
       FROM entry_comments c JOIN users u ON u.id = c.user_id
      WHERE c.journal_entry_id = $1 ORDER BY c.created_at
-  `, [entry.id])
+  `, [entry.id, req.user.id])
   res.json({ comments: result.rows })
 }))
 
@@ -3151,7 +3303,114 @@ app.post('/social/entries/:entryId/comments', requireUser, asyncRoute(async (req
     payload: { entryId: entry.id, commentId: result.rows[0].id }, title: 'Neuer Kommentar', body: `${req.user.name} hat deinen Beitrag kommentiert.`, targetUrl: `/social?entry=${encodeURIComponent(entry.id)}`,
   })
   void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
-  res.status(201).json({ comment: { ...result.rows[0], user_id: req.user.id, user_name: req.user.name, username: req.user.username } })
+  res.status(201).json({ comment: { ...result.rows[0], user_id: req.user.id, user_name: req.user.name, username: req.user.username, is_owner: true } })
+}))
+
+app.delete('/social/entries/:entryId/comments/:commentId', requireUser, asyncRoute(async (req, res) => {
+  const { entryId, commentId } = z.object({ entryId: z.string().uuid(), commentId: z.string().uuid() }).parse(req.params)
+  const entry = await getViewableEntry(req.user.id, entryId)
+  if (!entry) return res.status(404).json({ error: 'entry_not_found' })
+  const result = await pool.query(
+    'DELETE FROM entry_comments WHERE id = $1 AND journal_entry_id = $2 AND user_id = $3 RETURNING id',
+    [commentId, entry.id, req.user.id],
+  )
+  if (!result.rowCount) return res.status(404).json({ error: 'comment_not_found' })
+  res.status(204).end()
+}))
+
+app.post('/social/entries/:entryId/participants', requireUser, asyncRoute(async (req, res) => {
+  const entryId = z.string().uuid().parse(req.params.entryId)
+  const entry = await getViewableEntry(req.user.id, entryId)
+  if (!entry) return res.status(404).json({ error: 'entry_not_found' })
+  if (entry.user_id === req.user.id) return res.status(400).json({ error: 'entry_owner_cannot_participate' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const visit = await client.query(`
+      SELECT v.id, s.name AS spot_name
+        FROM journal_entries j
+        JOIN visits v ON v.id = j.visit_id
+        JOIN spots s ON s.id = v.spot_id
+       WHERE j.id = $1
+       FOR UPDATE`, [entry.id])
+    if (!visit.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'entry_not_found' }) }
+    const participant = await client.query(`
+      INSERT INTO visit_participants (visit_id, user_id, status, requested_at, decided_at)
+      VALUES ($1, $2, 'pending', NOW(), NULL)
+      ON CONFLICT (visit_id, user_id) DO UPDATE
+        SET status = 'pending', requested_at = NOW(), decided_at = NULL
+      WHERE visit_participants.status = 'declined'
+      RETURNING status`, [visit.rows[0].id, req.user.id])
+    if (!participant.rowCount) {
+      const existing = await client.query('SELECT status FROM visit_participants WHERE visit_id = $1 AND user_id = $2', [visit.rows[0].id, req.user.id])
+      await client.query('ROLLBACK')
+      return res.status(409).json({ error: 'participation_exists', status: existing.rows[0]?.status })
+    }
+    await createNotifications(client, {
+      recipientIds: [entry.user_id], actorId: req.user.id, type: 'visit_participant_request', category: 'visits',
+      payload: { entryId: entry.id, visitId: visit.rows[0].id }, title: 'Anfrage für gemeinsamen Besuch', body: `${req.user.name} möchte bei deinem Besuch im ${visit.rows[0].spot_name} dabei gewesen sein.`, targetUrl: `/social?entry=${encodeURIComponent(entry.id)}`,
+    })
+    await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+    res.status(201).json({ status: 'pending' })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally { client.release() }
+}))
+
+app.patch('/social/entries/:entryId/participants/:userId', requireUser, asyncRoute(async (req, res) => {
+  const { entryId, userId } = z.object({ entryId: z.string().uuid(), userId: z.string().uuid() }).parse(req.params)
+  const { status } = z.object({ status: z.enum(['approved', 'declined']) }).parse(req.body)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const entry = await client.query(`
+      SELECT j.id, j.user_id, v.id AS visit_id, s.name AS spot_name
+        FROM journal_entries j
+        JOIN visits v ON v.id = j.visit_id
+        JOIN spots s ON s.id = v.spot_id
+       WHERE j.id = $1
+       FOR UPDATE`, [entryId])
+    if (!entry.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'entry_not_found' }) }
+    if (entry.rows[0].user_id !== req.user.id) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'entry_owner_required' }) }
+    const participant = await client.query(
+      "UPDATE visit_participants SET status = $3, decided_at = NOW() WHERE visit_id = $1 AND user_id = $2 AND status = 'pending' RETURNING user_id",
+      [entry.rows[0].visit_id, userId, status],
+    )
+    if (!participant.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'participant_request_not_found' }) }
+    await client.query(
+      `DELETE FROM notifications
+        WHERE user_id = $1 AND actor_id = $2 AND type = 'visit_participant_request' AND payload->>'entryId' = $3`,
+      [req.user.id, userId, entry.rows[0].id],
+    )
+    await createNotifications(client, {
+      recipientIds: [userId], actorId: req.user.id, type: `visit_participant_${status}`, category: 'visits',
+      payload: { entryId: entry.rows[0].id, visitId: entry.rows[0].visit_id }, title: status === 'approved' ? 'Gemeinsamer Besuch bestätigt' : 'Anfrage nicht bestätigt', body: status === 'approved' ? `${req.user.name} hat dich als Mitboulderer:in bei ${entry.rows[0].spot_name} bestätigt.` : `${req.user.name} hat deine Anfrage für ${entry.rows[0].spot_name} abgelehnt.`, targetUrl: `/social?entry=${encodeURIComponent(entry.rows[0].id)}`,
+    })
+    await client.query('COMMIT')
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+    res.json({ status })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    throw error
+  } finally { client.release() }
+}))
+
+app.delete('/social/entries/:entryId/participants/me', requireUser, asyncRoute(async (req, res) => {
+  const entryId = z.string().uuid().parse(req.params.entryId)
+  const result = await pool.query(`
+    DELETE FROM visit_participants participant
+     USING journal_entries j
+    WHERE participant.visit_id = j.visit_id AND j.id = $1 AND participant.user_id = $2
+    RETURNING participant.status, j.user_id`, [entryId, req.user.id])
+  if (!result.rowCount) return res.status(404).json({ error: 'participant_not_found' })
+  await pool.query(
+    `DELETE FROM notifications
+      WHERE user_id = $1 AND actor_id = $2 AND type = 'visit_participant_request' AND payload->>'entryId' = $3`,
+    [result.rows[0].user_id, req.user.id, entryId],
+  )
+  res.status(204).end()
 }))
 
 app.post('/social/entries/:entryId/like', requireUser, asyncRoute(async (req, res) => {
@@ -3621,16 +3880,25 @@ app.post('/admin/spots/import/apply', ...requireSuperAdmin, spotImportUpload.sin
 
 app.get('/visits', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
-    SELECT v.id, v.spot_id, v.visited_at, v.started_at, v.ended_at, v.created_at, s.name AS spot_name,
-           s.district, j.id AS journal_entry_id, j.body, j.visibility,
-           COALESCE(json_agg(json_build_object('id', m.id, 'contentType', m.content_type))
-             FILTER (WHERE m.id IS NOT NULL), '[]') AS media
-      FROM visits v
+    WITH my_visits AS (
+      SELECT v.id, v.spot_id, v.visited_at, v.started_at, v.ended_at, v.created_at,
+             TRUE AS is_owner, FALSE AS is_participant
+        FROM visits v WHERE v.user_id = $1
+      UNION
+      SELECT v.id, v.spot_id, v.visited_at, v.started_at, v.ended_at, v.created_at,
+             FALSE AS is_owner, TRUE AS is_participant
+        FROM visit_participants participant
+        JOIN visits v ON v.id = participant.visit_id
+       WHERE participant.user_id = $1 AND participant.status = 'approved'
+    )
+    SELECT v.id, v.spot_id, v.visited_at, v.started_at, v.ended_at, v.created_at, v.is_owner, v.is_participant,
+           s.name AS spot_name, s.district, j.id AS journal_entry_id,
+           CASE WHEN v.is_owner THEN j.body ELSE NULL END AS body,
+           CASE WHEN v.is_owner THEN j.visibility ELSE NULL END AS visibility,
+           CASE WHEN v.is_owner THEN COALESCE((SELECT json_agg(json_build_object('id', m.id, 'contentType', m.content_type)) FROM media m WHERE m.journal_entry_id = j.id), '[]') ELSE '[]'::json END AS media
+      FROM my_visits v
       JOIN spots s ON s.id = v.spot_id
       LEFT JOIN journal_entries j ON j.visit_id = v.id
-      LEFT JOIN media m ON m.journal_entry_id = j.id
-     WHERE v.user_id = $1
-     GROUP BY v.id, s.id, j.id
      ORDER BY v.visited_at DESC, v.created_at DESC
   `, [req.user.id])
   res.json({ visits: result.rows })
@@ -3830,9 +4098,17 @@ app.delete('/follows/:userId', requireUser, asyncRoute(async (req, res) => {
 
 app.get('/progress', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
+    WITH my_visits AS (
+      SELECT id, spot_id FROM visits WHERE user_id = $1
+      UNION
+      SELECT v.id, v.spot_id
+        FROM visit_participants participant
+        JOIN visits v ON v.id = participant.visit_id
+       WHERE participant.user_id = $1 AND participant.status = 'approved'
+    )
     SELECT
-      (SELECT COUNT(DISTINCT spot_id)::int FROM visits WHERE user_id = $1) AS unique_spots,
-      (SELECT COUNT(*)::int FROM visits WHERE user_id = $1) AS total_visits,
+      (SELECT COUNT(DISTINCT spot_id)::int FROM my_visits) AS unique_spots,
+      (SELECT COUNT(*)::int FROM my_visits) AS total_visits,
       (SELECT COUNT(*)::int FROM follows WHERE followed_id = $1 AND status = 'accepted') AS follower_count
   `, [req.user.id])
   const progress = result.rows[0]

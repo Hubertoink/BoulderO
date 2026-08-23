@@ -56,7 +56,9 @@ import {
   NotificationSettingsView,
   PasswordDialog,
   PlannedVisitDialog,
+  ProfilePrivacyView,
   ProfileView,
+  PublicProfileView,
   RankBadge,
   SignInDialog,
   SpotCorrectionDialog,
@@ -74,7 +76,7 @@ const navItems = [
   { id: 'profile', label: 'Profil', icon: IconUserCircle },
 ]
 
-const appViews = new Set(['map', 'journal', 'social', 'friends', 'groups', 'profile', 'notifications', 'badges', 'connections', 'admin', 'audit'])
+const appViews = new Set(['map', 'journal', 'social', 'friends', 'groups', 'profile', 'privacy', 'users', 'notifications', 'badges', 'connections', 'admin', 'audit'])
 
 function viewFromLocation() {
   const segment = window.location.pathname.split('/').filter(Boolean)[0]
@@ -82,7 +84,7 @@ function viewFromLocation() {
 }
 
 function pathForView(view) {
-  return view === 'map' ? '/' : `/${view}`
+  return view === 'map' ? '/' : view === 'users' ? '/users' : `/${view}`
 }
 
 function App() {
@@ -127,6 +129,7 @@ function App() {
   const [planRefreshKey, setPlanRefreshKey] = useState(0)
   const [correctionDialogSpotId, setCorrectionDialogSpotId] = useState(null)
   const [legalDialog, setLegalDialog] = useState(null)
+  const [profileUserId, setProfileUserId] = useState(() => window.location.pathname.split('/')[1] === 'users' ? window.location.pathname.split('/')[2] ?? null : null)
 
   function navigate(view, { replace = false } = {}) {
     if (!appViews.has(view)) return
@@ -149,11 +152,22 @@ function App() {
     else navigate(fallback, { replace: true })
   }
 
+  function openUserProfile(user) {
+    if (!user?.id) return
+    if (currentUser?.id === user.id) return navigate('profile')
+    const current = window.history.state
+    const nextState = { boulderO: true, view: 'users', position: (current?.position ?? 0) + 1 }
+    window.history.pushState(nextState, '', `/users/${encodeURIComponent(user.id)}`)
+    setProfileUserId(user.id)
+    setActiveView('users')
+  }
+
   async function openNotificationTarget(targetUrl) {
     const target = new URL(targetUrl, window.location.origin)
     const view = target.pathname.split('/').filter(Boolean)[0] || 'map'
     navigate(appViews.has(view) ? view : 'map')
     window.history.replaceState(window.history.state, '', `${target.pathname}${target.search}`)
+    if (view === 'users') setProfileUserId(target.pathname.split('/')[2] ?? null)
     const messageUserId = target.searchParams.get('message')
     if (view === 'friends' && messageUserId) {
       const response = await fetch('/api/social/friends')
@@ -177,7 +191,9 @@ function App() {
       setMessageUser(null)
       setLightboxImage(null)
       if (new URLSearchParams(window.location.search).has('entry')) setFeedAuthorFilter(null)
-      setActiveView(viewFromLocation())
+      const nextView = viewFromLocation()
+      setProfileUserId(nextView === 'users' ? window.location.pathname.split('/')[2] ?? null : null)
+      setActiveView(nextView)
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
@@ -279,7 +295,7 @@ function App() {
   async function markFeedSectionRead(section) {
     const types = section === 'plans'
       ? ['plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder']
-      : ['entry_comment', 'entry_like']
+      : ['entry_comment', 'entry_like', 'visit_participant_approved', 'visit_participant_declined']
     await markNotificationTypesRead(types)
   }
   async function loadSpotCorrectionReports(user = currentUser) {
@@ -660,6 +676,31 @@ function App() {
     showToast('Profilfoto aktualisiert')
   }
 
+  async function updateProfile(input) {
+    const response = await fetch('/api/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) throw new Error('Die Profileinstellungen konnten nicht gespeichert werden.')
+    const { user } = await response.json()
+    setCurrentUser(user)
+  }
+
+  async function uploadBanner(file) {
+    if (!file) return
+    const formData = new FormData()
+    formData.append('banner', await optimizePhoto(file))
+    const response = await fetch('/api/me/banner', { method: 'POST', body: formData })
+    if (!response.ok) throw new Error('Banner konnte nicht hochgeladen werden.')
+    const { user } = await response.json()
+    setCurrentUser(user)
+    showToast('Profilbanner aktualisiert')
+  }
+
+  async function removeBanner() {
+    const response = await fetch('/api/me/banner', { method: 'DELETE' })
+    if (!response.ok) throw new Error('Banner konnte nicht entfernt werden.')
+    setCurrentUser((current) => current ? { ...current, banner_image: null } : current)
+    showToast('Profilbanner entfernt')
+  }
+
   async function toggleFollow(user) {
     const response = await fetch(`/api/follows/${user.id}`, { method: user.following ? 'DELETE' : 'POST' })
     if (!response.ok) throw new Error('Die Verbindung konnte nicht geändert werden.')
@@ -790,16 +831,18 @@ function App() {
         {currentUser ? <button className="profile-chip" onClick={() => navigate('profile')} aria-label="Profil öffnen"><span className="profile-chip__image">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><RankBadge progress={progress} /></button> : <button className="header-login" onClick={() => setAuthOpen(true)}><IconLogin2 size={18} />Anmelden</button>}
       </header>
       {!currentUser && welcomeOpen && <section className="welcome-screen"><div className="welcome-card"><img src="/Logo_Boulder_Icon.png" alt="BoulderO" /><h1>BoulderO</h1><p>Entdecke Hallen, halte Besuche fest und teile deine Boulderreise mit Freundinnen und Freunden.</p><div><button className="visit-button" onClick={() => setAuthOpen(true)}>Konto erstellen oder anmelden</button><button className="text-back" onClick={() => setWelcomeOpen(false)}>Karte entdecken</button></div></div><div className="welcome-legal-links"><button type="button" onClick={() => setLegalDialog('privacy')}>Datenschutz</button><button type="button" onClick={() => setLegalDialog('imprint')}>Impressum</button></div></section>}
-      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} spotFocusRequest={mapFocusRequest} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? (user) => { setFeedAuthorFilter(user); navigate('social') } : null} onOpenPlanFeed={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} onOpenMessage={setMessageUser} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
+      {activeView === 'map' && <MapView spots={spots} currentUser={currentUser} selectedId={selectedId} spotFocusRequest={mapFocusRequest} lastVisitedSpotId={journalVisits[0]?.spot_id} onSelectSpot={selectSpot} onVisit={openComposer} onPlan={openPlan} onReport={openCorrection} onOpenUserFeed={currentUser ? openUserProfile : null} onOpenPlanFeed={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} onOpenMessage={setMessageUser} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} isPickingSpot={isPickingSpot} onCancelPicker={() => setIsPickingSpot(false)} onMessage={showToast} />}
       {activeView === 'journal' && <JournalView spots={spots} currentUser={currentUser} journalVisits={journalVisits} onSignIn={() => setAuthOpen(true)} onOpenComposer={() => openComposer()} onOpenEntry={setSelectedEntry} onOpenFeedEntry={(entry) => { setFeedAuthorFilter(null); setFeedPlanFocus(null); navigate('social'); window.history.replaceState(window.history.state, '', `/social?entry=${encodeURIComponent(entry.journal_entry_id)}`) }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onLogPlan={openPlannedVisitJournal} onMarkPlanMissed={markPlanMissed} onOpenPlan={(plan) => { setFeedAuthorFilter(null); setFeedPlanFocus(plan); navigate('social') }} />}
-      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenNotifications={() => navigate('notifications')} notificationCount={notificationSummary.unread_count} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} />}
+      {activeView === 'profile' && <ProfileView spots={spots} currentUser={currentUser} onSignIn={() => setAuthOpen(true)} onSignOut={signOut} onDeleteAccount={deleteAccount} progress={progress} onOpenBadges={() => navigate('badges')} onOpenNotifications={() => navigate('notifications')} onOpenProfilePrivacy={() => navigate('privacy')} notificationCount={notificationSummary.unread_count} onOpenAdmin={() => navigate('admin')} onOpenAudit={() => { navigate('audit'); loadAuthAudit() }} onChangePassword={() => setPasswordDialogOpen(true)} onSuggestSpot={() => setSuggestionDialogOpen(true)} onOpenPrivacy={() => setLegalDialog('privacy')} onOpenImprint={() => setLegalDialog('imprint')} pendingSuggestionCount={spotSuggestions.length} pendingCorrectionCount={spotCorrectionReports.length} onUploadAvatar={uploadAvatar} onUploadBanner={uploadBanner} />}
+      {activeView === 'privacy' && currentUser && <ProfilePrivacyView currentUser={currentUser} onBack={() => goBack('profile')} onUpdateProfile={updateProfile} />}
+      {activeView === 'users' && currentUser && profileUserId && <PublicProfileView userId={profileUserId} currentUser={currentUser} onOpenProfile={openUserProfile} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onOpenSpot={openSpotOnMap} onOpenMessages={setMessageUser} onBack={() => goBack('friends')} />}
       {activeView === 'notifications' && currentUser && <NotificationSettingsView currentUser={currentUser} onBack={() => goBack('profile')} onUnreadChange={() => void loadNotificationSummary()} onOpenTarget={openNotificationTarget} onMessage={showToast} />}
       {activeView === 'badges' && <BadgesView progress={progress} onBack={() => goBack('profile')} />}
       {activeView === 'admin' && currentUser?.role === 'superadmin' && <AdminSpotsView spots={spots} suggestions={spotSuggestions} correctionReports={spotCorrectionReports} onCreate={createSpot} onPreviewImport={previewSpotImport} onApplyImport={applySpotImport} onUpdate={updateSpot} onDelete={deleteSpot} onApproveSuggestion={approveSpotSuggestion} onRejectSuggestion={rejectSpotSuggestion} onResolveCorrection={resolveSpotCorrection} onExport={exportSpots} onBack={() => goBack('profile')} />}
       {activeView === 'audit' && currentUser?.role === 'superadmin' && <AuditView events={authAudit} stats={adminStats} onBack={() => goBack('profile')} onOpenUsers={openRegisteredUsers} />}
-      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onOpenSpot={openSpotOnMap} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} notificationCounts={notificationSummary} onSectionRead={markFeedSectionRead} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} planRefreshKey={planRefreshKey} />}
-      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} notificationCounts={notificationSummary} onNotificationsRead={markNotificationTypesRead} />}
-      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onOpenSpot={openSpotOnMap} onOpenUserFeed={(user) => { setFeedAuthorFilter(user); navigate('social') }} onSummaryChange={setFriendSummary} notificationCounts={notificationSummary} onNotificationsRead={loadNotificationSummary} />}
+      {activeView === 'social' && <FeedView onOpenImage={(src, alt) => setLightboxImage({ src, alt })} onOpenSpot={openSpotOnMap} onOpenProfile={openUserProfile} authorFilter={feedAuthorFilter} onClearAuthorFilter={() => setFeedAuthorFilter(null)} notificationCounts={notificationSummary} onSectionRead={markFeedSectionRead} spots={spots} onLogPlan={openPlannedVisitJournal} planFocus={feedPlanFocus} onPlanFocusConsumed={() => setFeedPlanFocus(null)} planRefreshKey={planRefreshKey} />}
+      {(activeView === 'friends' || activeView === 'connections') && <FriendsView onOpenMessages={setMessageUser} onSummaryChange={setFriendSummary} onOpenGroups={() => navigate('groups')} onOpenUserFeed={openUserProfile} onOpenProfile={openUserProfile} onOpenImage={(src, alt) => setLightboxImage({ src, alt })} notificationCounts={notificationSummary} onNotificationsRead={markNotificationTypesRead} />}
+      {activeView === 'groups' && currentUser && <GroupsView spots={spots} onOpenFriends={() => navigate('friends')} onOpenSpot={openSpotOnMap} onOpenUserFeed={openUserProfile} onSummaryChange={setFriendSummary} notificationCounts={notificationSummary} onNotificationsRead={loadNotificationSummary} />}
       <nav className="bottom-nav" aria-label="Hauptnavigation">
         {navItems.map(({ id, label, icon: Icon }) => { const communityNotifications = Number(notificationSummary.unread_friends) + Number(notificationSummary.unread_groups); const feedNotifications = Number(notificationSummary.unread_feed) + Number(notificationSummary.unread_plans); const active = id === 'friends' ? ['friends', 'groups', 'connections'].includes(activeView) : activeView === id; const showProfileAvatar = id === 'profile' && currentUser; return <button key={id} className={active ? 'is-active' : ''} onClick={() => navigate(id)}><span className="nav-icon">{showProfileAvatar && <span className="nav-profile-avatar">{currentUser.image ? <img src={`/api/avatars/${currentUser.id}`} alt="" /> : currentUser.name.split(' ').map((name) => name[0]).join('').slice(0, 2)}<RankBadge progress={progress} /></span>}<Icon className={showProfileAvatar ? 'nav-profile-symbol' : undefined} size={20} />{id === 'friends' && communityNotifications > 0 && <b className="nav-badge">{communityNotifications > 9 ? '9+' : communityNotifications}</b>}{id === 'social' && feedNotifications > 0 && <b className="nav-badge">{feedNotifications > 9 ? '9+' : feedNotifications}</b>}</span><span>{label}</span></button> })}
       </nav>

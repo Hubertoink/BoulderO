@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   "emailVerified" TIMESTAMPTZ,
   image TEXT,
   username TEXT UNIQUE,
+    profile_visibility TEXT NOT NULL DEFAULT 'friends' CHECK (profile_visibility IN ('public', 'friends', 'private')),
+  banner_image TEXT,
   role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'superadmin')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

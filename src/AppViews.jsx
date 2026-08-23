@@ -35,6 +35,10 @@ function visibilityLabel(value) {
   return ({ private: 'Privat', friends: 'Freunde', followers: 'Follower', public: 'Community' })[value] ?? 'Privat'
 }
 
+function DeleteConfirmDialog({ title, description, confirmLabel, saving = false, onClose, onConfirm }) {
+  return <div className="composer-backdrop delete-confirm-backdrop"><section className="journal-composer delete-confirm-dialog" role="dialog" aria-modal="true" aria-label={title}><div className="composer-header"><div><span className="eyebrow">Löschen</span><h2>{title}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} disabled={saving} aria-label="Schließen"><IconX size={19} /></button></div><p>{description}</p><div className="delete-confirm-dialog__actions"><button type="button" className="text-back" disabled={saving} onClick={onClose}>Abbrechen</button><button type="button" className="danger" disabled={saving} onClick={onConfirm}>{saving ? 'Wird gelöscht …' : confirmLabel}</button></div></section></div>
+}
+
 function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
   const [body, setBody] = useState(entry.body ?? '')
   const [visibility, setVisibility] = useState(entry.visibility ?? 'private')
@@ -88,7 +92,7 @@ function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
     })
   }
 
-  return <div className="composer-backdrop"><section className="journal-composer entry-dialog" role="dialog" aria-modal="true" aria-label="Tagebucheintrag">
+  return <><div className="composer-backdrop"><section className="journal-composer entry-dialog" role="dialog" aria-modal="true" aria-label="Tagebucheintrag">
     <div className="composer-header"><div><span className="eyebrow">{formatJournalDate(entry.visited_at).day} {formatJournalDate(entry.visited_at).month} · {visibilityLabel(entry.visibility)}</span><h2>{entry.spot_name}</h2><p>{entry.district}</p></div><div className="entry-dialog__header-actions"><div className="friend-more-menu" ref={menuRef}><button type="button" className="icon-button ui-icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Eintrag verwalten"><IconDots size={19} /></button>{menuOpen && <div className="friend-more-menu__popover"><button type="button" className="danger" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}><IconTrash size={16} />Eintrag löschen</button></div>}</div><button className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div></div>
     <label className="form-field"><span>Datum</span><input type="date" value={visitedAt} onChange={(event) => setVisitedAt(event.target.value)} /></label>
     <div className="filter-date-row"><label className="form-field"><span>Von <small>optional</small></span><input type="time" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} /></label><label className="form-field"><span>Bis <small>optional</small></span><input type="time" value={endedAt} onChange={(event) => setEndedAt(event.target.value)} /></label></div>
@@ -97,8 +101,7 @@ function JournalEntryDialog({ entry, onClose, onUpdate, onDelete }) {
     {media.length + newFiles.length < 6 && <label className="add-entry-photo"><IconPlus size={17} />Foto oder Clip hinzufügen<input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/webm,video/quicktime" multiple onChange={addMedia} /></label>}
     <VisibilityPicker value={visibility} onChange={setVisibility} />
     {error && <p className="form-error">{error}</p>}<p className="field-help">Änderungen an Fotos und Clips werden erst mit „Änderungen speichern“ übernommen.</p><button className="visit-button" disabled={saving} onClick={save}>{saving ? 'Wird gespeichert …' : 'Änderungen speichern'}</button>
-    {confirmDelete && <div className="entry-delete-confirm"><p><b>Eintrag wirklich löschen?</b><br />Text, Medien und Reaktionen auf diesen Eintrag werden dauerhaft entfernt.</p><div><button type="button" className="text-back" disabled={saving} onClick={() => setConfirmDelete(false)}>Abbrechen</button><button type="button" className="danger" disabled={saving} onClick={removeEntry}>{saving ? 'Wird gelöscht …' : 'Eintrag löschen'}</button></div></div>}
-  </section></div>
+  </section></div>{confirmDelete && <DeleteConfirmDialog title="Eintrag wirklich löschen?" description="Text, Medien und Reaktionen auf diesen Eintrag werden dauerhaft entfernt." confirmLabel="Eintrag löschen" saving={saving} onClose={() => setConfirmDelete(false)} onConfirm={removeEntry} />}</>
 }
 
 function JournalFilterDialog({ halls, years, months, filters, onApply, onClose }) {
@@ -214,12 +217,12 @@ function JournalView({ spots, currentUser, journalVisits, onSignIn, onOpenCompos
         {visitGroups.map(([monthKey, visits]) => <section className="journal-entry-group" key={monthKey}><div className="journal-entry-group__heading"><h3>{journalMonthLabel(monthKey)}</h3><span>{visits.length}</span></div>{visits.map((visit) => {
           const date = formatJournalDate(visit.visited_at)
           return <div className="journal-entry-row" key={visit.id}>
-            <button type="button" className="journal-entry" onClick={() => onOpenEntry(visit)}>
+            <button type="button" className={`journal-entry${visit.is_participant ? ' journal-entry--shared' : ''}`} disabled={visit.is_participant} onClick={() => onOpenEntry(visit)}>
               <div className="journal-entry__date"><b>{date.day}</b><span>{date.month}</span></div>
-              <div className="journal-entry__main"><h3>{visit.spot_name}</h3><small className="entry-meta">{visit.district} · {visibilityLabel(visit.visibility)}{formatVisitTimeRange(visit.started_at, visit.ended_at) ? ` · ${formatVisitTimeRange(visit.started_at, visit.ended_at)}` : ''}</small>{visit.body && <p className="journal-entry__body">{visit.body}</p>}{visit.media?.length > 0 && <div className="journal-entry__photos">{visit.media.map((media) => isVideoMedia(media) ? <span className="journal-entry__video" key={media.id}><video src={`/api/media/${media.id}`} muted playsInline preload="metadata" /><IconVideo size={14} /></span> : <img key={media.id} onClick={(event) => { event.stopPropagation(); onOpenImage(`/api/media/${media.id}`, `Foto von ${visit.spot_name}`) }} src={`/api/media/${media.id}`} alt="Tagebucheintrag" />)}</div>}</div>
+              <div className="journal-entry__main"><h3>{visit.spot_name}</h3><small className="entry-meta">{visit.district} · {visit.is_participant ? 'Gemeinsamer Besuch' : visibilityLabel(visit.visibility)}{formatVisitTimeRange(visit.started_at, visit.ended_at) ? ` · ${formatVisitTimeRange(visit.started_at, visit.ended_at)}` : ''}</small>{visit.body && <p className="journal-entry__body">{visit.body}</p>}{visit.media?.length > 0 && <div className="journal-entry__photos">{visit.media.map((media) => isVideoMedia(media) ? <span className="journal-entry__video" key={media.id}><video src={`/api/media/${media.id}`} muted playsInline preload="metadata" /><IconVideo size={14} /></span> : <img key={media.id} onClick={(event) => { event.stopPropagation(); onOpenImage(`/api/media/${media.id}`, `Foto von ${visit.spot_name}`) }} src={`/api/media/${media.id}`} alt="Tagebucheintrag" />)}</div>}</div>
               <IconChevronRight size={19} />
             </button>
-            {visit.journal_entry_id && <button type="button" className="journal-entry-feed" onClick={() => onOpenFeedEntry(visit)} aria-label={`${visit.spot_name} im Feed ansehen`} title="Im Feed ansehen"><IconMessageCircle size={18} /></button>}
+            {visit.journal_entry_id && !visit.is_participant && <button type="button" className="journal-entry-feed" onClick={() => onOpenFeedEntry(visit)} aria-label={`${visit.spot_name} im Feed ansehen`} title="Im Feed ansehen"><IconMessageCircle size={18} /></button>}
           </div>
         })}</section>)}
       </section>
@@ -322,7 +325,7 @@ function AccountDeletionDialog({ username, onClose, onDelete }) {
   return <div className="composer-backdrop"><section className="journal-composer account-deletion-dialog" role="dialog" aria-modal="true" aria-label="Konto löschen"><div className="composer-header"><div><span className="eyebrow">Konto</span><h2>Konto endgültig löschen</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Dein Profil, Besuche, Fotos, Planungen und persönlichen Daten werden dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.</p><form className="admin-login" onSubmit={submit}><label className="form-field"><span>Zur Bestätigung <b>LOESCHEN</b> eingeben</span><input required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoCapitalize="characters" /></label>{error && <p className="form-error">{error}</p>}<div className="account-deletion-dialog__actions"><button type="button" className="text-back" onClick={onClose}>Abbrechen</button><button type="submit" className="danger" disabled={confirmation !== 'LOESCHEN' || saving}>{saving ? 'Wird gelöscht …' : `@${username} löschen`}</button></div></form></section></div>
 }
 
-function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenNotifications, notificationCount, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar }) {
+function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount, onOpenBadges, onOpenNotifications, onOpenProfilePrivacy, notificationCount, onOpenAdmin, onOpenAudit, onChangePassword, onSuggestSpot, onOpenPrivacy, onOpenImprint, pendingSuggestionCount, pendingCorrectionCount, progress, onUploadAvatar, onUploadBanner }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [avatarFile, setAvatarFile] = useState(null)
   if (!currentUser) {
@@ -344,13 +347,14 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
   return (
     <main className="view content-view profile-view">
       <div className="profile-content">
-        <section className="profile-hero">
+        <section className="profile-hero" style={currentUser.banner_image ? { backgroundImage: `url("/api/profile-banners/${currentUser.id}")` } : undefined}>
           <div className="profile-hero__shade" />
           <div className="profile-hero__content">
             <ProfileAvatar user={currentUser} progress={progress} onChooseFile={setAvatarFile} />
             <h1>{currentUser.name}</h1>
             <p>@{currentUser.username ?? 'boulderfan'}</p>
           </div>
+          <label className="profile-banner-picker">Banner ändern<input type="file" accept="image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; try { await onUploadBanner(file) } catch { /* toast feedback is handled by the parent */ } }} /></label>
         </section>
         <section className="rank-card">
           <div className="rank-card__icon"><IconTrophy size={22} /></div>
@@ -362,6 +366,7 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
           <div className="profile-stats"><div><strong>{uniqueSpots}</strong><span>Hallen entdeckt</span></div><div><strong>{total}</strong><span>Besuche</span></div><div><strong>{progress?.follower_count ?? 0}</strong><span>Follower</span></div></div>
         </section>
         <section className="profile-actions">
+          <button onClick={onOpenProfilePrivacy}><IconLock size={18} /><span><b>Profil & Privatsphäre</b><small>Wer darf dein Profil sehen?</small></span><IconChevronRight size={18} /></button>
           <button onClick={onOpenBadges}><IconSparkles size={18} /><span><b>Abzeichen ansehen</b><small>Deine Meilensteine und nächsten Ziele</small></span><IconChevronRight size={18} /></button>
           <button onClick={onOpenNotifications}><IconBell size={18} /><span><b>Benachrichtigungen</b><small>Hinweise und Push-Einstellungen</small></span>{notificationCount > 0 && <b className="admin-count-badge">{notificationCount > 99 ? '99+' : notificationCount}</b>}<IconChevronRight size={18} /></button>
           <button onClick={onSuggestSpot}><IconMapPin size={18} /><span><b>Halle melden</b><small>Schlage eine Boulderhalle zur Prüfung vor</small></span><IconChevronRight size={18} /></button>
@@ -379,6 +384,39 @@ function ProfileView({ spots, currentUser, onSignIn, onSignOut, onDeleteAccount,
   )
 }
 
+const profileVisibilityOptions = [
+  { value: 'private', label: 'Niemand', description: 'Nur dein Name', icon: IconLock },
+  { value: 'friends', label: 'Freund:innen', description: 'Dein Netzwerk', icon: IconUsers },
+  { value: 'public', label: 'Öffentlich', description: 'Alle in BoulderO', icon: IconWorld },
+]
+
+function ProfilePrivacyView({ currentUser, onBack, onUpdateProfile }) {
+  const [value, setValue] = useState(currentUser?.profile_visibility ?? 'friends')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  async function save(event) {
+    event.preventDefault()
+    setSaving(true); setError(''); setSaved(false)
+    try { await onUpdateProfile({ profileVisibility: value }); setSaved(true) }
+    catch (saveError) { setError(saveError.message || 'Die Profileinstellung konnte nicht gespeichert werden.') }
+    finally { setSaving(false) }
+  }
+  return <main className="view content-view compact-view profile-privacy-view">
+    <div className="profile-privacy-view__content">
+      <button type="button" className="text-back profile-public__back" onClick={onBack}><IconChevronLeft size={17} />Zurück zum Profil</button>
+      <form className="profile-privacy-card" onSubmit={save}>
+        <div className="page-intro"><span className="eyebrow">Profil</span><h1>Privatsphäre</h1><p>Lege fest, wie viel andere über dich sehen dürfen.</p></div>
+        <fieldset className="visibility-picker profile-visibility-picker"><legend>Profil sichtbar für</legend><div role="radiogroup" aria-label="Profil-Sichtbarkeit">{profileVisibilityOptions.map(({ value: optionValue, label, description, icon: Icon }) => <button key={optionValue} type="button" role="radio" aria-checked={value === optionValue} className={value === optionValue ? 'is-selected' : ''} onClick={() => { setValue(optionValue); setSaved(false) }}><Icon size={22} /><span>{label}</span><small>{description}</small></button>)}</div></fieldset>
+        <p className="field-help">Deine Tagebucheinträge haben zusätzlich eine eigene Sichtbarkeit. Private Einträge erscheinen nie auf deiner Profilseite.</p>
+        {error && <p className="form-error">{error}</p>}
+        {saved && <p className="form-notice">Privatsphäre gespeichert.</p>}
+        <div className="profile-privacy-card__actions"><button type="button" className="text-back" onClick={onBack}>Abbrechen</button><button type="submit" className="visit-button" disabled={saving}>{saving ? 'Wird gespeichert …' : 'Auswahl speichern'}</button></div>
+      </form>
+    </div>
+  </main>
+}
+
 const notificationCategoryCopy = {
   messages: ['Nachrichten', 'Direkte Nachrichten von Freund:innen'],
   friendships: ['Freundschaften', 'Anfragen und bestätigte Freundschaften'],
@@ -387,6 +425,7 @@ const notificationCategoryCopy = {
   plans: ['Planungen', 'Zusagen, Änderungen und Absagen'],
   reminders: ['Erinnerungen', 'Bevorstehende Boulderplanungen'],
   groups: ['Gruppen', 'Einladungen, Termine, Abstimmungen und Gruppenchat'],
+  visits: ['Gemeinsame Besuche', 'Anfragen und Bestätigungen für gemeinsame Boulder-Sessions'],
 }
 
 function NotificationSettingsView({ currentUser, onBack, onUnreadChange, onOpenTarget, onMessage }) {
@@ -499,9 +538,37 @@ function NotificationSettingsView({ currentUser, onBack, onUnreadChange, onOpenT
     void onOpenTarget(notification.target_url)
   }
 
+  async function decideVisitParticipation(notification, status) {
+    const entryId = notification.payload?.entryId
+    if (!entryId || !notification.actor_id) return setError('Die Anfrage konnte nicht zugeordnet werden.')
+    setSaving(true); setError('')
+    try {
+      const response = await fetch(`/api/social/entries/${entryId}/participants/${notification.actor_id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })
+      if (!response.ok) throw new Error('Die Anfrage konnte nicht aktualisiert werden.')
+      setNotifications((current) => current.filter((item) => item.id !== notification.id))
+      onUnreadChange(notifications.filter((item) => item.id !== notification.id && !item.read_at).length)
+    } catch (decisionError) {
+      setError(decisionError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const unreadCount = notifications.filter((item) => !item.read_at).length
   const pushAvailable = supportsPushNotifications() && push.configured
-  return <main className="view content-view compact-view notification-settings-view"><div className="page-intro"><div><span className="eyebrow">Profil</span><h1>Benachrichtigungen</h1><p>Lege fest, welche Hinweise du in BoulderO und auf diesem Gerät erhältst.</p></div></div>{error && <p className="form-error">{error}</p>}{loading ? <p className="journal-empty">Wird geladen …</p> : <><section className="notification-inbox"><div className="section-heading"><div><h2>Neu für dich</h2><span>{unreadCount} ungelesen</span></div>{unreadCount > 0 && <button type="button" onClick={markAllRead}>Alle gelesen</button>}</div>{!notifications.length && <p className="journal-empty">Keine Benachrichtigungen vorhanden.</p>}{notifications.slice(0, 5).map((notification) => <button type="button" className={`notification-item${notification.read_at ? '' : ' is-unread'}`} key={notification.id} onClick={() => void openNotification(notification)}><IconBell size={18} /><span><b>{notification.title}</b><small>{notification.body}</small><time>{formatFeedDate(notification.created_at)}</time></span><IconChevronRight size={17} /></button>)}</section><section className="notification-settings"><div className="section-heading"><div><h2>Dieses Gerät</h2><span>{pushEnabled ? 'Push aktiv' : 'Push aus'}</span></div></div><p className="notification-settings__copy">Die Freigabe erfolgt über die Systemeinstellung deines Geräts. Sie wird erst nach deinem Klick angefragt.</p><label className="notification-switch"><span><b>Push-Benachrichtigungen</b><small>{!push.configured ? 'Der Push-Dienst wird noch eingerichtet.' : !supportsPushNotifications() ? 'Dieses Gerät unterstützt Web Push nicht.' : pushEnabled ? 'Auf diesem Gerät aktiv' : 'Auf diesem Gerät deaktiviert'}</small></span><input type="checkbox" checked={pushEnabled} disabled={saving || !pushAvailable && !pushEnabled} onChange={(event) => void setPushState(event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Inhalte in der Vorschau</b><small>Namen und Hinweise in Systembenachrichtigungen anzeigen</small></span><input type="checkbox" checked={contentPreviewEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('contentPreviewEnabled', event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Badge am App-Icon</b><small>Ungelesene Hinweise am installierten App-Symbol zeigen</small></span><input type="checkbox" checked={badgeEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('badgeEnabled', event.target.checked)} /><i /></label></section><section className="notification-settings"><div className="section-heading"><div><h2>Welche Hinweise möchtest du erhalten?</h2><span>{saving ? 'Wird gespeichert …' : 'Kontoweite Einstellung'}</span></div></div><div className="notification-preference-list">{preferences.map((preference) => { const copy = notificationCategoryCopy[preference.category] ?? [preference.category, '']; return <article key={preference.category}><div><b>{copy[0]}</b><small>{copy[1]}</small></div><label><span>In App</span><input type="checkbox" checked={preference.inAppEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'inAppEnabled')} /></label><label><span>Push</span><input type="checkbox" checked={preference.pushEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'pushEnabled')} /></label></article> })}</div></section></>}<button className="text-back" onClick={onBack}>Zurück zum Profil</button></main>
+  return <main className="view content-view compact-view notification-settings-view">
+    <div className="page-intro"><div><span className="eyebrow">Profil</span><h1>Benachrichtigungen</h1><p>Lege fest, welche Hinweise du in BoulderO und auf diesem Gerät erhältst.</p></div></div>
+    {error && <p className="form-error">{error}</p>}
+    {loading ? <p className="journal-empty">Wird geladen …</p> : <>
+      <section className="notification-inbox"><div className="section-heading"><div><h2>Neu für dich</h2><span>{unreadCount} ungelesen</span></div>{unreadCount > 0 && <button type="button" onClick={markAllRead}>Alle gelesen</button>}</div>
+        {!notifications.length && <p className="journal-empty">Keine Benachrichtigungen vorhanden.</p>}
+        {notifications.slice(0, 5).map((notification) => notification.type === 'visit_participant_request' ? <article className={`notification-item notification-item--action${notification.read_at ? '' : ' is-unread'}`} key={notification.id}><IconBell size={18} /><span><b>{notification.title}</b><small>{notification.body}</small><time>{formatFeedDate(notification.created_at)}</time><div><button type="button" disabled={saving} onClick={() => void decideVisitParticipation(notification, 'declined')}>Ablehnen</button><button type="button" disabled={saving} onClick={() => void decideVisitParticipation(notification, 'approved')}>Bestätigen</button></div></span></article> : <button type="button" className={`notification-item${notification.read_at ? '' : ' is-unread'}`} key={notification.id} onClick={() => void openNotification(notification)}><IconBell size={18} /><span><b>{notification.title}</b><small>{notification.body}</small><time>{formatFeedDate(notification.created_at)}</time></span><IconChevronRight size={17} /></button>)}
+      </section>
+      <section className="notification-settings"><div className="section-heading"><div><h2>Dieses Gerät</h2><span>{pushEnabled ? 'Push aktiv' : 'Push aus'}</span></div></div><p className="notification-settings__copy">Die Freigabe erfolgt über die Systemeinstellung deines Geräts. Sie wird erst nach deinem Klick angefragt.</p><label className="notification-switch"><span><b>Push-Benachrichtigungen</b><small>{!push.configured ? 'Der Push-Dienst wird noch eingerichtet.' : !supportsPushNotifications() ? 'Dieses Gerät unterstützt Web Push nicht.' : pushEnabled ? 'Auf diesem Gerät aktiv' : 'Auf diesem Gerät deaktiviert'}</small></span><input type="checkbox" checked={pushEnabled} disabled={saving || !pushAvailable && !pushEnabled} onChange={(event) => void setPushState(event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Inhalte in der Vorschau</b><small>Namen und Hinweise in Systembenachrichtigungen anzeigen</small></span><input type="checkbox" checked={contentPreviewEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('contentPreviewEnabled', event.target.checked)} /><i /></label><label className="notification-switch"><span><b>Badge am App-Icon</b><small>Badge am installierten App-Symbol zeigen</small></span><input type="checkbox" checked={badgeEnabled} disabled={saving} onChange={(event) => void setDeviceSetting('badgeEnabled', event.target.checked)} /><i /></label></section>
+      <section className="notification-settings"><div className="section-heading"><div><h2>Welche Hinweise möchtest du erhalten?</h2><span>{saving ? 'Wird gespeichert …' : 'Kontoweite Einstellung'}</span></div></div><div className="notification-preference-list">{preferences.map((preference) => { const copy = notificationCategoryCopy[preference.category] ?? [preference.category, '']; return <article key={preference.category}><div><b>{copy[0]}</b><small>{copy[1]}</small></div><label><span>In App</span><input type="checkbox" checked={preference.inAppEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'inAppEnabled')} /></label><label><span>Push</span><input type="checkbox" checked={preference.pushEnabled} disabled={saving} onChange={() => togglePreference(preference.category, 'pushEnabled')} /></label></article> })}</div></section>
+    </>}
+    <button className="text-back" onClick={onBack}>Zurück zum Profil</button>
+  </main>
 }
 
 function LegalDialog({ kind, onClose }) {
@@ -1102,15 +1169,56 @@ function AdminSpotsView({
 }
 
 
-function FeedAuthor({ entry }) {
-  const [expanded, setExpanded] = useState(false)
-  const authorRef = useOutsideDismiss(expanded, () => setExpanded(false))
-  function openDiscover() {
-    const current = window.history.state
-    window.history.pushState({ boulderO: true, view: 'friends', position: (current?.position ?? 0) + 1 }, '', `/friends?discover=${encodeURIComponent(entry.username)}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
+function FeedAuthor({ entry, onOpenProfile }) {
+  return <div className="feed-author" id={`feed-entry-${entry.id}`}><button className="person-avatar feed-avatar" onClick={() => onOpenProfile?.({ id: entry.user_id, name: entry.user_name, username: entry.username, image: entry.user_image })} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><button type="button" className="feed-author__name-link" onClick={() => onOpenProfile?.({ id: entry.user_id, name: entry.user_name, username: entry.username, image: entry.user_image })}>{entry.user_name}</button><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}</div>
+}
+
+function FeedParticipants({ participants, onOpenProfile }) {
+  const [open, setOpen] = useState(false)
+  const ref = useOutsideDismiss(open, () => setOpen(false))
+  const label = participants.length === 1 ? '1 Person war dabei' : `${participants.length} Personen waren dabei`
+  if (participants.length === 1) {
+    const participant = participants[0]
+    return <button type="button" className="feed-participants feed-participants--single" onClick={() => onOpenProfile?.(participant)} title={`${participant.name} öffnen`}><span><span className="feed-participants__avatar">{participant.image ? <img src={`/api/avatars/${participant.id}`} alt="" /> : participant.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span></span><small>{label}</small></button>
   }
-  return <div className="feed-author" id={`feed-entry-${entry.id}`} ref={authorRef}><button className="person-avatar feed-avatar" onClick={() => setExpanded((value) => !value)} aria-label={`Profil von ${entry.user_name} anzeigen`}>{entry.user_image ? <img src={`/api/avatars/${entry.user_id}`} alt="" /> : entry.user_name.split(' ').map((part) => part[0]).join('')}<RankBadge uniqueSpots={entry.author_unique_spots} /></button><span className="feed-author__identity"><b>{entry.user_name}</b><time>{formatFeedDate(entry.visited_at)}</time></span>{entry.is_owner && <span className="feed-author__own">Dein Beitrag</span>}{expanded && <div className="feed-author__dropdown"><b>{entry.user_name}</b><small>@{entry.username} · {visibilityLabel(entry.visibility)}</small>{!entry.is_owner && <button type="button" onClick={openDiscover}>In Freunde öffnen</button>}</div>}</div>
+  return <div className="feed-participants" ref={ref} title={label}><div>{participants.slice(0, 4).map((participant, index) => <button type="button" key={participant.id} className="feed-participants__avatar" style={{ zIndex: 4 - index }} onClick={() => onOpenProfile?.(participant)} aria-label={`Profil von ${participant.name} öffnen`}>{participant.image ? <img src={`/api/avatars/${participant.id}`} alt="" /> : participant.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</button>)}</div><button type="button" className="feed-participants__label" onClick={() => setOpen((value) => !value)}>{label}</button>{open && <div className="feed-participants__popover">{participants.map((participant) => <button type="button" key={participant.id} onClick={() => { setOpen(false); onOpenProfile?.(participant) }}><span className="person-avatar">{participant.image ? <img src={`/api/avatars/${participant.id}`} alt="" /> : participant.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><b>{participant.name}</b><small>Profil öffnen</small></span><IconChevronRight size={16} /></button>)}</div>}</div>
+}
+
+function FeedVisitSummary({ entry, onOpenSpot, onOpenProfile }) {
+  const participants = Array.isArray(entry.participants) ? entry.participants.filter((participant) => participant?.name) : []
+  const participantLabel = participants.length === 0 ? '' : participants.length === 1 ? participants[0].name : participants.length === 2 ? `${participants[0].name} und ${participants[1].name}` : `${participants[0].name} und ${participants.length - 1} weiteren`
+  return <><h3 className="feed-entry__visit">{entry.user_name} war{participants.length > 0 ? ` mit ${participantLabel}` : ''} bei <button type="button" className="feed-entry__spot-link" onClick={() => onOpenSpot?.(entry.spot_id)}>{entry.spot_name}</button></h3>{participants.length > 0 && <FeedParticipants participants={participants} onOpenProfile={onOpenProfile} />}</>
+}
+
+function FeedParticipationButton({ entry, saving, onRequest, onRemove }) {
+  const status = entry.participant_status
+  const label = saving ? 'Teilnahme wird aktualisiert' : status === 'pending' ? 'Anfrage zurückziehen' : status === 'approved' ? 'Nicht mehr dabei' : status === 'declined' ? 'Anfrage abgelehnt' : 'Auch dabei gewesen'
+  const Icon = status === 'approved' ? IconUserCheck : status === 'pending' || status === 'declined' ? IconX : IconUserPlus
+  return <button type="button" className={`feed-participation-action${status === 'approved' ? ' is-active' : ''}`} disabled={saving || status === 'declined'} onClick={() => void (status ? onRemove(entry) : onRequest(entry))} aria-label={label} title={label}><Icon size={19} /></button>
+}
+
+function FeedParticipantRequests({ entry, saving, onDecide }) {
+  const [open, setOpen] = useState(false)
+  const requestsRef = useOutsideDismiss(open, () => setOpen(false))
+  const participants = Array.isArray(entry.pending_participants) ? entry.pending_participants.filter((participant) => participant?.id && participant?.name) : []
+  const count = Number(entry.pending_participant_count) || participants.length
+  if (!count) return null
+  const label = `${count} offene Anfrage${count === 1 ? '' : 'n'} für einen gemeinsamen Besuch`
+  async function decide(participant, status) {
+    const resolved = await onDecide(entry, participant, status)
+    if (resolved && participants.length === 1) setOpen(false)
+  }
+  return <div className="feed-pending-participants" ref={requestsRef}>
+    <button type="button" onClick={() => setOpen((value) => !value)} aria-label={label} aria-expanded={open} title={label}><IconUserPlus size={19} /><b>{count}</b></button>
+    {open && <div className="feed-pending-participants__popover" role="dialog" aria-label="Offene Anfragen für gemeinsamen Besuch">
+      <strong>Gemeinsamer Besuch</strong>
+      {participants.length ? participants.map((participant) => <div className="feed-pending-participants__request" key={participant.id}>
+        <span className="person-avatar">{participant.image ? <img src={`/api/avatars/${participant.id}`} alt="" /> : participant.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>
+        <span><b>{participant.name}</b><small>möchte dabei gewesen sein</small></span>
+        <div><button type="button" disabled={saving} onClick={() => void decide(participant, 'declined')}>Ablehnen</button><button type="button" disabled={saving} onClick={() => void decide(participant, 'approved')}>Bestätigen</button></div>
+      </div>) : <small>Die Anfragen werden aktualisiert …</small>}
+    </div>}
+  </div>
 }
 
 function FeedMediaCarousel({ entry, onOpenImage }) {
@@ -1227,7 +1335,7 @@ function PlanCancelDialog({ plan, onCancel, onClose }) {
   return <div className="composer-backdrop"><section className="journal-composer" role="dialog" aria-modal="true"><div className="composer-header"><div><span className="eyebrow">Planung absagen</span><h2>{plan.spot_name}</h2></div><button type="button" className="icon-button ui-icon-button" onClick={onClose} aria-label="Schließen"><IconX size={19} /></button></div><p className="auth-copy">Zugesagte und interessierte Personen werden benachrichtigt.</p><form onSubmit={submit}><label className="form-field"><span>Grund <small>optional</small></span><textarea value={reason} maxLength="1000" onChange={(event) => setReason(event.target.value)} /></label><div className="plan-dialog-actions"><button type="button" className="message-button" onClick={onClose}>Zurück</button><button className="danger" disabled={saving}>{saving ? 'Wird abgesagt …' : 'Planung absagen'}</button></div></form></section></div>
 }
 
-function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, notificationCounts = {}, onSectionRead = async () => {}, spots, onLogPlan, planFocus, onPlanFocusConsumed, planRefreshKey = 0 }) {
+function FeedView({ onOpenImage, onOpenSpot, onOpenProfile, authorFilter, onClearAuthorFilter, notificationCounts = {}, onSectionRead = async () => {}, spots, onLogPlan, planFocus, onPlanFocusConsumed, planRefreshKey = 0 }) {
   const initialParameters = new URLSearchParams(window.location.search)
   const [entries, setEntries] = useState([])
   const [nextFeedCursor, setNextFeedCursor] = useState(null)
@@ -1238,6 +1346,10 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   const [error, setError] = useState('')
   const [comments, setComments] = useState({})
   const [expanded, setExpanded] = useState(null)
+  const [activeCommentId, setActiveCommentId] = useState(null)
+  const [commentToDelete, setCommentToDelete] = useState(null)
+  const [deletingComment, setDeletingComment] = useState(false)
+  const [participantActionEntryId, setParticipantActionEntryId] = useState(null)
   const [commentDraft, setCommentDraft] = useState('')
   const [feedMode, setFeedMode] = useState(initialParameters.get('feed') === 'friends' ? 'friends' : 'all')
   const [section, setSection] = useState(initialParameters.get('section') === 'plans' ? 'plans' : 'feed')
@@ -1411,6 +1523,66 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
     await refreshFeedHead()
   }
 
+  async function deleteComment(entryId, commentId) {
+    setDeletingComment(true)
+    const response = await fetch(`/api/social/entries/${entryId}/comments/${commentId}`, { method: 'DELETE' })
+    if (!response.ok) {
+      setDeletingComment(false)
+      return setError('Kommentar konnte nicht gelöscht werden.')
+    }
+    setComments((current) => ({ ...current, [entryId]: (current[entryId] ?? []).filter((comment) => comment.id !== commentId) }))
+    setActiveCommentId((current) => current === commentId ? null : current)
+    setCommentToDelete(null)
+    setDeletingComment(false)
+    await refreshFeedHead()
+  }
+
+  async function requestParticipation(entry) {
+    setParticipantActionEntryId(entry.id)
+    const response = await fetch(`/api/social/entries/${entry.id}/participants`, { method: 'POST' })
+    if (!response.ok) {
+      setParticipantActionEntryId(null)
+      return setError('Die Anfrage konnte nicht gesendet werden.')
+    }
+    setEntries((current) => current.map((item) => item.id === entry.id ? { ...item, participant_status: 'pending' } : item))
+    setParticipantActionEntryId(null)
+    await refreshFeedHead()
+  }
+
+  async function removeParticipation(entry) {
+    setParticipantActionEntryId(entry.id)
+    const response = await fetch(`/api/social/entries/${entry.id}/participants/me`, { method: 'DELETE' })
+    if (!response.ok) {
+      setParticipantActionEntryId(null)
+      return setError('Die Teilnahme konnte nicht entfernt werden.')
+    }
+    setEntries((current) => current.map((item) => item.id === entry.id ? { ...item, participant_status: null } : item))
+    setParticipantActionEntryId(null)
+    await refreshFeedHead()
+  }
+
+  async function decideEntryParticipation(entry, participant, status) {
+    setParticipantActionEntryId(entry.id)
+    setError('')
+    try {
+      const response = await fetch(`/api/social/entries/${entry.id}/participants/${participant.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })
+      if (!response.ok) throw new Error('Die Anfrage konnte nicht aktualisiert werden.')
+      setEntries((current) => current.map((item) => {
+        if (item.id !== entry.id) return item
+        const pendingParticipants = (item.pending_participants ?? []).filter((person) => person.id !== participant.id)
+        const participants = status === 'approved' && !(item.participants ?? []).some((person) => person.id === participant.id) ? [...(item.participants ?? []), participant] : item.participants
+        return { ...item, pending_participant_count: Math.max(0, Number(item.pending_participant_count) - 1), pending_participants: pendingParticipants, participants }
+      }))
+      try { await refreshFeedHead() } catch { /* The local state is already current; the next refresh reconciles it. */ }
+      return true
+    } catch (decisionError) {
+      setError(decisionError.message || 'Die Anfrage konnte nicht aktualisiert werden.')
+      return false
+    } finally {
+      setParticipantActionEntryId(null)
+    }
+  }
+
   async function rsvp(plan, response) {
     const base = plan.group_id ? `/api/community/groups/${plan.group_id}/events/${plan.id}/rsvp` : `/api/planned-visits/${plan.id}/rsvp`
     const result = await fetch(base, response ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response }) } : { method: 'DELETE' })
@@ -1439,7 +1611,7 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
   const visibleEntries = (feedMode === 'friends' ? entries.filter((entry) => entry.is_friend || entry.is_owner) : entries).filter((entry) => !authorFilter || entry.user_id === authorFilter.id || entry.id === entryFocusId)
   const visiblePlans = plannedVisits.filter((plan) => (!authorFilter || plan.user_id === authorFilter.id) && (planScope !== 'friends' || plan.is_friend || plan.is_owner) && (planScope !== 'groups' || plan.group_id) && (planScope !== 'mine' || plan.is_owner || plan.my_response === 'going') && (planResponse === 'all' || plan.my_response === planResponse) && (!selectedDay || planDayKey(plan.starts_at) === selectedDay))
   activePlanningAuthorFilter = section === 'plans' && authorFilter ? { author: authorFilter, onClear: onClearAuthorFilter } : null
-  return <main className="view content-view compact-view social-view">
+  return <><main className="view content-view compact-view social-view">
     {error && <p className="form-error">{error}</p>}
     <section className="social-section feed-section">
       <div className="section-heading">
@@ -1459,12 +1631,12 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
         </div></div>
         {!visibleEntries.length && <p className="journal-empty">Noch keine Beiträge für diese Ansicht.</p>}
         <div className="feed-list">{visibleEntries.map((entry) => <article className={entry.is_owner ? 'feed-entry feed-entry--own' : 'feed-entry'} key={entry.id}>
-          <FeedAuthor entry={entry} /><h3 className="feed-entry__visit">{entry.user_name} war bei <button type="button" className="feed-entry__spot-link" onClick={() => onOpenSpot?.(entry.spot_id)}>{entry.spot_name}</button></h3>
+          <FeedAuthor entry={entry} onOpenProfile={onOpenProfile} /><FeedVisitSummary entry={entry} onOpenSpot={onOpenSpot} onOpenProfile={onOpenProfile} />
           {formatVisitTimeRange(entry.started_at, entry.ended_at) && <p className="feed-entry__time"><IconClock size={14} />{formatVisitTimeRange(entry.started_at, entry.ended_at)}</p>}
           {entry.body && <p className="feed-body">{entry.body}</p>}
           {entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}
-          <div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button></div>
-          {expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <p key={comment.id}><b>{comment.user_name}</b>{comment.body}</p>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}
+          <div className="feed-actions"><button className={entry.liked_by_me ? 'is-active' : ''} onClick={() => toggleLike(entry)}>♥ <span>{entry.like_count}</span></button><button onClick={() => toggleComments(entry.id)}>{entry.comment_count === 1 ? 'Kommentar' : 'Kommentare'} <span>{entry.comment_count}</span></button>{entry.is_owner && <FeedParticipantRequests entry={entry} saving={participantActionEntryId === entry.id} onDecide={decideEntryParticipation} />}{!entry.is_owner && <FeedParticipationButton entry={entry} saving={participantActionEntryId === entry.id} onRequest={requestParticipation} onRemove={removeParticipation} />}</div>
+          {expanded === entry.id && <div className="comments"><div>{(comments[entry.id] ?? []).map((comment) => <div key={comment.id} className={`comment${comment.is_owner ? ' comment--own' : ''}${activeCommentId === comment.id ? ' is-actions-visible' : ''}`} onClick={() => { if (comment.is_owner) setActiveCommentId(comment.id) }}><span><b>{comment.user_name}</b>{comment.body}</span>{comment.is_owner && <button type="button" className="comment-delete" onClick={(event) => { event.stopPropagation(); setCommentToDelete({ entryId: entry.id, commentId: comment.id }) }} aria-label="Eigenen Kommentar löschen">Löschen</button>}</div>)}</div><form onSubmit={(event) => { event.preventDefault(); postComment(entry.id) }}><input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength="1000" placeholder="Kommentar schreiben …" /><button>Posten</button></form></div>}
         </article>)}</div>
         <div className="feed-load-more" ref={feedLoadMoreRef}>
           {loadingMoreEntries && <span>Weitere Beiträge werden geladen …</span>}
@@ -1494,18 +1666,60 @@ function FeedView({ onOpenImage, onOpenSpot, authorFilter, onClearAuthorFilter, 
       {editingPlan && <PlanEditorDialog plan={editingPlan} spots={spots} onSave={updatePlan} onClose={() => setEditingPlan(null)} />}
       {cancellingPlan && <PlanCancelDialog plan={cancellingPlan} onCancel={cancelPlan} onClose={() => setCancellingPlan(null)} />}
     </section>
-  </main>
+  </main>{commentToDelete && <DeleteConfirmDialog title="Kommentar wirklich löschen?" description="Dieser Kommentar wird dauerhaft entfernt." confirmLabel="Kommentar löschen" saving={deletingComment} onClose={() => setCommentToDelete(null)} onConfirm={() => void deleteComment(commentToDelete.entryId, commentToDelete.commentId)} />}</>
 }
 
 
-function UserAvatar({ user, onOpenImage }) {
+function PublicProfileView({ userId, currentUser, onOpenProfile, onOpenImage, onOpenSpot, onOpenMessages, onBack }) {
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [actionLoading, setActionLoading] = useState(false)
+  useEffect(() => {
+    let active = true
+    setLoading(true); setError('')
+    fetch(`/api/social/users/${userId}/profile?limit=20`).then(async (response) => {
+      if (!response.ok) throw new Error(response.status === 404 ? 'Dieses Profil ist nicht verfügbar.' : 'Profil konnte nicht geladen werden.')
+      return response.json()
+    }).then((payload) => { if (active) setProfile(payload) }).catch((loadError) => { if (active) setError(loadError.message) }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [userId])
+  async function relationshipAction(path, method = 'POST') {
+    setActionLoading(true); setError('')
+    try {
+      const response = await fetch(path, { method })
+      if (!response.ok) throw new Error('Die Anfrage konnte nicht aktualisiert werden.')
+      const refreshed = await fetch(`/api/social/users/${userId}/profile?limit=20`)
+      if (refreshed.ok) setProfile(await refreshed.json())
+    } catch (actionError) { setError(actionError.message) } finally { setActionLoading(false) }
+  }
+  if (loading) return <main className="view content-view profile-public"><p className="journal-empty">Profil wird geladen …</p></main>
+  if (error || !profile) return <main className="view content-view profile-public"><button type="button" className="text-back" onClick={onBack}><IconChevronLeft size={17} />Zurück</button><p className="form-error">{error || 'Profil konnte nicht geladen werden.'}</p></main>
+  const user = profile.user
+  const minimal = profile.access === 'minimal'
+  const stats = profile.stats
+  return <main className="view content-view profile-public">
+    <button type="button" className="text-back profile-public__back" onClick={onBack}><IconChevronLeft size={17} />Zurück</button>
+    <section className={`profile-public__hero${user.banner_image ? ' has-banner' : ''}${minimal ? ' is-minimal' : ''}`} style={user.banner_image ? { backgroundImage: `url("/api/profile-banners/${user.id}")` } : undefined}>
+      <div className="profile-public__shade" /><div className="profile-public__identity"><span className="profile-public__avatar">{user.image ? <img src={`/api/avatars/${user.id}`} alt="" /> : user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><h1>{user.name}</h1>{user.username && <p>@{user.username}</p>}</div>
+    </section>
+    <div className="profile-public__actions">{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_received ? <><button type="button" className="message-button" disabled={actionLoading} onClick={() => void relationshipAction(`/api/social/friend-requests/${user.id}/decline`, 'POST')}>Ablehnen</button><button type="button" disabled={actionLoading} onClick={() => void relationshipAction(`/api/social/friend-requests/${user.id}/accept`, 'POST')}><IconCheck size={16} />Annehmen</button></> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : currentUser?.id !== user.id && <button type="button" disabled={actionLoading} onClick={() => void relationshipAction(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Freundschaft anfragen</button>}{user.is_friend && <button type="button" className="message-button" onClick={() => onOpenMessages?.(user)}><IconMessageCircle size={16} />Nachricht</button>}</div>
+    {minimal ? <section className="profile-public__private"><IconLock size={20} /><h2>Profil geschützt</h2><p>Diese Person zeigt ihr Profil nur eingeschränkt. Du kannst den Namen und den Beziehungsstatus sehen.</p></section> : <>
+      <section className="profile-public__stats"><div><strong>{stats?.total_visits ?? 0}</strong><span>Besuche</span></div><div><strong>{stats?.unique_spots ?? 0}</strong><span>Hallen besucht</span></div><div><strong>{stats?.discovery_percent ?? 0}%</strong><span>Hallen entdeckt</span></div></section>
+      <section className="profile-public__feed"><div className="section-heading"><div><h2>Persönlicher Feed</h2><span>Geteilte Tagebucheinträge</span></div></div>{profile.entries?.length ? profile.entries.map((entry) => <article className="feed-entry" key={entry.id}><FeedVisitSummary entry={entry} onOpenSpot={onOpenSpot} onOpenProfile={onOpenProfile} />{formatVisitTimeRange(entry.started_at, entry.ended_at) && <p className="feed-entry__time"><IconClock size={14} />{formatVisitTimeRange(entry.started_at, entry.ended_at)}</p>}{entry.body && <p className="feed-body">{entry.body}</p>}{entry.media?.length > 0 && <FeedMediaCarousel entry={entry} onOpenImage={onOpenImage} />}</article>) : <p className="journal-empty">Noch keine geteilten Einträge.</p>}</section>
+    </>}
+  </main>
+}
+
+function UserAvatar({ user, onOpenImage, onOpenProfile }) {
   const initials = user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)
   const avatar = <>{user.image ? <img src={`/api/avatars/${user.id ?? user.user_id}`} alt="" /> : initials}<RankBadge uniqueSpots={user.unique_spots} /></>
+  if (onOpenProfile) return <button type="button" className="person-avatar social-avatar social-avatar--ranked" onClick={() => onOpenProfile({ ...user, id: user.id ?? user.user_id })} aria-label={`Profil von ${user.name} öffnen`}>{avatar}</button>
   if (user.image && onOpenImage) return <button type="button" className="person-avatar social-avatar social-avatar--ranked social-avatar--zoomable" onClick={() => onOpenImage(`/api/avatars/${user.id ?? user.user_id}`, `Profilbild von ${user.name}`)} aria-label={`Profilbild von ${user.name} vergrößern`}>{avatar}</button>
   return <span className="person-avatar social-avatar social-avatar--ranked">{avatar}</span>
 }
 
-function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUserFeed, onOpenImage, notificationCounts = {}, onNotificationsRead = async () => {} }) {
+function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUserFeed, onOpenProfile, onOpenImage, notificationCounts = {}, onNotificationsRead = async () => {} }) {
   const initialDiscoverUsername = new URLSearchParams(window.location.search).get('discover')?.replace(/^@+/, '') ?? ''
   const initialTab = new URLSearchParams(window.location.search).get('tab')
   const [tab, setTab] = useState(initialDiscoverUsername ? 'discover' : ['friends', 'requests', 'discover'].includes(initialTab) ? initialTab : 'friends')
@@ -1516,11 +1730,15 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
   const [results, setResults] = useState([])
   const [summary, setSummary] = useState({ unread_groups: 0 })
   const [error, setError] = useState('')
-  const [preview, setPreview] = useState(null)
   const [friendMenuId, setFriendMenuId] = useState(null)
+  const hasLoadedFriends = useRef(false)
+  const friendLoadInFlight = useRef(null)
+  const resumeRefreshTimer = useRef(null)
   const friendMenuRef = useOutsideDismiss(friendMenuId !== null, () => setFriendMenuId(null))
-  async function load() {
-    try {
+  async function load({ background = false } = {}) {
+    if (friendLoadInFlight.current) return friendLoadInFlight.current
+    const request = (async () => {
+      try {
       const [friendsResponse, suggestionsResponse, requestsResponse, summaryResponse] = await Promise.all([fetch('/api/social/friends'), fetch('/api/social/friend-suggestions'), fetch('/api/social/friend-requests'), fetch('/api/social/friends/summary')])
       if (!friendsResponse.ok || !suggestionsResponse.ok || !requestsResponse.ok || !summaryResponse.ok) throw new Error('Freunde konnten nicht geladen werden.')
       setFriends((await friendsResponse.json()).friends)
@@ -1529,12 +1747,41 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
       const summaryPayload = await summaryResponse.json()
       setSummary(summaryPayload)
       onSummaryChange(summaryPayload)
-    } catch (loadError) { setError(loadError.message) }
+        hasLoadedFriends.current = true
+        setError('')
+      } catch {
+        // Edge can cancel an in-flight request while restoring a background tab.
+        // Retain the last successful state and keep this automatic retry quiet.
+        if (!background && !hasLoadedFriends.current) setError('Freunde konnten nicht geladen werden.')
+      }
+    })()
+    friendLoadInFlight.current = request
+    try {
+      return await request
+    } finally {
+      if (friendLoadInFlight.current === request) friendLoadInFlight.current = null
+    }
   }
   useEffect(() => {
-    load()
-    const interval = window.setInterval(load, 15000)
-    return () => window.clearInterval(interval)
+    void load()
+    function refreshInForeground() {
+      if (document.visibilityState !== 'visible') return
+      void load({ background: true })
+    }
+    function refreshAfterResume() {
+      if (document.visibilityState !== 'visible') return
+      window.clearTimeout(resumeRefreshTimer.current)
+      resumeRefreshTimer.current = window.setTimeout(refreshInForeground, 300)
+    }
+    const interval = window.setInterval(refreshInForeground, 15000)
+    window.addEventListener('focus', refreshAfterResume)
+    document.addEventListener('visibilitychange', refreshAfterResume)
+    return () => {
+      window.clearInterval(interval)
+      window.clearTimeout(resumeRefreshTimer.current)
+      window.removeEventListener('focus', refreshAfterResume)
+      document.removeEventListener('visibilitychange', refreshAfterResume)
+    }
   }, [])
   useEffect(() => {
     const types = tab === 'requests' ? ['friend_request'] : tab === 'friends' ? ['friend_accepted'] : []
@@ -1561,12 +1808,6 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
       const search = await fetch(`/api/social/discover?q=${encodeURIComponent(searchQuery)}`)
       if (search.ok) setResults((await search.json()).users)
     }
-  }
-  async function openPreview(user) {
-    if (preview?.user?.id === user.id) return setPreview(null)
-    const response = await fetch(`/api/social/users/${user.id}/preview`)
-    if (!response.ok) return setError('Die Vorschau konnte nicht geladen werden.')
-    setPreview(await response.json())
   }
   function selectTab(nextTab) {
     setTab(nextTab)
@@ -1597,7 +1838,7 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
             <p>Vorgeschlagen über gemeinsame Kontakte.</p>
             <div className="people-list">
               {friendSuggestions.map((user) => <article key={user.id}>
-                <UserAvatar user={user} />
+                <UserAvatar user={user} onOpenProfile={onOpenProfile} />
                 <div><h3>{user.name}</h3><p>@{user.username} · {user.mutual_friend_count} gemeinsame{user.mutual_friend_count === 1 ? 'r Kontakt' : ' Kontakte'}</p></div>
                 <button type="button" className="suggestion-dismiss" onClick={() => action(`/api/social/friend-suggestions/${user.id}/dismiss`)} aria-label={`${user.name} nicht mehr vorschlagen`} title="Nicht mehr vorschlagen"><IconX size={16} /></button>
                 <button type="button" onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>
@@ -1607,15 +1848,14 @@ function FriendsView({ onOpenMessages, onSummaryChange, onOpenGroups, onOpenUser
           <div className="people-list friends-list">
             {!friends.length && <p className="journal-empty">Noch keine Freundschaften. Entdecke andere BoulderO-Nutzer:innen.</p>}
             {friends.map((user) => <article key={user.id}>
-              <UserAvatar user={user} onOpenImage={onOpenImage} />
-              <div><h3>{user.name}</h3><p>@{user.username}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div>
-              <div className="friend-row-actions"><button type="button" className="message-button" onClick={() => openPreview(user)}>Profil</button><button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button><div className="friend-more-menu" ref={friendMenuId === user.id ? friendMenuRef : null}><button type="button" className="friend-more-button" onClick={() => setFriendMenuId((current) => current === user.id ? null : user.id)} aria-label={`Beziehungsoptionen für ${user.name}`} aria-expanded={friendMenuId === user.id} title="Beziehungsoptionen"><IconDots size={19} /></button>{friendMenuId === user.id && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setFriendMenuId(null); action(`/api/follows/${user.id}`, 'DELETE') }}>Nicht mehr folgen</button><button type="button" className="danger" onClick={() => { setFriendMenuId(null); action(`/api/social/friends/${user.id}`, 'DELETE') }}>Freundschaft beenden</button></div>}</div></div>
-              {preview?.user?.id === user.id && <div className="friend-preview"><b>Letztes von {preview.user.name}</b>{preview.plans.map((plan) => <p key={plan.id}><IconCalendarEvent size={14} /> {formatPlanDateRange(plan.starts_at, plan.ends_at)} · {plan.spot_name}</p>)}{preview.entries.map((entry) => <p key={entry.id}>war bei <b>{entry.spot_name}</b>{entry.body ? ` · ${entry.body}` : ''}</p>)}{!preview.entries.length && !preview.plans.length && <p>Noch nichts geteilt.</p>}<button type="button" onClick={() => onOpenUserFeed(preview.user)}>Feed von {preview.user.name.split(' ')[0]} öffnen</button></div>}
+              <UserAvatar user={user} onOpenImage={onOpenImage} onOpenProfile={onOpenProfile} />
+               <div><h3>{user.name}</h3><p>{user.username ? `@${user.username}` : 'Profil geschützt'}{user.last_visit_at ? ` · letzter Besuch ${formatFeedDate(user.last_visit_at)}` : ''}</p></div>
+               <div className="friend-row-actions"><button type="button" className="message-button" onClick={() => onOpenProfile?.(user)}>Profil</button><button className="message-button" onClick={() => { onOpenMessages(user); setFriends((current) => current.map((item) => item.id === user.id ? { ...item, unread_count: 0 } : item)) }}>Nachricht{user.unread_count > 0 && <b>{user.unread_count}</b>}</button><div className="friend-more-menu" ref={friendMenuId === user.id ? friendMenuRef : null}><button type="button" className="friend-more-button" onClick={() => setFriendMenuId((current) => current === user.id ? null : user.id)} aria-label={`Beziehungsoptionen für ${user.name}`} aria-expanded={friendMenuId === user.id} title="Beziehungsoptionen"><IconDots size={19} /></button>{friendMenuId === user.id && <div className="friend-more-menu__popover"><button type="button" onClick={() => { setFriendMenuId(null); action(`/api/follows/${user.id}`, 'DELETE') }}>Nicht mehr folgen</button><button type="button" className="danger" onClick={() => { setFriendMenuId(null); action(`/api/social/friends/${user.id}`, 'DELETE') }}>Freundschaft beenden</button></div>}</div></div>
             </article>)}
           </div>
         </>}
-        {tab === 'requests' && <div className="request-groups"><section><div className="section-heading"><h3>Eingegangen</h3><span>{requests.incoming.length}</span></div><div className="people-list">{!requests.incoming.length && <p className="journal-empty">Keine offenen Anfragen.</p>}{requests.incoming.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username}</p></div><button className="message-button" onClick={() => action(`/api/social/friend-requests/${request.id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${request.id}/accept`)}><IconCheck size={16} />Annehmen</button></article>)}</div></section><section><div className="section-heading"><h3>Gesendet</h3><span>{requests.outgoing.length}</span></div><div className="people-list">{!requests.outgoing.length && <p className="journal-empty">Keine gesendeten Anfragen.</p>}{requests.outgoing.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} /><div><h3>{request.name}</h3><p>@{request.username} · Anfrage gesendet</p></div></article>)}</div></section></div>}
-        {tab === 'discover' && <section className="friend-discover"><label className="search-field"><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name oder @username suchen" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}</label>{query.trim().replace(/^@+/, '').length > 0 && query.trim().replace(/^@+/, '').length < 2 && <p className="journal-empty">Mindestens zwei Zeichen eingeben.</p>}<div className="people-list">{results.map((user) => <article key={user.id}><UserAvatar user={user} /><div><h3>{user.name}</h3><p>@{user.username}{user.follows_you ? ' · folgt dir' : ''}</p></div>{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : user.request_received ? <span className="relationship-actions"><button className="message-button" onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/accept`)}>Annehmen</button></span> : <button onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>}{!user.is_friend && <button className={user.following ? 'following' : ''} onClick={() => action(`/api/follows/${user.id}`, user.following ? 'DELETE' : 'POST')}>{user.following ? 'Folge ich' : 'Folgen'}</button>}</article>)}</div></section>}
+        {tab === 'requests' && <div className="request-groups"><section><div className="section-heading"><h3>Eingegangen</h3><span>{requests.incoming.length}</span></div><div className="people-list">{!requests.incoming.length && <p className="journal-empty">Keine offenen Anfragen.</p>}{requests.incoming.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} onOpenProfile={onOpenProfile} /><div><h3>{request.name}</h3><p>@{request.username}</p></div><button className="message-button" onClick={() => action(`/api/social/friend-requests/${request.id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${request.id}/accept`)}><IconCheck size={16} />Annehmen</button></article>)}</div></section><section><div className="section-heading"><h3>Gesendet</h3><span>{requests.outgoing.length}</span></div><div className="people-list">{!requests.outgoing.length && <p className="journal-empty">Keine gesendeten Anfragen.</p>}{requests.outgoing.map((request) => <article key={request.id}><UserAvatar user={{ ...request, id: request.user_id }} onOpenProfile={onOpenProfile} /><div><h3>{request.name}</h3><p>@{request.username} · Anfrage gesendet</p></div></article>)}</div></section></div>}
+        {tab === 'discover' && <section className="friend-discover"><label className="search-field"><IconSearch size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name oder @username suchen" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}</label>{query.trim().replace(/^@+/, '').length > 0 && query.trim().replace(/^@+/, '').length < 2 && <p className="journal-empty">Mindestens zwei Zeichen eingeben.</p>}<div className="people-list">{results.map((user) => <article key={user.id}><UserAvatar user={user} onOpenProfile={onOpenProfile} /><div><h3>{user.name}</h3><p>@{user.username}{user.follows_you ? ' · folgt dir' : ''}</p></div>{user.is_friend ? <span className="relationship-state"><IconUserCheck size={16} />Freund:in</span> : user.request_sent ? <span className="relationship-state">Anfrage gesendet</span> : user.request_received ? <span className="relationship-actions"><button className="message-button" onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/decline`)}>Ablehnen</button><button onClick={() => action(`/api/social/friend-requests/${user.incoming_request_id}/accept`)}>Annehmen</button></span> : <button onClick={() => action(`/api/social/friend-requests/${user.id}`)}><IconUserPlus size={16} />Anfragen</button>}{!user.is_friend && <button className={user.following ? 'following' : ''} onClick={() => action(`/api/follows/${user.id}`, user.following ? 'DELETE' : 'POST')}>{user.following ? 'Folge ich' : 'Folgen'}</button>}</article>)}</div></section>}
       </section>
     </main>
   )
@@ -1700,5 +1940,5 @@ function PasswordDialog({ onClose, onSave }) {
 export {
   AdminSpotsView, BadgesView, FeedView, FriendsView, JournalComposer, JournalEntryDialog,
   JournalView, LegalDialog, Lightbox, MapView, MessageDialog, PasswordDialog, PlannedVisitDialog,
-  NotificationSettingsView, ProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
+  NotificationSettingsView, ProfilePrivacyView, ProfileView, PublicProfileView, RankBadge, SignInDialog, SpotCorrectionDialog, SpotSuggestionDialog, optimizePhoto,
 }
