@@ -73,6 +73,8 @@ AUTH_SECRET="..." POSTGRES_PASSWORD="..." \
 
 Der Webservice wird anschließend über einen Mittwald-Virtualhost auf Port `80/tcp` veröffentlicht. Für reale Konten muss `DEMO_MODE=false` gelten. Die API erhält pro Umgebung eine eigene `APP_ORIGIN`-Variable, damit Bestätigungs- und Reset-Links korrekt zeigen: `https://bouldero.de` in Produktion und `https://dev.bouldero.de` in Staging. Der SMTP-Postausgang wird ebenfalls ausschließlich als Container-Umgebung konfiguriert.
 
+Nach einem Host-Neustart können die Container unabhängig voneinander wieder anlaufen. Der Webservice löst seinen API-Upstream deshalb erst bei einer Anfrage über Docker-DNS auf. Wenn die API noch startet, liefert Nginx vorübergehend höchstens einen `502` für API-Anfragen; der Webcontainer beendet sich nicht und verbindet sich automatisch, sobald die API erreichbar ist. Alle drei Dienste verwenden außerdem `restart: unless-stopped`.
+
 `main` veröffentlicht die Produktions-Tags `latest`; `dev` veröffentlicht getrennte Tags `dev`. Der GitHub-Workflow baut das Frontend vor jedem Image-Build frisch. Dadurch kann derselbe API- und Web-Quellstand getrennt nach Staging und Produktion ausgerollt werden.
 
 Für die vorläufige Verwaltung kann zusätzlich ein passwortgeschütztes Superadmin-Konto aktiviert werden. Die Werte `SUPERADMIN_EMAIL` und `SUPERADMIN_PASSWORD` müssen ausschließlich in der Deployment-Umgebung gesetzt werden. Das Konto erhält Zugriff auf „Hallen verwalten“ und kann neue Hallen mit Adresse und Koordinaten anlegen; gewöhnliche Konten erhalten hierfür keine API-Berechtigung.

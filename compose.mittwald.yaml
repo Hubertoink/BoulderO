@@ -6,6 +6,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -36,6 +37,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -57,6 +59,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
     deploy:
       resources:
         limits:
