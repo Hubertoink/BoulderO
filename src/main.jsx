@@ -295,7 +295,7 @@ function App() {
   async function markFeedSectionRead(section) {
     const types = section === 'plans'
       ? ['plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder']
-      : ['entry_comment', 'entry_like', 'visit_participant_approved', 'visit_participant_declined']
+      : ['visit_created', 'entry_comment', 'entry_like', 'visit_participant_approved', 'visit_participant_declined']
     await markNotificationTypesRead(types)
   }
   async function loadSpotCorrectionReports(user = currentUser) {

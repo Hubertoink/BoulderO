@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -508,6 +509,7 @@ function privatePushCopy(category) {
     plans: 'Neue Änderung bei einer Planung',
     reminders: 'Erinnerung an deine Boulderplanung',
     groups: 'Neue Aktivität in einer Bouldergruppe',
+    visits: 'Neue Aktivität im Feed',
   })[category] ?? 'Neue Benachrichtigung in BoulderO'
 }
 
@@ -3001,6 +3003,7 @@ app.post('/notifications/read', requireUser, asyncRoute(async (req, res) => {
     ids: z.array(z.string().uuid()).min(1).max(40).optional(),
     types: z.array(z.enum([
       'direct_message', 'friend_request', 'friend_accepted', 'entry_comment', 'entry_like',
+      'visit_created',
       'visit_participant_request', 'visit_participant_approved', 'visit_participant_declined',
       'plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder',
       'group_invitation', 'group_join_request', 'group_joined', 'group_message',
@@ -3907,8 +3910,13 @@ app.get('/visits', requireUser, asyncRoute(async (req, res) => {
 app.post('/visits', requireUser, asyncRoute(async (req, res) => {
   const input = visitInputSchema.parse(req.body)
   const client = await pool.connect()
+  let createdVisit = null
+  let createdEntry = null
+  let spotName = 'einer Boulderhalle'
   try {
     await client.query('BEGIN')
+    const spot = await client.query('SELECT name FROM spots WHERE id = $1', [input.spotId])
+    spotName = spot.rows[0]?.name ?? spotName
     const visit = await client.query(
       `INSERT INTO visits (user_id, spot_id, visited_at, started_at, ended_at)
        VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), NULLIF($4, '')::time, NULLIF($5, '')::time)
@@ -3921,14 +3929,33 @@ app.post('/visits', requireUser, asyncRoute(async (req, res) => {
        RETURNING id, body, visibility, created_at`,
       [req.user.id, visit.rows[0].id, input.body, input.visibility],
     )
+    createdVisit = visit.rows[0]
+    createdEntry = entry.rows[0]
     await client.query('COMMIT')
-    res.status(201).json({ visit: visit.rows[0], journalEntry: entry.rows[0] })
   } catch (error) {
     await client.query('ROLLBACK')
     throw error
   } finally {
     client.release()
   }
+  try {
+    const recipients = await planFriendsForNotification(pool, req.user.id, input.visibility)
+    await createNotifications(pool, {
+      recipientIds: recipients,
+      actorId: req.user.id,
+      type: 'visit_created',
+      category: 'visits',
+      payload: { entryId: createdEntry.id, visitId: createdVisit.id, spotId: createdVisit.spot_id },
+      title: 'Neuer Besuch im Feed',
+      body: `${req.user.name} war bei ${spotName}.`,
+      targetUrl: `/social?entry=${encodeURIComponent(createdEntry.id)}`,
+    })
+    void flushPushDeliveries().catch((error) => console.error('Push-Zustellung fehlgeschlagen:', error))
+  } catch (error) {
+    // The visit is already committed; a notification failure must not turn a successful visit into a misleading error.
+    console.error('Besuchsbenachrichtigung konnte nicht erstellt werden:', error)
+  }
+  res.status(201).json({ visit: createdVisit, journalEntry: createdEntry })
 }))
 
 app.patch('/journal/:entryId', requireUser, asyncRoute(async (req, res) => {
@@ -4064,7 +4091,32 @@ app.get('/media/:mediaId', requireUser, asyncRoute(async (req, res) => {
   }
   const absolutePath = path.resolve(uploadRoot, media.storage_key)
   if (!absolutePath.startsWith(path.resolve(uploadRoot))) return res.status(400).end()
-  res.type(media.content_type).sendFile(absolutePath)
+  const stat = await fs.stat(absolutePath).catch(() => null)
+  if (!stat?.isFile()) return res.status(404).end()
+
+  // Mobile Chromium requests video in byte ranges. A complete-file response works on
+  // desktop but leaves Android/Edge with an empty player for larger MP4s.
+  res.set({
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'private, max-age=3600',
+    'Content-Type': media.content_type,
+  })
+  const total = stat.size
+  const ranges = req.headers.range ? req.range(total, { combine: true }) : null
+  if (ranges === -1 || ranges === -2 || ranges?.length === 0) {
+    return res.status(416).set('Content-Range', `bytes */${total}`).end()
+  }
+  const range = ranges?.[0]
+  if (!range) {
+    res.set('Content-Length', String(total))
+    return createReadStream(absolutePath).pipe(res)
+  }
+  const end = Math.min(range.end, total - 1)
+  res.status(206).set({
+    'Content-Range': `bytes ${range.start}-${end}/${total}`,
+    'Content-Length': String(end - range.start + 1),
+  })
+  return createReadStream(absolutePath, { start: range.start, end }).pipe(res)
 }))
 
 app.delete('/media/:mediaId', requireUser, asyncRoute(async (req, res) => {
