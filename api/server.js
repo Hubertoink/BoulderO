@@ -844,19 +844,69 @@ async function normalizeJournalMedia(file) {
   }
 
   const outputPath = path.join(path.dirname(file.path), `${crypto.randomUUID()}.mp4`)
+  const posterPath = `${outputPath}.poster.jpg`
   try {
     const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file.path])
     const duration = Number.parseFloat(stdout.trim())
     if (!Number.isFinite(duration) || duration <= 0 || duration > maxJournalVideoSeconds) throw Object.assign(new Error('video_duration_invalid'), { status: 400 })
-    await execFileAsync('ffmpeg', ['-y', '-i', file.path, '-map', '0:v:0', '-map', '0:a?', '-vf', 'scale=720:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath])
+    await transcodeJournalVideo(file.path, outputPath)
+    await createJournalVideoPoster(outputPath, posterPath)
     const stat = await fs.stat(outputPath)
     await fs.unlink(file.path).catch(() => undefined)
-    return { filePath: outputPath, storageKey: path.relative(uploadRoot, outputPath).split(path.sep).join('/'), contentType: 'video/mp4', byteSize: stat.size, originalName: file.originalname }
+    return { filePath: outputPath, posterFilePath: posterPath, storageKey: path.relative(uploadRoot, outputPath).split(path.sep).join('/'), contentType: 'video/mp4', byteSize: stat.size, originalName: file.originalname }
   } catch (error) {
     await fs.unlink(outputPath).catch(() => undefined)
+    await fs.unlink(posterPath).catch(() => undefined)
     if (error?.status) throw error
     throw Object.assign(new Error('video_conversion_failed'), { status: 400 })
   }
+}
+
+async function transcodeJournalVideo(inputPath, outputPath) {
+  await execFileAsync('ffmpeg', [
+    '-y', '-i', inputPath,
+    '-map', '0:v:0', '-map', '0:a?',
+    '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p,fps=30',
+    '-c:v', 'libx264', '-profile:v', 'baseline', '-level:v', '3.1', '-tag:v', 'avc1', '-preset', 'veryfast', '-crf', '24',
+    '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+    '-movflags', '+faststart',
+    outputPath,
+  ])
+}
+
+async function createJournalVideoPoster(videoPath, posterPath) {
+  await execFileAsync('ffmpeg', [
+    '-y', '-ss', '0.1', '-i', videoPath,
+    '-frames:v', '1', '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease:force_divisible_by=2', '-q:v', '4',
+    posterPath,
+  ])
+}
+
+async function upgradeLegacyJournalVideos() {
+  const result = await pool.query("SELECT id, storage_key FROM media WHERE content_type LIKE 'video/%' ORDER BY created_at")
+  let upgraded = 0
+  for (const media of result.rows) {
+    const absolutePath = path.resolve(uploadRoot, media.storage_key)
+    if (!absolutePath.startsWith(path.resolve(uploadRoot))) continue
+    const posterPath = `${absolutePath}.poster.jpg`
+    if (await fs.stat(posterPath).then((stat) => stat.isFile()).catch(() => false)) continue
+
+    const temporaryVideoPath = `${absolutePath}.${crypto.randomUUID()}.compat.mp4`
+    const temporaryPosterPath = `${temporaryVideoPath}.poster.jpg`
+    try {
+      await transcodeJournalVideo(absolutePath, temporaryVideoPath)
+      await createJournalVideoPoster(temporaryVideoPath, temporaryPosterPath)
+      const stat = await fs.stat(temporaryVideoPath)
+      await fs.rename(temporaryVideoPath, absolutePath)
+      await fs.rename(temporaryPosterPath, posterPath)
+      await pool.query("UPDATE media SET content_type = 'video/mp4', byte_size = $2 WHERE id = $1", [media.id, stat.size])
+      upgraded += 1
+    } catch (error) {
+      await Promise.all([temporaryVideoPath, temporaryPosterPath].map((filePath) => fs.unlink(filePath).catch(() => undefined)))
+      console.error(`Video ${media.id} konnte nicht für mobile Edge-Browser aktualisiert werden:`, error)
+    }
+  }
+  if (upgraded) console.info(`${upgraded} bestehende Video-Clips wurden für mobile Browser aktualisiert.`)
 }
 
 const spotImageUpload = multer({
@@ -1465,7 +1515,7 @@ app.delete('/me', requireUser, asyncRoute(async (req, res) => {
        SELECT banner_image AS storage_key FROM users WHERE id = $1 AND banner_image IS NOT NULL`,
       [req.user.id],
     )
-    storageKeys = assets.rows.map((row) => row.storage_key).filter(Boolean)
+    storageKeys = assets.rows.flatMap((row) => row.storage_key ? [row.storage_key, `${row.storage_key}.poster.jpg`] : [])
     const deleted = await client.query('DELETE FROM users WHERE id = $1 RETURNING id', [req.user.id])
     if (!deleted.rowCount) {
       await client.query('ROLLBACK')
@@ -2857,7 +2907,10 @@ app.get('/social/feed/summary', requireUser, asyncRoute(async (req, res) => {
 }))
 
 app.post('/social/feed/seen', requireUser, asyncRoute(async (req, res) => {
-  await pool.query(`INSERT INTO social_feed_reads (user_id, last_seen_at) VALUES ($1, NOW()) ON CONFLICT (user_id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`, [req.user.id])
+  await Promise.all([
+    pool.query(`INSERT INTO social_feed_reads (user_id, last_seen_at) VALUES ($1, NOW()) ON CONFLICT (user_id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`, [req.user.id]),
+    pool.query("UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND in_app_visible AND read_at IS NULL AND category IN ('comments', 'reactions', 'visits')", [req.user.id]),
+  ])
   res.status(204).end()
 }))
 
@@ -4019,7 +4072,7 @@ app.delete('/visits/:visitId', requireUser, asyncRoute(async (req, res) => {
         RETURNING storage_key`,
       [req.params.visitId],
     )
-    storageKeys = media.rows.map((row) => row.storage_key)
+    storageKeys = media.rows.flatMap((row) => [row.storage_key, `${row.storage_key}.poster.jpg`])
     await client.query('DELETE FROM visits WHERE id = $1 AND user_id = $2', [req.params.visitId, req.user.id])
     await client.query('COMMIT')
   } catch (error) {
@@ -4070,13 +4123,29 @@ async function uploadJournalMedia(req, res) {
     }))
     res.status(201).json({ media })
   } catch (error) {
-    await Promise.all([...files.map((file) => file.path), ...normalized.map((item) => item.filePath)].map((filePath) => fs.unlink(filePath).catch(() => undefined)))
+    await Promise.all([...files.map((file) => file.path), ...normalized.flatMap((item) => [item.filePath, item.posterFilePath].filter(Boolean))].map((filePath) => fs.unlink(filePath).catch(() => undefined)))
     throw error
   }
 }
 
 app.post('/journal/:entryId/media', requireUser, journalMediaUpload.array('media', maxJournalMedia), asyncRoute(uploadJournalMedia))
 app.post('/journal/:entryId/photos', requireUser, journalMediaUpload.array('photos', maxJournalMedia), asyncRoute(uploadJournalMedia))
+
+app.get('/media/:mediaId/poster', requireUser, asyncRoute(async (req, res) => {
+  const result = await pool.query(`
+    SELECT m.storage_key, j.user_id, j.visibility
+      FROM media m
+      JOIN journal_entries j ON j.id = m.journal_entry_id
+     WHERE m.id = $1 AND m.content_type LIKE 'video/%'
+  `, [req.params.mediaId])
+  const media = result.rows[0]
+  if (!media || !await canViewEntry(req.user.id, media.user_id, media.visibility)) return res.status(404).end()
+  const absolutePath = path.resolve(uploadRoot, `${media.storage_key}.poster.jpg`)
+  if (!absolutePath.startsWith(path.resolve(uploadRoot))) return res.status(400).end()
+  if (!await fs.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false)) return res.status(404).end()
+  res.set('Cache-Control', 'private, max-age=86400')
+  return res.type('image/jpeg').sendFile(absolutePath)
+}))
 
 app.get('/media/:mediaId', requireUser, asyncRoute(async (req, res) => {
   const result = await pool.query(`
@@ -4094,8 +4163,7 @@ app.get('/media/:mediaId', requireUser, asyncRoute(async (req, res) => {
   const stat = await fs.stat(absolutePath).catch(() => null)
   if (!stat?.isFile()) return res.status(404).end()
 
-  // Mobile Chromium requests video in byte ranges. A complete-file response works on
-  // desktop but leaves Android/Edge with an empty player for larger MP4s.
+  // Keep byte-range semantics explicit across the reverse proxy for mobile media players.
   res.set({
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, max-age=3600',
@@ -4126,8 +4194,10 @@ app.delete('/media/:mediaId', requireUser, asyncRoute(async (req, res) => {
   )
   if (!result.rowCount) return res.status(404).json({ error: 'media_not_found' })
   await pool.query('DELETE FROM media WHERE id = $1', [req.params.mediaId])
-  const absolutePath = path.resolve(uploadRoot, result.rows[0].storage_key)
-  if (absolutePath.startsWith(path.resolve(uploadRoot))) await fs.unlink(absolutePath).catch(() => undefined)
+  for (const storageKey of [result.rows[0].storage_key, `${result.rows[0].storage_key}.poster.jpg`]) {
+    const absolutePath = path.resolve(uploadRoot, storageKey)
+    if (absolutePath.startsWith(path.resolve(uploadRoot))) await fs.unlink(absolutePath).catch(() => undefined)
+  }
   res.status(204).end()
 }))
 
@@ -4181,6 +4251,7 @@ app.use((error, _req, res, _next) => {
 })
 
 await ensureManagedUsers()
+await upgradeLegacyJournalVideos().catch((error) => console.error('Bestehende Videos konnten nicht aktualisiert werden:', error))
 void schedulePlanReminders().catch((error) => console.error('Planungserinnerungen konnten nicht geplant werden:', error))
 const planReminderInterval = setInterval(() => {
   void schedulePlanReminders().catch((error) => console.error('Planungserinnerungen konnten nicht geplant werden:', error))

@@ -293,6 +293,12 @@ function App() {
     if (response.ok) await Promise.all([loadNotificationSummary(), loadFeedSummary()])
   }
   async function markFeedSectionRead(section) {
+    const summaryKey = section === 'plans' ? 'unread_plans' : 'unread_feed'
+    setNotificationSummary((current) => {
+      const cleared = Number(current[summaryKey]) || 0
+      return { ...current, [summaryKey]: 0, unread_count: Math.max(0, Number(current.unread_count) - cleared) }
+    })
+    if (section === 'feed') setFeedSummary((current) => ({ ...current, unread_feed: 0 }))
     const types = section === 'plans'
       ? ['plan_created', 'plan_rsvp', 'plan_updated', 'plan_cancelled', 'plan_reminder']
       : ['visit_created', 'entry_comment', 'entry_like', 'visit_participant_approved', 'visit_participant_declined']
