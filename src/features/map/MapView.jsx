@@ -44,6 +44,23 @@ function escapeMarkerText(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
 }
 
+function distanceInKilometres(first, second) {
+  if (!Array.isArray(first) || !Array.isArray(second)) return Infinity
+  const [firstLatitude, firstLongitude] = first.map(Number)
+  const [secondLatitude, secondLongitude] = second.map(Number)
+  if (![firstLatitude, firstLongitude, secondLatitude, secondLongitude].every(Number.isFinite)) return Infinity
+  const radians = (value) => value * Math.PI / 180
+  const latitudeDifference = radians(secondLatitude - firstLatitude)
+  const longitudeDifference = radians(secondLongitude - firstLongitude)
+  const a = Math.sin(latitudeDifference / 2) ** 2 + Math.cos(radians(firstLatitude)) * Math.cos(radians(secondLatitude)) * Math.sin(longitudeDifference / 2) ** 2
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function locationHasNearbySpot(result, spots) {
+  const location = [result.latitude, result.longitude]
+  return spots.some((spot) => distanceInKilometres(location, spot.position) <= 45)
+}
+
 const activityIconCache = new Map()
 const planIconCache = new Map()
 function activityIcon(activity, index, offset, isPreview) {
@@ -587,7 +604,11 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
     ? new Set(spots.filter((spot) => matchesSpotSearch(spot, locationFilter)).map((spot) => String(spot.id)))
     : null, [spots, locationFilter])
   const plannedSpotIds = useMemo(() => new Set(mapPlans.map((plan) => String(plan.spot_id))), [mapPlans])
-  const locationResult = locationResults[0] ?? null
+  const availableLocationResults = useMemo(() => locationResults.filter((result) => {
+    const searchableLocation = { name: result.name, district: result.label, address: '' }
+    return matchesSpotSearch(searchableLocation, query) && locationHasNearbySpot(result, spots)
+  }), [locationResults, query, spots])
+  const locationResult = availableLocationResults[0] ?? null
   const locationResultName = locationResult?.name || locationResult?.label?.split(',')[0]?.trim() || query.trim()
   function selectSearchLocation(result) {
     const location = [Number(result.latitude), Number(result.longitude)]

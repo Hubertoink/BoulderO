@@ -3542,7 +3542,7 @@ app.get('/geocoding/search', asyncRoute(async (req, res) => {
   if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
   lastGeocodingRequestAt = Date.now()
 
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=de&q=${encodeURIComponent(input.q)}`, {
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=de&accept-language=de&q=${encodeURIComponent(input.q)}`, {
     headers: { 'User-Agent': 'BoulderO/1.0 (+https://bouldero.de)', Accept: 'application/json' },
     signal: AbortSignal.timeout(8000),
   })
