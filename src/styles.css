@@ -542,6 +542,10 @@ body {
   .composer-backdrop--map .journal-composer--map {
     max-height: calc(var(--app-viewport-height) - 380px);
   }
+
+  .composer-backdrop--map .journal-composer--map .composer-header {
+    top: -18px;
+  }
 }
 
 html.modal-open,
@@ -565,7 +569,7 @@ body.modal-open {
 
 .composer-header {
   position: sticky;
-  top: 0;
+  top: -22px;
   z-index: 2;
   padding-top: 0;
   background: var(--paper);
@@ -672,7 +676,7 @@ body.modal-open {
   }
 
   .composer-header {
-    top: 0;
+    top: -16px;
     padding-top: 0;
   }
 
@@ -687,6 +691,7 @@ body.modal-open {
 
   .composer-backdrop--map .journal-composer--map .composer-header {
     position: static;
+    top: auto;
     padding-top: 0;
   }
 
