@@ -71,7 +71,7 @@ test('resizes the mobile app and navigation above the keyboard viewport', async 
     navBottom: Math.round(document.querySelector('.bottom-nav').getBoundingClientRect().bottom),
   }))).toEqual({ appBottom: 844, mapBottom: 768, navTop: 768, navBottom: 844 })
 
-  await page.getByPlaceholder('Hallen in Mannheim suchen').focus()
+  await page.getByPlaceholder('Suche').focus()
   await page.setViewportSize({ width: 390, height: 520 })
   await expect(page.locator('.bottom-nav')).toBeVisible()
   await expect.poll(() => page.evaluate(() => ({
@@ -87,7 +87,7 @@ test('resizes the mobile app and navigation above the keyboard viewport', async 
     dialogTop: getComputedStyle(document.documentElement).getPropertyValue('--dialog-viewport-top').trim(),
   }))).toEqual({ appHeight: '520px', dialogHeight: '520px', dialogTop: '0px' })
 
-  await expect(page.getByPlaceholder('Hallen in Mannheim suchen')).toBeFocused()
+  await expect(page.getByPlaceholder('Suche')).toBeFocused()
 })
 
 test('keeps a focused mobile dialog within the resized keyboard viewport', async ({ page }) => {
@@ -185,7 +185,7 @@ test('marks the map field as a search instead of an autofill field', async ({ pa
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   await page.getByRole('button', { name: 'Karte entdecken' }).click()
-  const search = page.getByPlaceholder('Hallen in Mannheim suchen')
+  const search = page.getByPlaceholder('Suche')
 
   await expect(search).toHaveAttribute('type', 'search')
   await expect(search).toHaveAttribute('autocomplete', 'off')

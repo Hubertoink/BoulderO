@@ -128,6 +128,14 @@ function FocusLocation({ location, request }) {
   return null
 }
 
+function FocusSearchLocation({ location, request }) {
+  const map = useMap()
+  useEffect(() => {
+    if (location && request > 0) map.flyTo(location, 12, { duration: .45 })
+  }, [location, request, map])
+  return null
+}
+
 function MapActivityViewport({ onChange }) {
   const map = useMap()
   useEffect(() => {
@@ -273,7 +281,7 @@ function MobileMapDismiss({ onDismiss }) {
   return null
 }
 
-function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, spotFocusRequest: externalSpotFocusRequest, spotCenterRequest, activities, plans, showVisitMarkers, onSelectPlan, onActivityBoundsChange }) {
+function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, locationFocusRequest, searchLocation, searchLocationFocusRequest, spotFocusRequest: externalSpotFocusRequest, spotCenterRequest, activities, plans, showVisitMarkers, onSelectPlan, onActivityBoundsChange }) {
   const [initialView] = useState(savedMapView)
   const [spotFocusRequest, setSpotFocusRequest] = useState(0)
   const [animatedSpotId, setAnimatedSpotId] = useState(null)
@@ -295,6 +303,7 @@ function BoulderMap({ spots, selectedSpot, onSelect, onDismiss, userLocation, lo
         <FocusMap spot={selectedSpot} request={externalSpotFocusRequest} />
         <CenterMap spot={selectedSpot} request={spotCenterRequest} />
         <FocusLocation location={userLocation} request={locationFocusRequest} />
+        <FocusSearchLocation location={searchLocation} request={searchLocationFocusRequest} />
         <MapViewportResize />
         <MapViewportPersistence />
         <MobileMapDismiss onDismiss={onDismiss} />
@@ -423,6 +432,11 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [userLocation, setUserLocation] = useState(null)
   const [locationFocusRequest, setLocationFocusRequest] = useState(0)
+  const [searchLocation, setSearchLocation] = useState(null)
+  const [searchLocationFocusRequest, setSearchLocationFocusRequest] = useState(0)
+  const [locationResults, setLocationResults] = useState([])
+  const [locationSearchPending, setLocationSearchPending] = useState(false)
+  const [locationFilter, setLocationFilter] = useState('')
   const [spotCenterRequest, setSpotCenterRequest] = useState(0)
   const [activityBounds, setActivityBounds] = useState(null)
   const [activities, setActivities] = useState([])
@@ -455,6 +469,41 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
     }).catch(() => undefined)
     return () => { cancelled = true }
   }, [spots])
+  useEffect(() => {
+    if (spotFocusRequest > 0) {
+      setLocationFilter('')
+      setSearchLocation(null)
+    }
+  }, [spotFocusRequest])
+  useEffect(() => {
+    const search = query.trim()
+    if (search.length < 3) {
+      setLocationResults([])
+      setLocationSearchPending(false)
+      return undefined
+    }
+
+    const controller = new AbortController()
+    setLocationResults([])
+    setLocationSearchPending(true)
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/geocoding/search?q=${encodeURIComponent(search)}`, { signal: controller.signal })
+        if (!response.ok) throw new Error('Ortssuche nicht verfügbar')
+        const payload = await response.json()
+        if (!controller.signal.aborted) setLocationResults(Array.isArray(payload.results) ? payload.results : [])
+      } catch (error) {
+        if (error.name !== 'AbortError' && !controller.signal.aborted) setLocationResults([])
+      } finally {
+        if (!controller.signal.aborted) setLocationSearchPending(false)
+      }
+    }, 350)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [query])
   useEffect(() => {
     if (!currentUser || !showVisitMarkers || !activityBounds || activityBounds.zoom < 10) {
       setActivities([])
@@ -520,6 +569,7 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
   const hallFilter = filter === 'planned' ? 'all' : filter
   const matchingSpots = useMemo(() => {
     return spots.filter((spot) => {
+      const matchesLocation = !locationFilter || matchesSpotSearch(spot, locationFilter)
       const matchesSearch = matchesSpotSearch(spot, query)
       const area = spotAreaSquareMeters(spot.area_sqm ?? spot.size)
       const matchesFilter = hallFilter === 'all'
@@ -527,13 +577,29 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
         || (hallFilter === 'large' && area !== null && area >= 1000)
         || (hallFilter === 'small' && area !== null && area < 750)
         || (hallFilter === 'late' && /22:30|23:00/.test(spot.opening_hours ?? spot.open ?? ''))
-      return matchesSearch && matchesFilter
+      return matchesLocation && matchesSearch && matchesFilter
     }).sort((first, second) => spotSearchRank(first, query) - spotSearchRank(second, query) || first.name.localeCompare(second.name, 'de-DE'))
-  }, [spots, query, hallFilter])
+  }, [spots, query, hallFilter, locationFilter])
 
   const visibleSpots = matchingSpots
   const selectedSpot = selectedId ? spots.find((spot) => spot.id === selectedId) ?? null : null
+  const locationSpotIds = useMemo(() => locationFilter
+    ? new Set(spots.filter((spot) => matchesSpotSearch(spot, locationFilter)).map((spot) => String(spot.id)))
+    : null, [spots, locationFilter])
   const plannedSpotIds = useMemo(() => new Set(mapPlans.map((plan) => String(plan.spot_id))), [mapPlans])
+  const locationResult = locationResults[0] ?? null
+  const locationResultName = locationResult?.name || locationResult?.label?.split(',')[0]?.trim() || query.trim()
+  function selectSearchLocation(result) {
+    const location = [Number(result.latitude), Number(result.longitude)]
+    if (!location.every(Number.isFinite)) return
+    setLocationFilter(locationResultName)
+    setSearchLocation(location)
+    setSearchLocationFocusRequest((value) => value + 1)
+    setLocationResults([])
+    setQuery('')
+    setSelectedMapPlan(null)
+    if (!isPickingSpot) onSelectSpot(null)
+  }
 
   return (
     <main className="view map-view">
@@ -541,11 +607,13 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
         <div className="search-control">
           <label className="search-field">
             <IconSearch size={18} />
-            <input type="search" name="map-search" autoComplete="off" autoCorrect="off" spellCheck={false} enterKeyHint="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Hallen in Mannheim suchen" aria-expanded={Boolean(query)} aria-controls="search-results" />
+            <input type="search" name="map-search" autoComplete="off" autoCorrect="off" spellCheck={false} enterKeyHint="search" value={query} onChange={(event) => { if (locationFilter) { setLocationFilter(''); setSearchLocation(null) }; setQuery(event.target.value) }} placeholder="Suche" aria-expanded={Boolean(query)} aria-controls="search-results" />
             {query && <button type="button" onClick={() => setQuery('')} aria-label="Suche löschen"><IconX size={16} /></button>}
           </label>
-          {query && <div className={`search-results${matchingSpots.length >= 4 ? ' search-results--scrollable' : ''}`} id="search-results" role="listbox">
-            {matchingSpots.length ? matchingSpots.map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spotSearchMeta(spot)}</small></span></button>) : <p>Keine Hallen gefunden.</p>}
+          {query && <div className={`search-results${matchingSpots.length + (locationResult ? 1 : 0) >= 4 ? ' search-results--scrollable' : ''}`} id="search-results" role="listbox">
+            {locationResult && <button type="button" role="option" className="search-result--location" onClick={() => selectSearchLocation(locationResult)}><IconMapPin size={17} /><span><b>{locationResultName}</b><small>{locationResult.label}</small></span></button>}
+            {matchingSpots.map((spot) => <button type="button" role="option" key={spot.id} onClick={() => { setSelectedMapPlan(null); onSelectSpot(spot.id); setQuery('') }}><IconMapPin size={17} /><span><b>{spot.name}</b><small>{spotSearchMeta(spot)}</small></span></button>)}
+            {!matchingSpots.length && !locationResult && <p>{locationSearchPending ? 'Orte werden gesucht …' : 'Keine Hallen oder Orte gefunden.'}</p>}
           </div>}
         </div>
         <button type="button" className="toolbar-filter ui-icon-button" aria-label="Filter öffnen" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><IconAdjustmentsHorizontal size={19} /></button>
@@ -555,6 +623,7 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
         ].map(([id, label]) => <button type="button" key={id} className={hallFilter === id ? 'is-active' : ''} onClick={() => { setFilter(id); setFiltersOpen(false) }}>{label}{hallFilter === id && <IconCheck size={15} />}</button>)}<span className="eyebrow">Auf Karte zeigen</span><button type="button" className={showPlanned ? 'is-active' : ''} onClick={() => setShowPlanned((value) => !value)}>Geplante Besuche{showPlanned && <IconCheck size={15} />}</button><button type="button" className={showVisitMarkers ? 'is-active' : ''} onClick={() => setShowVisitMarkers((value) => !value)}>Besuchsmarker{showVisitMarkers && <IconCheck size={15} />}</button></div>}
       </div>
       <div className="filter-row">
+        {locationFilter && <button type="button" className="filter-chip filter-chip--location" onClick={() => { setLocationFilter(''); setSearchLocation(null) }} aria-label={`Ortsfilter ${locationFilter} entfernen`}>Ort: {locationFilter}<IconX size={14} /></button>}
         {[
           ['all', 'Alle Hallen'],
           ['visited', 'Besucht'],
@@ -566,7 +635,7 @@ export function MapView({ spots, currentUser, selectedId, spotFocusRequest = 0, 
         <span className="result-count">{visibleSpots.length} Orte{showPlanned ? ` · ${mapPlans.length} Planungen` : ''}</span>
       </div>
       {isPickingSpot && <div className="map-picker-notice"><IconMapPin size={18} /><span><b>Halle auf der Karte auswählen</b>Tippe auf einen Marker, um den Besuch einzutragen.</span><button type="button" onClick={onCancelPicker}>Abbrechen</button></div>}
-      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} spotFocusRequest={spotFocusRequest} spotCenterRequest={spotCenterRequest} activities={showVisitMarkers ? activities.filter((activity) => !showPlanned || !plannedSpotIds.has(String(activity.spot_id))) : []} plans={showPlanned ? mapPlans : []} showVisitMarkers={showVisitMarkers} onActivityBoundsChange={setActivityBounds} />
+      <BoulderMap spots={visibleSpots} selectedSpot={selectedSpot} onSelect={(spotId) => { setSelectedMapPlan(null); onSelectSpot(spotId) }} onSelectPlan={(plan) => { setSelectedMapPlan(plan); onSelectSpot(null) }} onDismiss={() => { if (!isPickingSpot) { setSelectedMapPlan(null); onSelectSpot(null) } }} userLocation={userLocation} locationFocusRequest={locationFocusRequest} searchLocation={searchLocation} searchLocationFocusRequest={searchLocationFocusRequest} spotFocusRequest={spotFocusRequest} spotCenterRequest={spotCenterRequest} activities={showVisitMarkers ? activities.filter((activity) => (!locationSpotIds || locationSpotIds.has(String(activity.spot_id))) && (!showPlanned || !plannedSpotIds.has(String(activity.spot_id)))) : []} plans={showPlanned ? mapPlans.filter((plan) => !locationSpotIds || locationSpotIds.has(String(plan.spot_id))) : []} showVisitMarkers={showVisitMarkers} onActivityBoundsChange={setActivityBounds} />
       {selectedSpot && <SpotSheet spot={selectedSpot} plans={mapPlans.filter((plan) => String(plan.spot_id) === String(selectedSpot.id))} onClose={() => onSelectSpot(null)} onVisit={onVisit} onPlan={onPlan} onReport={onReport} onCenter={() => setSpotCenterRequest((value) => value + 1)} onOpenUserFeed={onOpenUserFeed} onOpenPlanFeed={onOpenPlanFeed} hideOnMobile={Boolean(query)} />}
       {selectedMapPlan && <MapPlanSheet plan={selectedMapPlan} onClose={() => setSelectedMapPlan(null)} onRsvp={updateMapPlanRsvp} onOpenPlanFeed={onOpenPlanFeed} onOpenMessage={onOpenMessage} onOpenUserFeed={onOpenUserFeed} />}
     </main>

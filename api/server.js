@@ -3532,7 +3532,7 @@ app.get('/spots', asyncRoute(async (_req, res) => {
   res.json({ spots: result.rows })
 }))
 
-app.get('/geocoding/search', requireUser, asyncRoute(async (req, res) => {
+app.get('/geocoding/search', asyncRoute(async (req, res) => {
   const input = z.object({ q: z.string().trim().min(3).max(160) }).parse(req.query)
   const cacheKey = input.q.toLocaleLowerCase('de-DE')
   const cached = geocodingCache.get(cacheKey)
@@ -3549,7 +3549,7 @@ app.get('/geocoding/search', requireUser, asyncRoute(async (req, res) => {
   if (!response.ok) return res.status(502).json({ error: 'geocoding_unavailable' })
   const payload = await response.json()
   const results = (Array.isArray(payload) ? payload : [])
-    .map((item) => ({ latitude: Number(item.lat), longitude: Number(item.lon), label: String(item.display_name ?? '') }))
+    .map((item) => ({ latitude: Number(item.lat), longitude: Number(item.lon), name: String(item.name ?? ''), label: String(item.display_name ?? '') }))
     .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude) && item.label)
     .map((item) => ({ ...item, latitude: item.latitude.toFixed(6), longitude: item.longitude.toFixed(6) }))
 
