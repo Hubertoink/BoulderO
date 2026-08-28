@@ -376,14 +376,12 @@ function SpotSheet({ spot, plans, onClose, onVisit, onPlan, onReport, onCenter, 
   }, [spot.id])
   return (
     <aside className={`spot-sheet${hideOnMobile ? ' spot-sheet--mobile-hidden' : ''}`} style={spot.image_url ? { '--spot-image': `url("${spot.image_url}")` } : undefined}>
-      <div className="spot-sheet__topline">
-        <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}<button type="button" className="icon-button ui-icon-button spot-sheet__close" onClick={onClose} aria-label="Hallenkarte schließen" title="Schließen"><IconX size={18} /></button></div>
-      </div>
       <div className="spot-sheet__title-row">
         <div>
           <h2>{spot.name}</h2>
           <button type="button" className="spot-sheet__address" onClick={onCenter} title="Marker auf der Karte anzeigen">{spot.address}</button>
         </div>
+        <div className="spot-sheet__topline-actions"><SpotPlans plans={plans} onOpenPlanFeed={onOpenPlanFeed} />{visited && <span className="visited-label"><IconCheck size={14} /> {visitLabel}</span>}<button type="button" className="icon-button ui-icon-button spot-sheet__close" onClick={onClose} aria-label="Hallenkarte schließen" title="Schließen"><IconX size={18} /></button></div>
       </div>
       <button type="button" className="spot-details-toggle" onClick={() => setDetailsOpen((value) => !value)} aria-expanded={detailsOpen} aria-controls={`spot-details-${spot.id}`}>
         Infos <IconChevronDown size={18} />
