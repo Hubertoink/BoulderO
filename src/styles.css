@@ -544,7 +544,7 @@ body {
   }
 
   .composer-backdrop--map .journal-composer--map .composer-header {
-    top: -18px;
+    --composer-header-cover: 18px;
   }
 }
 
@@ -568,11 +568,23 @@ body.modal-open {
 }
 
 .composer-header {
+  --composer-header-cover: 22px;
   position: sticky;
-  top: -22px;
+  top: 0;
   z-index: 2;
   padding-top: 0;
   background: var(--paper);
+}
+
+.composer-header::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: var(--composer-header-cover);
+  background: var(--paper);
+  pointer-events: none;
 }
 
 .app-shell .composer-header .ui-icon-button {
@@ -676,7 +688,8 @@ body.modal-open {
   }
 
   .composer-header {
-    top: -16px;
+    --composer-header-cover: 16px;
+    top: 0;
     padding-top: 0;
   }
 
@@ -693,6 +706,10 @@ body.modal-open {
     position: static;
     top: auto;
     padding-top: 0;
+  }
+
+  .composer-backdrop--map .journal-composer--map .composer-header::before {
+    display: none;
   }
 
   .location-picker-backdrop {
