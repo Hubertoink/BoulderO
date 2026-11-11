@@ -1,0 +1,43 @@
+name: Node security update 2026-11-11
+on:
+  push:
+    branches: [security/node-2026-11-11]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [{"id":"c-uhwtbs","repo":"BoulderO","version":"22.23.5","platform":"linux-x64-musl","original":"ghcr.io/hubertoink/bouldero-api@sha256:848a5d21a49bff92992eaf0d71f6e7308c2e0b3c58072c0193af44aefc59704e","target":"ghcr.io/hubertoink/bouldero-api:security-node-22.23.5-20261111-c-uhwtbs","sha256":"aef6690916d4b4210b55618ea0beeb927d67184257879b1ebec6e309285f3c08"},{"id":"c-vzavbx","repo":"BoulderO","version":"22.23.5","platform":"linux-x64-musl","original":"ghcr.io/hubertoink/bouldero-api@sha256:3bff1848dd717ebb1472c8310ea68088b4943a596f94c008735f64a56a234d8f","target":"ghcr.io/hubertoink/bouldero-api:security-node-22.23.5-20261111-c-vzavbx","sha256":"aef6690916d4b4210b55618ea0beeb927d67184257879b1ebec6e309285f3c08"}]
+    steps:
+      - name: Authenticate to existing image registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Verify and install signed Node runtime
+        env:
+          ORIGINAL: ${{ matrix.original }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ matrix.version }}
+          PLATFORM: ${{ matrix.platform }}
+          SHA256: ${{ matrix.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="node-v$VERSION-$PLATFORM.tar.xz"
+          curl --fail --location --retry 3 "https://nodejs.org/dist/v$VERSION/$archive" -o "$archive"
+          printf '%s  %s\n' "$SHA256" "$archive" | sha256sum --check
+          mkdir runtime
+          tar -xJf "$archive" --strip-components=2 -C runtime "node-v$VERSION-$PLATFORM/bin/node"
+          chmod 755 runtime/node
+          printf 'FROM %s\nCOPY --chmod=755 node /usr/local/bin/node\nENV NODE_VERSION=%s\nLABEL de.hubertoink.security.node-version="%s" de.hubertoink.security.original-image="%s"\nRUN node --version\n' "$ORIGINAL" "$VERSION" "$VERSION" "$ORIGINAL" > runtime/Dockerfile
+          docker build --pull --platform linux/amd64 -t "$TARGET" runtime
+          test "$(docker run --rm --network none --entrypoint node "$TARGET" --version)" = "v$VERSION"
+          docker run --rm --network none --entrypoint node "$TARGET" -e 'const fs=require("fs"); const p=require("/app/package.json"); for(const name of Object.keys(p.dependencies||{})) require.resolve(name,{paths:["/app"]}); console.log("Runtime dependencies resolve");'
+          docker push "$TARGET"
+          printf '### %s\nNode: %s\nOriginal: %s\nUpdated: %s\n' '${{ matrix.id }}' "$VERSION" "$ORIGINAL" "$TARGET" >> "$GITHUB_STEP_SUMMARY"
