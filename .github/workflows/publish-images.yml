@@ -37,11 +37,11 @@ jobs:
       - name: Build and publish images
         run: |
           if [ "${GITHUB_REF_NAME}" = "main" ]; then TAG=latest; API_UPSTREAM=api; else TAG=dev; API_UPSTREAM=api-dev; fi
-          docker build --build-arg API_UPSTREAM=$API_UPSTREAM --file Dockerfile --tag ghcr.io/hubertoink/bouldero-web:$TAG .
+          docker build --pull --build-arg API_UPSTREAM=$API_UPSTREAM --file Dockerfile --tag ghcr.io/hubertoink/bouldero-web:$TAG .
           docker push ghcr.io/hubertoink/bouldero-web:$TAG
-          docker build --file api/Dockerfile --tag ghcr.io/hubertoink/bouldero-api:$TAG .
+          docker build --pull --file api/Dockerfile --tag ghcr.io/hubertoink/bouldero-api:$TAG .
           docker push ghcr.io/hubertoink/bouldero-api:$TAG
-          docker build --file db/Dockerfile --tag ghcr.io/hubertoink/bouldero-db:$TAG db
+          docker build --pull --file db/Dockerfile --tag ghcr.io/hubertoink/bouldero-db:$TAG db
           docker push ghcr.io/hubertoink/bouldero-db:$TAG
-          docker build --file website/Dockerfile --tag ghcr.io/hubertoink/bouldero-site:$TAG website
+          docker build --pull --file website/Dockerfile --tag ghcr.io/hubertoink/bouldero-site:$TAG website
           docker push ghcr.io/hubertoink/bouldero-site:$TAG
